@@ -1,0 +1,39 @@
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/tsconfig.tsbuildinfo
+frontend/*.log
+
+# Python / Backend
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/*/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/*.db
+backend/*.sqlite3
+
+# Database & local data
+postgres_data/
+scratch/
+*.db
+*.sqlite
+backend/users.json
+users.json
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
