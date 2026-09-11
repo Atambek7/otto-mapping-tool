@@ -16,6 +16,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Validate Server Credentials
+        run: |
+          if [ -z "${{ secrets.SERVER_HOST }}" ] || [ -z "${{ secrets.SERVER_USER }}" ] || [ -z "${{ secrets.SERVER_SSH_KEY }}" ]; then
+            echo "::error::Missing required GitHub Secrets: SERVER_HOST, SERVER_USER, or SERVER_SSH_KEY. Please add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
       - name: Configure SSH Key
         run: |
           mkdir -p ~/.ssh
@@ -27,49 +34,32 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "if [ ! -d /home/atambek/otto-mapping-tool ]; then git clone https://github.com/Atambek7/otto-mapping-tool.git /home/atambek/otto-mapping-tool; fi; mkdir -p /home/atambek/otto-mapping-tool/backend"
 
-      - name: Construct Environment Configuration
+      - name: Sync Secrets to Environment
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          AFTERCOOL_USERNAME: ${{ secrets.AFTERCOOL_USERNAME }}
+          AFTERCOOL_PASSWORD: ${{ secrets.AFTERCOOL_PASSWORD }}
+          AFTERCOOL_LOGIN_URL: ${{ secrets.AFTERCOOL_LOGIN_URL }}
+          AFTERCOOL_BASE_URL: ${{ secrets.AFTERCOOL_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          OTTO_JV_CLIENT_ID: ${{ secrets.OTTO_JV_CLIENT_ID }}
+          OTTO_JV_CLIENT_SECRET: ${{ secrets.OTTO_JV_CLIENT_SECRET }}
+          OTTO_JV_PARTNER_ID: ${{ secrets.OTTO_JV_PARTNER_ID }}
+          OTTO_JV_BRAND_ID: ${{ secrets.OTTO_JV_BRAND_ID }}
+          OTTO_JV_APP_ID: ${{ secrets.OTTO_JV_APP_ID }}
+          OTTO_XL_CLIENT_ID: ${{ secrets.OTTO_XL_CLIENT_ID }}
+          OTTO_XL_CLIENT_SECRET: ${{ secrets.OTTO_XL_CLIENT_SECRET }}
+          OTTO_XL_PARTNER_ID: ${{ secrets.OTTO_XL_PARTNER_ID }}
+          OTTO_XL_BRAND_ID: ${{ secrets.OTTO_XL_BRAND_ID }}
+          OTTO_XL_APP_ID: ${{ secrets.OTTO_XL_APP_ID }}
         run: |
-          cat << 'EOF' > backend.env
-          # Backend Security
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
-          ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
-          CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
-          COOKIE_SECURE=${{ secrets.COOKIE_SECURE }}
-
-          # Database & Cache
-          DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
-          CELERY_BROKER_URL=redis://redis:6379/0
-          CELERY_RESULT_BACKEND=redis://redis:6379/0
-
-          # Aftercool Service
-          AFTERCOOL_USERNAME=${{ secrets.AFTERCOOL_USERNAME }}
-          AFTERCOOL_PASSWORD=${{ secrets.AFTERCOOL_PASSWORD }}
-          AFTERCOOL_LOGIN_URL=${{ secrets.AFTERCOOL_LOGIN_URL }}
-          AFTERCOOL_BASE_URL=${{ secrets.AFTERCOOL_BASE_URL }}
-
-          # OpenAI API (Optional)
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          MODEL_NAME=${{ secrets.MODEL_NAME }}
-
-          # Otto API - JV
-          OTTO_JV_CLIENT_ID=${{ secrets.OTTO_JV_CLIENT_ID }}
-          OTTO_JV_CLIENT_SECRET=${{ secrets.OTTO_JV_CLIENT_SECRET }}
-          OTTO_JV_PARTNER_ID=${{ secrets.OTTO_JV_PARTNER_ID }}
-          OTTO_JV_BRAND_ID=${{ secrets.OTTO_JV_BRAND_ID }}
-          OTTO_JV_APP_ID=${{ secrets.OTTO_JV_APP_ID }}
-
-          # Otto API - XL
-          OTTO_XL_CLIENT_ID=${{ secrets.OTTO_XL_CLIENT_ID }}
-          OTTO_XL_CLIENT_SECRET=${{ secrets.OTTO_XL_CLIENT_SECRET }}
-          OTTO_XL_PARTNER_ID=${{ secrets.OTTO_XL_PARTNER_ID }}
-          OTTO_XL_BRAND_ID=${{ secrets.OTTO_XL_BRAND_ID }}
-          OTTO_XL_APP_ID=${{ secrets.OTTO_XL_APP_ID }}
-          EOF
-
-      - name: Transfer Environment to Server
-        run: |
-          scp -i ~/.ssh/id_ed25519 backend.env ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/atambek/otto-mapping-tool/backend/.env
-          ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "chmod 600 /home/atambek/otto-mapping-tool/backend/.env"
+          python3 scripts/update_env.py backend.env
+          scp -i ~/.ssh/id_ed25519 backend.env ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/atambek/otto-mapping-tool/backend/.env.incoming
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "cd /home/atambek/otto-mapping-tool && python3 scripts/merge_env.py backend/.env backend/.env.incoming && rm -f backend/.env.incoming && chmod 600 backend/.env"
 
       - name: Run Remote Deployment Script
         run: |
