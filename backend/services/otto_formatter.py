@@ -33,16 +33,26 @@ def format_otto_product(ean: str, aftercool_info: Dict[str, Any], mapping: Dict[
     attributes = []
     # Some attributes might need to be hoisted if Otto requires them at top level.
     # We rely on user mapping or fallback.
-    raw_attrs = mapping.get("attributes", {})
-    brand_id = raw_attrs.pop("brandId", None) or raw_attrs.pop("BrandId", None) or raw_attrs.pop("Marke", None) or "UNKNOWN"
+    raw_attrs = dict(mapping.get("attributes", {}))
+    brand_id = raw_attrs.get("brandId") or raw_attrs.get("BrandId") or raw_attrs.get("Marke") or "UNKNOWN"
 
     for k, v in raw_attrs.items():
-        if v:
-            attributes.append({
-                "name": str(k),
-                "values": [str(v)],
-                "additional": False
-            })
+        if k in ("brandId", "BrandId"):
+            continue
+        if v is not None and v != "":
+            if isinstance(v, list):
+                val_list = [str(x).strip() for x in v if str(x).strip()]
+            elif isinstance(v, str) and ";" in v:
+                val_list = [x.strip() for x in v.split(";") if x.strip()]
+            else:
+                val_list = [str(v).strip()]
+
+            if val_list:
+                attributes.append({
+                    "name": str(k),
+                    "values": val_list,
+                    "additional": False
+                })
 
     payload = {
         "productReference": str(ean),

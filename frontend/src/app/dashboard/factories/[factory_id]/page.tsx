@@ -205,6 +205,7 @@ export default function FactoryWorkspace() {
 
   const [isAutoMapping, setIsAutoMapping] = useState(false);
   const [isSyncingOkb, setIsSyncingOkb] = useState(false);
+  const [isApplyingDefaults, setIsApplyingDefaults] = useState(false);
   const isSyncCancelled = useRef(false);
   const isAutoMappingCancelled = useRef(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -323,6 +324,45 @@ export default function FactoryWorkspace() {
       console.error("Failed to fetch mappings", e);
     }
   }, [factoryId, account]);
+
+  const handleApplyDefaultsBulk = async (options?: { sofa?: boolean; armrest?: string; targetGroup?: string }) => {
+    if (!factoryId || selectedIds.size === 0 || !account) return;
+    const selectedEans = processed
+      .filter((p, i) => selectedIds.has(getRowKey(p, i)))
+      .map((p) => p.ean || p.row?.EAN || "")
+      .filter(Boolean);
+
+    if (selectedEans.length === 0) return;
+
+    setIsApplyingDefaults(true);
+    toast.info(`Применяются стандартные атрибуты для ${selectedEans.length} товаров (${account})...`);
+    try {
+      const res = await fetchWithAuth("/mapping/apply-defaults", {
+        method: "POST",
+        body: JSON.stringify({
+          product_eans: selectedEans,
+          account: account,
+          target_group: options?.targetGroup || "Erwachsene ; Jugendliche",
+          armrest: options?.armrest || undefined,
+          include_sofa_presets: options?.sofa ?? false,
+          overwrite_existing: false,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Успешно! Ready: ${data.ready}, Errors: ${data.errors}`);
+        await fetchMappings();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.detail || "Ошибка применения атрибутов");
+      }
+    } catch {
+      toast.error("Сетевая ошибка при применении атрибутов");
+    } finally {
+      setIsApplyingDefaults(false);
+    }
+  };
 
   const handleOkbSync = async () => {
     if (!factoryId || selectedIds.size === 0 || !account) return;
@@ -2024,11 +2064,28 @@ export default function FactoryWorkspace() {
                   variant="outline"
                   size="sm"
                   onClick={() => setIsMassEditOpen(true)}
-                  disabled={isAutoMapping || isSyncingOkb}
+                  disabled={isAutoMapping || isSyncingOkb || isApplyingDefaults}
                   className="h-8 px-2.5 text-xs font-medium border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 hover:bg-indigo-50 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 gap-1.5"
                 >
                   <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   <span>Mass Edit</span>
+                </Button>
+
+                {/* Apply Defaults */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleApplyDefaultsBulk()}
+                  disabled={isAutoMapping || isSyncingOkb || isApplyingDefaults}
+                  className="h-8 px-2.5 text-xs font-medium border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 hover:bg-emerald-50 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 gap-1.5"
+                  title="Заполнить стандартные константы и брендовые атрибуты для выделенных товаров"
+                >
+                  {isApplyingDefaults ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  )}
+                  <span>⚡ Defaults</span>
                 </Button>
 
                 <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 shrink-0" />
@@ -2136,6 +2193,7 @@ export default function FactoryWorkspace() {
               .map(p => p.ean || p.row?.EAN || "")
               .filter(Boolean)
           }
+          account={account}
           onClose={() => setIsMassEditOpen(false)}
           onSaved={() => {
             setIsMassEditOpen(false);

@@ -1,7 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { X, Loader2, Save, Layers, AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  X,
+  Loader2,
+  Save,
+  Layers,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
+  Wand2,
+  Armchair,
+  Users
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AttributeCombobox } from "@/components/AttributeCombobox";
 import { fetchWithAuth } from "@/lib/api";
@@ -32,19 +45,48 @@ interface MassEditSchema {
   mapped_eans: number;
 }
 
+interface PresetsData {
+  account: string;
+  global: Record<string, string>;
+  account_specific: Record<string, string>;
+  merged_defaults: Record<string, string>;
+  sofa_presets: {
+    "Art Rückenkissen"?: string;
+    "Ausführung Rückenlehne"?: string;
+    "Art der Rollen"?: string;
+    armrest_options?: Record<string, string>;
+    default_armrest?: string;
+  };
+  zielgruppe_options: string[];
+  armrest_options: Record<string, string>;
+}
+
 interface Props {
   selectedEans: string[];
+  account?: string;
   onClose: () => void;
   onSaved: (updatedEans: string[]) => void;
 }
 
-export function MassEditDrawer({ selectedEans, onClose, onSaved }: Props) {
+export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved }: Props) {
   const [schema, setSchema] = useState<MassEditSchema | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [attrs, setAttrs] = useState<Record<string, string>>({});
   const [showOptional, setShowOptional] = useState(false);
+  const [presets, setPresets] = useState<PresetsData | null>(null);
+  const [selectedArmrest, setSelectedArmrest] = useState<string>("Mit gepolsterten Armlehnen");
+  const [selectedTargetGroup, setSelectedTargetGroup] = useState<string>("Erwachsene ; Jugendliche");
   const attrsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    fetchWithAuth(`/mapping/attribute-presets?account=${account || "JV"}`)
+      .then((r) => r.json())
+      .then((data: PresetsData) => {
+        setPresets(data);
+      })
+      .catch(() => {});
+  }, [account]);
 
   useEffect(() => {
     if (selectedEans.length === 0) return;
@@ -84,6 +126,87 @@ export function MassEditDrawer({ selectedEans, onClose, onSaved }: Props) {
     attrsRef.current = { ...attrsRef.current, [name]: val };
     setAttrs({ ...attrsRef.current });
   }, []);
+
+  const handleApplyDefaults = () => {
+    if (!presets || !schema) return;
+    const defaults = { ...presets.merged_defaults };
+    defaults["Zielgruppe"] = selectedTargetGroup;
+
+    let filledCount = 0;
+    const nextAttrs = { ...attrsRef.current };
+
+    for (const attr of schema.shared_attrs) {
+      const lowerName = attr.name.trim().toLowerCase();
+      const foundEntry = Object.entries(defaults).find(
+        ([k]) => k.trim().toLowerCase() === lowerName
+      );
+      if (foundEntry) {
+        nextAttrs[attr.name] = foundEntry[1];
+        filledCount++;
+      }
+    }
+
+    attrsRef.current = nextAttrs;
+    setAttrs(nextAttrs);
+    setShowOptional(true);
+    toast.success(`Заполнено ${filledCount} стандартных атрибутов (${account})`);
+  };
+
+  const handleApplySofaPresets = () => {
+    if (!presets || !schema) return;
+    const sofa = presets.sofa_presets || {};
+    const sofaToApply: Record<string, string> = {
+      "Art Rückenkissen": sofa["Art Rückenkissen"] || "Mit Schaumstofffüllung",
+      "Ausführung Rückenlehne": sofa["Ausführung Rückenlehne"] || "Mit gepolsterten Rückenlehne",
+      "Art der Rollen": sofa["Art der Rollen"] || "Messing-Rollen",
+      "Ausführung Armlehnen": selectedArmrest,
+    };
+
+    let filledCount = 0;
+    const nextAttrs = { ...attrsRef.current };
+
+    for (const attr of schema.shared_attrs) {
+      const lowerName = attr.name.trim().toLowerCase();
+      const foundEntry = Object.entries(sofaToApply).find(
+        ([k]) => k.trim().toLowerCase() === lowerName
+      );
+      if (foundEntry) {
+        nextAttrs[attr.name] = foundEntry[1];
+        filledCount++;
+      }
+    }
+
+    attrsRef.current = nextAttrs;
+    setAttrs(nextAttrs);
+    setShowOptional(true);
+    toast.success(`Применено ${filledCount} атрибутов дивана`);
+  };
+
+  const handleSelectTargetGroup = (group: string) => {
+    setSelectedTargetGroup(group);
+    if (!schema) return;
+    const targetAttr = schema.shared_attrs.find(
+      (a) => a.name.trim().toLowerCase() === "zielgruppe"
+    );
+    if (targetAttr) {
+      handleAttrChange(targetAttr.name, group);
+    } else {
+      handleAttrChange("Zielgruppe", group);
+    }
+  };
+
+  const handleSelectArmrest = (armrestVal: string) => {
+    setSelectedArmrest(armrestVal);
+    if (!schema) return;
+    const armrestAttr = schema.shared_attrs.find(
+      (a) => a.name.trim().toLowerCase() === "ausführung armlehnen"
+    );
+    if (armrestAttr) {
+      handleAttrChange(armrestAttr.name, armrestVal);
+    } else {
+      handleAttrChange("Ausführung Armlehnen", armrestVal);
+    }
+  };
 
   const requiredAttrs = useMemo(
     () => schema?.shared_attrs.filter((a) => a.required) ?? [],
@@ -208,6 +331,128 @@ export function MassEditDrawer({ selectedEans, onClose, onSaved }: Props) {
                   <span className="font-semibold text-indigo-600 dark:text-indigo-400">{schema.shared_attrs.length}</span> shared attributes
                   {schema.categories.length > 1 ? " across all categories" : ""}
                 </p>
+              </div>
+
+              {/* Quick Presets Panel */}
+              <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-gradient-to-br from-indigo-50/50 via-white to-slate-50 dark:from-indigo-950/20 dark:via-[#0E131F] dark:to-slate-900/40 p-3.5 space-y-3 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Стандартные константы & Пресеты
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                    {account}
+                  </span>
+                </div>
+
+                {/* 1-Click fill button */}
+                <div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleApplyDefaults}
+                    className="w-full h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs gap-1.5"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>✨ Заполнить стандартные атрибуты</span>
+                  </Button>
+                </div>
+
+                {/* Zielgruppe Selector */}
+                <div className="space-y-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1 font-medium">
+                      <Users className="w-3 h-3 text-slate-400" />
+                      Zielgruppe (Целевая аудитория):
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTargetGroup("Erwachsene ; Jugendliche")}
+                      className={cn(
+                        "h-7 px-2 text-[11px] font-medium rounded-lg border transition-all flex items-center justify-center gap-1",
+                        (attrs["Zielgruppe"] === "Erwachsene ; Jugendliche" || (!attrs["Zielgruppe"] && selectedTargetGroup === "Erwachsene ; Jugendliche"))
+                          ? "bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-semibold"
+                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      )}
+                    >
+                      <span>🧑 Взрослые / Подростки</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTargetGroup("Kinder")}
+                      className={cn(
+                        "h-7 px-2 text-[11px] font-medium rounded-lg border transition-all flex items-center justify-center gap-1",
+                        attrs["Zielgruppe"] === "Kinder"
+                          ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 shadow-xs font-semibold"
+                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      )}
+                    >
+                      <span>👶 Дети (Kinder)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sofa Presets & Armlehnen */}
+                <div className="space-y-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1 font-medium">
+                      <Armchair className="w-3 h-3 text-amber-500" />
+                      Диваны (Подлокотники / Спинка / Подушки):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplySofaPresets}
+                      className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>🛋️ Применить всё</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectArmrest("Mit gepolsterten Armlehnen")}
+                      className={cn(
+                        "h-7 px-1 text-[10px] font-medium rounded-lg border transition-all truncate text-center",
+                        attrs["Ausführung Armlehnen"] === "Mit gepolsterten Armlehnen"
+                          ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 shadow-xs font-semibold"
+                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      )}
+                      title="Mit gepolsterten Armlehnen (Мягкие)"
+                    >
+                      Мягкие
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectArmrest("Mit Holzarmlehnen")}
+                      className={cn(
+                        "h-7 px-1 text-[10px] font-medium rounded-lg border transition-all truncate text-center",
+                        attrs["Ausführung Armlehnen"] === "Mit Holzarmlehnen"
+                          ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 shadow-xs font-semibold"
+                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      )}
+                      title="Mit Holzarmlehnen (Деревянные)"
+                    >
+                      Деревянные
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectArmrest("Ohne Armlehnen")}
+                      className={cn(
+                        "h-7 px-1 text-[10px] font-medium rounded-lg border transition-all truncate text-center",
+                        attrs["Ausführung Armlehnen"] === "Ohne Armlehnen"
+                          ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 shadow-xs font-semibold"
+                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      )}
+                      title="Ohne Armlehnen (Без подлокотников)"
+                    >
+                      Без подлокот.
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Mixed values notice */}

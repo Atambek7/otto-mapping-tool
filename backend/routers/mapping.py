@@ -11,17 +11,23 @@ import asyncio
 from database import SessionLocal
 from services.automapper import auto_map_product, predict_category, extract_attributes, format_product_info
 from services.okb_sync import sync_product_from_okb
-from services.constant_attributes import get_defaults_for_account
+from services.constant_attributes import (
+    get_defaults_for_account,
+    get_presets_payload,
+    get_attributes_for_apply,
+    apply_default_attributes
+)
 
 def ensure_default_attributes(db: Session, ean: str, account: str):
     defaults = get_defaults_for_account(account)
     existing = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean == ean).all()
-    existing_map = {a.attribute_name: a for a in existing}
+    existing_map = {a.attribute_name.strip().lower(): a for a in existing}
     for k, v in defaults.items():
-        if k not in existing_map:
+        k_lower = k.strip().lower()
+        if k_lower not in existing_map:
             db.add(models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v))
-        elif not str(existing_map[k].attribute_value).strip():
-            existing_map[k].attribute_value = v
+        elif not str(existing_map[k_lower].attribute_value).strip():
+            existing_map[k_lower].attribute_value = v
 import openai
 
 router = APIRouter(
@@ -53,6 +59,14 @@ class AttributeMappingBase(BaseModel):
 class AttributeMappingBulk(BaseModel):
     product_eans: List[str]
     attributes: Dict[str, str]
+
+class ApplyDefaultsRequest(BaseModel):
+    product_eans: List[str]
+    account: str = "JV"
+    target_group: Optional[str] = "Erwachsene ; Jugendliche"
+    armrest: Optional[str] = None
+    include_sofa_presets: bool = False
+    overwrite_existing: bool = False
 
 # ====== Routes ======
 
@@ -753,6 +767,101 @@ async def save_attributes_bulk(mapping: AttributeMappingBulk, db: Session = Depe
     db.commit()
     return {"status": "success"}
 
+@router.get("/attribute-presets")
+async def get_attribute_presets(account: str = "JV"):
+    """
+    Returns default attribute presets according to the account (JV/XL),
+    including universal constants, target group options, and sofa presets.
+    """
+    return get_presets_payload(account)
+
+@router.post("/apply-defaults")
+async def apply_defaults_bulk(req: ApplyDefaultsRequest, db: Session = Depends(get_db)):
+    """
+    Applies standard default constants (green), account branding (blue JV/XL),
+    and optional target group/sofa presets (yellow) to selected products in bulk,
+    then re-validates mapping status.
+    """
+    from services.validator import validate_product
+
+    if not req.product_eans:
+        return {"status": "success", "total": 0, "updated": 0, "ready": 0, "errors": 0}
+
+    defaults_to_apply = get_attributes_for_apply(
+        account=req.account,
+        target_group=req.target_group,
+        armrest=req.armrest,
+        include_sofa_presets=req.include_sofa_presets
+    )
+
+    if not defaults_to_apply:
+        return {"status": "success", "total": len(req.product_eans), "updated": 0, "ready": 0, "errors": 0}
+
+    # Fetch existing attributes for all requested eans
+    existing_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(req.product_eans)
+    ).all()
+
+    # Organize existing attributes by EAN and lowercased attribute name
+    attrs_by_ean: Dict[str, Dict[str, models.ProductAttribute]] = {}
+    for a in existing_attrs:
+        attrs_by_ean.setdefault(a.product_ean, {})[a.attribute_name.strip().lower()] = a
+
+    new_attrs = []
+    updated_count = 0
+    for ean in req.product_eans:
+        ean_map = attrs_by_ean.setdefault(ean, {})
+        for k, v in defaults_to_apply.items():
+            k_lower = k.strip().lower()
+            if k_lower in ean_map:
+                existing_obj = ean_map[k_lower]
+                if req.overwrite_existing or not str(existing_obj.attribute_value or "").strip():
+                    if existing_obj.attribute_value != str(v):
+                        existing_obj.attribute_value = str(v)
+                        updated_count += 1
+            else:
+                new_obj = models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=str(v))
+                new_attrs.append(new_obj)
+                ean_map[k_lower] = new_obj
+                updated_count += 1
+
+    if new_attrs:
+        db.add_all(new_attrs)
+    db.flush()
+
+    # Revalidate mappings
+    mappings = db.query(models.ProductMapping).filter(
+        models.ProductMapping.product_ean.in_(req.product_eans)
+    ).all()
+
+    ready_count = 0
+    error_count = 0
+
+    for m in mappings:
+        if not m.category_id:
+            continue
+        prod_attrs = {
+            a_obj.attribute_name: a_obj.attribute_value
+            for a_obj in attrs_by_ean.get(m.product_ean, {}).values()
+        }
+        errors = validate_product(m.product_ean, m.category_id, prod_attrs)
+        if errors:
+            m.status = "Error"
+            error_count += 1
+        else:
+            m.status = "Ready"
+            ready_count += 1
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "total": len(req.product_eans),
+        "updated": updated_count,
+        "ready": ready_count,
+        "errors": error_count,
+        "applied_attributes_count": len(defaults_to_apply)
+    }
 
 class MassEditSchemaRequest(BaseModel):
     product_eans: List[str]
