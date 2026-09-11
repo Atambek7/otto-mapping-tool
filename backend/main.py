@@ -96,6 +96,7 @@ async def read_users_me(current_user: models.User = Depends(auth.get_current_use
 # ====== INIT SCRIPT ======
 @app.on_event("startup")
 def create_initial_admin():
+    admin_username = os.getenv("ADMIN_USERNAME", "yana")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if not admin_password:
         return
@@ -104,11 +105,19 @@ def create_initial_admin():
     for attempt in range(5):
         try:
             db = next(get_db())
-            admin_user = db.query(models.User).filter(models.User.username == "admin").first()
+            admin_user = db.query(models.User).filter(models.User.username == admin_username).first()
             hashed_password = auth.get_password_hash(admin_password)
             if not admin_user:
-                new_admin = models.User(username="admin", hashed_password=hashed_password, is_admin=True)
-                db.add(new_admin)
+                # Check if legacy "admin" exists and rename to configured admin_username
+                legacy_admin = db.query(models.User).filter(models.User.username == "admin").first()
+                if legacy_admin and admin_username != "admin":
+                    legacy_admin.username = admin_username
+                    legacy_admin.hashed_password = hashed_password
+                    legacy_admin.is_admin = True
+                    admin_user = legacy_admin
+                else:
+                    new_admin = models.User(username=admin_username, hashed_password=hashed_password, is_admin=True)
+                    db.add(new_admin)
             else:
                 admin_user.hashed_password = hashed_password
             db.commit()

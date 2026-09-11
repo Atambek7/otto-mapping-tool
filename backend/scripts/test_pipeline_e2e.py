@@ -6,9 +6,9 @@ BASE_URL = "http://127.0.0.1:8001"
 
 def run_tests():
     print("--- 1. Authenticating ---")
-    token = create_access_token({"sub": "admin"}, expires_delta=timedelta(hours=1))
+    token = create_access_token({"sub": "yana"}, expires_delta=timedelta(hours=1))
     headers = {"Authorization": f"Bearer {token}"}
-    print("Generated token for user 'admin' successfully!")
+    print("Generated token for user 'yana' successfully!")
 
     factory_id = "503718"
 

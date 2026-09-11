@@ -26,6 +26,7 @@ defaults = {
     "CORS_ORIGINS": "https://omt.automatonsoft.de,http://omt.automatonsoft.de,http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:3200",
     "COOKIE_SECURE": "true",
     "MODEL_NAME": "gpt-4o-mini",
+    "ADMIN_USERNAME": "yana",
     "AFTERCOOL_LOGIN_URL": "https://aftercool.de/auth/login",
     "AFTERCOOL_BASE_URL": "https://aftercool.de",
 }

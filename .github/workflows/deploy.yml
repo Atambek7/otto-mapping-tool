@@ -37,6 +37,7 @@ jobs:
       - name: Sync Secrets to Environment
         env:
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || 'yana' }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
           COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
