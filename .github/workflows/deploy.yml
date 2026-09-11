@@ -1,0 +1,76 @@
+name: Deploy to Production Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Ensure Target Directory
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "if [ ! -d /home/atambek/otto-mapping-tool ]; then git clone https://github.com/Atambek7/otto-mapping-tool.git /home/atambek/otto-mapping-tool; fi; mkdir -p /home/atambek/otto-mapping-tool/backend"
+
+      - name: Construct Environment Configuration
+        run: |
+          cat << 'EOF' > backend.env
+          # Backend Security
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+          CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
+          COOKIE_SECURE=${{ secrets.COOKIE_SECURE }}
+
+          # Database & Cache
+          DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+          CELERY_BROKER_URL=redis://redis:6379/0
+          CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+          # Aftercool Service
+          AFTERCOOL_USERNAME=${{ secrets.AFTERCOOL_USERNAME }}
+          AFTERCOOL_PASSWORD=${{ secrets.AFTERCOOL_PASSWORD }}
+          AFTERCOOL_LOGIN_URL=${{ secrets.AFTERCOOL_LOGIN_URL }}
+          AFTERCOOL_BASE_URL=${{ secrets.AFTERCOOL_BASE_URL }}
+
+          # OpenAI API (Optional)
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          MODEL_NAME=${{ secrets.MODEL_NAME }}
+
+          # Otto API - JV
+          OTTO_JV_CLIENT_ID=${{ secrets.OTTO_JV_CLIENT_ID }}
+          OTTO_JV_CLIENT_SECRET=${{ secrets.OTTO_JV_CLIENT_SECRET }}
+          OTTO_JV_PARTNER_ID=${{ secrets.OTTO_JV_PARTNER_ID }}
+          OTTO_JV_BRAND_ID=${{ secrets.OTTO_JV_BRAND_ID }}
+          OTTO_JV_APP_ID=${{ secrets.OTTO_JV_APP_ID }}
+
+          # Otto API - XL
+          OTTO_XL_CLIENT_ID=${{ secrets.OTTO_XL_CLIENT_ID }}
+          OTTO_XL_CLIENT_SECRET=${{ secrets.OTTO_XL_CLIENT_SECRET }}
+          OTTO_XL_PARTNER_ID=${{ secrets.OTTO_XL_PARTNER_ID }}
+          OTTO_XL_BRAND_ID=${{ secrets.OTTO_XL_BRAND_ID }}
+          OTTO_XL_APP_ID=${{ secrets.OTTO_XL_APP_ID }}
+          EOF
+
+      - name: Transfer Environment to Server
+        run: |
+          scp -i ~/.ssh/id_ed25519 backend.env ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/atambek/otto-mapping-tool/backend/.env
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "chmod 600 /home/atambek/otto-mapping-tool/backend/.env"
+
+      - name: Run Remote Deployment Script
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "cd /home/atambek/otto-mapping-tool && git fetch origin main && git checkout main && git reset --hard origin/main && chmod +x scripts/deploy_prod.sh && bash scripts/deploy_prod.sh"

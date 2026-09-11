@@ -1,0 +1,137 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omt_backend
+    restart: always
+    volumes:
+      - omt_static_data:/app/static
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - omt_network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omt_worker
+    restart: always
+    command: ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
+    volumes:
+      - omt_static_data:/app/static
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - omt_network
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: omt_beat
+    restart: always
+    command: ["celery", "-A", "worker.celery_app", "beat", "--loglevel=info"]
+    volumes:
+      - omt_static_data:/app/static
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - omt_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: omt_redis
+    restart: always
+    volumes:
+      - omt_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omt_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: omt_db
+    restart: always
+    environment:
+      POSTGRES_USER: otto_user
+      POSTGRES_PASSWORD: otto_pass
+      POSTGRES_DB: otto_db
+    volumes:
+      - omt_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otto_user -d otto_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omt_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=/api
+        - API_URL=http://backend:8001
+    container_name: omt_frontend
+    restart: always
+    ports:
+      - "127.0.0.1:3200:3000"
+    environment:
+      - API_URL=http://backend:8001
+    depends_on:
+      - backend
+    networks:
+      - omt_network
+
+networks:
+  omt_network:
+    name: omt_network
+    driver: bridge
+
+volumes:
+  omt_postgres_data:
+    name: omt_postgres_data
+  omt_redis_data:
+    name: omt_redis_data
+  omt_static_data:
+    name: omt_static_data

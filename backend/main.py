@@ -13,6 +13,11 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Otto Mapping Tool API")
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 # ====== CORS ======
 raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
