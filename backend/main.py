@@ -100,13 +100,15 @@ def create_initial_admin():
         try:
             db = next(get_db())
             admin_user = db.query(models.User).filter(models.User.username == "admin").first()
+            hashed_password = auth.get_password_hash(admin_password)
             if not admin_user:
-                hashed_password = auth.get_password_hash(admin_password)
                 new_admin = models.User(username="admin", hashed_password=hashed_password, is_admin=True)
                 db.add(new_admin)
-                db.commit()
-                import sync_users
-                sync_users.dump_users_to_json()
+            else:
+                admin_user.hashed_password = hashed_password
+            db.commit()
+            import sync_users
+            sync_users.dump_users_to_json()
 
             # Ensure account_settings has entries for JV and XL from env if present
             for acc in ("JV", "XL"):
