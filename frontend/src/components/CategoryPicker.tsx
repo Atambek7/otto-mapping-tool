@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Check, ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 // ── Otto category tree ────────────────────────────────────────────────────
 export const OTTO_CATEGORIES: { group: string; items: string[] }[] = [
@@ -111,6 +112,7 @@ interface CategoryPickerProps {
 }
 
 export function CategoryPicker({ value, onChange }: CategoryPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -152,7 +154,7 @@ export function CategoryPicker({ value, onChange }: CategoryPickerProps) {
         }
       >
         <span className="truncate flex-1">
-          {value || "Категория Otto..."}
+          {value || t("category_picker.placeholder", "Категория Otto...")}
         </span>
         <span className="flex items-center gap-0.5 shrink-0">
           {value && (
@@ -177,13 +179,13 @@ export function CategoryPicker({ value, onChange }: CategoryPickerProps) {
       >
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder="Поиск категории..."
+            placeholder={t("category_picker.search", "Поиск категории...")}
             value={query}
             onValueChange={setQuery}
             className="text-sm"
           />
           <CommandList className="max-h-72 overflow-y-auto">
-            <CommandEmpty>Категория не найдена</CommandEmpty>
+            <CommandEmpty>{t("category_picker.not_found", "Категория не найдена")}</CommandEmpty>
             {filtered.map((group) => (
               <CommandGroup key={group.group} heading={group.group}>
                 {group.items.map((cat) => (

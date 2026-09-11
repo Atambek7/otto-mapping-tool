@@ -48,19 +48,37 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+export function getFactoryCacheKey(factoryId: string, account: string = "JV"): string {
+  if (factoryId.startsWith("JV_") || factoryId.startsWith("XL_")) return factoryId;
+  return `${account}_${factoryId}`;
+}
+
 export async function getCachedFactory(
-  factoryId: string
+  factoryId: string,
+  account?: string
 ): Promise<CachedFactoryData | null> {
   const db = await openDB();
+  const key = account ? getFactoryCacheKey(factoryId, account) : factoryId;
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
-    const req = tx.objectStore(STORE_NAME).get(factoryId);
-    req.onsuccess = () => resolve((req.result as CachedFactoryData) ?? null);
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = () => {
+      if (req.result) {
+        resolve(req.result as CachedFactoryData);
+      } else if (account === "JV") {
+        // Fallback to plain factoryId for legacy JV entries
+        const fallbackReq = tx.objectStore(STORE_NAME).get(factoryId);
+        fallbackReq.onsuccess = () => resolve((fallbackReq.result as CachedFactoryData) ?? null);
+        fallbackReq.onerror = () => reject(fallbackReq.error);
+      } else {
+        resolve(null);
+      }
+    };
     req.onerror = () => reject(req.error);
   });
 }
 
-export async function getAllCachedFactoryIds(): Promise<string[]> {
+export async function getAllCachedFactoryIds(account?: string): Promise<string[]> {
   const db = await openDB();
   const all: CachedFactoryData[] = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
@@ -70,30 +88,36 @@ export async function getAllCachedFactoryIds(): Promise<string[]> {
   });
   // Show pinned always; show auto-cached only if active in this session
   const sessionIds = getSessionAutoCached();
+  const prefix = account ? `${account}_` : "";
   return all
-    .filter(e => e.isPinned || sessionIds.has(e.factoryId))
-    .map(e => e.factoryId);
+    .filter(e => {
+      const matchAccount = !account || e.factoryId.startsWith(prefix) || (account === "JV" && !e.factoryId.startsWith("XL_"));
+      return matchAccount && (e.isPinned || sessionIds.has(e.factoryId));
+    })
+    .map(e => e.factoryId.replace(/^(JV_|XL_)/, ""));
 }
 
 /**
  * Save factory to cache.
  * @param data - factory data
  * @param pin  - if true, mark as pinned (manually downloaded, survives session)
+ * @param account - optional account name ("JV" or "XL")
  */
-export async function setCachedFactory(data: CachedFactoryData, pin = false): Promise<void> {
+export async function setCachedFactory(data: CachedFactoryData, pin = false, account?: string): Promise<void> {
   const db = await openDB();
+  const key = account ? getFactoryCacheKey(data.factoryId, account) : data.factoryId;
 
   let isPinned = pin;
   if (!pin) {
     // Don't downgrade an already-pinned entry
-    const existing = await getCachedFactory(data.factoryId);
+    const existing = await getCachedFactory(data.factoryId, account);
     isPinned = existing?.isPinned ?? false;
-    addSessionAutoCached(data.factoryId);
+    addSessionAutoCached(key);
   }
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put({ ...data, isPinned });
+    tx.objectStore(STORE_NAME).put({ ...data, factoryId: key, isPinned });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -165,15 +189,23 @@ export async function cleanSessionCache(): Promise<void> {
   });
 }
 
-export function formatCacheAge(fetchedAt: number): string {
+export function formatCacheAge(fetchedAt: number, lang = "ru"): string {
   const diff = Date.now() - fetchedAt;
   const minutes = Math.floor(diff / 60_000);
   const hours = Math.floor(diff / 3_600_000);
   const days = Math.floor(diff / 86_400_000);
-  if (days > 0) return `${days} дн. назад`;
-  if (hours > 0) return `${hours} ч. назад`;
-  if (minutes > 0) return `${minutes} мин. назад`;
-  return "только что";
+  try {
+    const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+    if (days > 0) return rtf.format(-days, "day");
+    if (hours > 0) return rtf.format(-hours, "hour");
+    if (minutes > 0) return rtf.format(-minutes, "minute");
+    return lang === "ru" ? "только что" : "just now";
+  } catch {
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return "just now";
+  }
 }
 
 

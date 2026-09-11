@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 import pandas as pd
 import io
 import zipfile
 import csv
+import os
+import sqlite3
+import tempfile
 from typing import List
 
 from database import get_db
@@ -44,7 +47,23 @@ def get_category_schema_attrs(category_id: str):
         schema.append({"name": a.get("name"), "relevance": raw_rel})
     return schema
 
-# Removed fetch_product_info_for_export
+async def fetch_product_info_for_export(factory_id: str) -> dict:
+    from database import SessionLocal
+    _db = SessionLocal()
+    try:
+        mappings = _db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == str(factory_id)).all()
+        return {
+            m.product_ean: {
+                "name": m.product_name or "",
+                "price": m.price or "",
+                "startpreis": m.price_af or "",
+                "img": m.image_url or "",
+                "sku": m.product_ean
+            }
+            for m in mappings
+        }
+    finally:
+        _db.close()
 
 # --- Routes ---
 
@@ -58,13 +77,14 @@ async def export_categories(factory_id: str, req: ExportRequest = None, db: Sess
     
     stream = io.StringIO()
     writer = csv.writer(stream, delimiter=";")
-    writer.writerow(["EAN", "Product_Name", "Price", "Category_Name"])
+    writer.writerow(["pic_main", "EAN", "Product_Name", "Price", "Category_Name"])
     
     for m in mappings:
         cat = get_category_by_id(m.category_id) if m.category_id else None
         cat_name = cat.get("name", "") if cat else ""
         
         writer.writerow([
+            m.image_url or "",
             f'="{m.product_ean}"',
             m.product_name or "",
             m.price or "",
@@ -102,6 +122,10 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, db: Sess
         if a.product_ean not in attrs_by_ean:
             attrs_by_ean[a.product_ean] = {}
         attrs_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+
+    from services.image_processor import fetch_images_batch
+    all_img_urls = [m.image_url for m in mappings if m.image_url]
+    img_bytes_map = await fetch_images_batch(all_img_urls, max_concurrency=15)
 
     by_category: dict = {}
     for m in mappings:
@@ -148,11 +172,12 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, db: Sess
             
             stream = io.StringIO()
             writer = csv.writer(stream, delimiter=";")
-            header = ["EAN", "Product_Name"] + [attr_to_display[n] for n in sorted_attr_names]
+            header = ["pic_main", "EAN", "Product_Name"] + [attr_to_display[n] for n in sorted_attr_names]
             writer.writerow(header)
             
             for m in prods:
                 row = [
+                    m.image_url or "",
                     f'="{m.product_ean}"',
                     m.product_name or ""
                 ]
@@ -162,72 +187,151 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, db: Sess
                 writer.writerow(row)
                 
             csv_bytes = "\ufeff".encode("utf-8") + stream.getvalue().encode("utf-8")
-            file_name = f"{cat_name}_{factory_id}_{len(prods)}.csv"
+            file_name = f"1.Excel .csv/{cat_name}_{factory_id}_{len(prods)}.csv"
             zip_file.writestr(file_name, csv_bytes)
+
+            # 2. Database .db per category
+            fd, temp_cat_db = tempfile.mkstemp(suffix=".sqlite")
+            os.close(fd)
+            try:
+                cat_conn = sqlite3.connect(temp_cat_db)
+                cat_cur = cat_conn.cursor()
+                col_names = ["pic_main", "EAN", "Product_Name"] + [attr_to_display[n] for n in sorted_attr_names]
+                col_defs = ['"pic_main" BLOB', '"EAN" TEXT', '"Product_Name" TEXT'] + [f'"{attr_to_display[n]}" TEXT' for n in sorted_attr_names]
+                cat_cur.execute(f'CREATE TABLE attributes ({", ".join(col_defs)})')
+
+                placeholders = ", ".join(["?"] * len(col_names))
+                insert_sql = f'INSERT INTO attributes VALUES ({placeholders})'
+
+                db_rows = []
+                for m in prods:
+                    ean_attrs = attrs_by_ean.get(m.product_ean, {})
+                    raw_bytes = img_bytes_map.get(m.image_url)
+                    pic_blob = sqlite3.Binary(raw_bytes) if raw_bytes else None
+                    row_data = [pic_blob, str(m.product_ean), str(m.product_name or "")]
+                    for attr_name in sorted_attr_names:
+                        row_data.append(str(ean_attrs.get(attr_name, "") or ""))
+                    db_rows.append(row_data)
+
+                cat_cur.executemany(insert_sql, db_rows)
+                cat_conn.commit()
+                cat_conn.close()
+
+                with open(temp_cat_db, "rb") as f:
+                    db_bytes = f.read()
+                zip_file.writestr(f"2. Database .db/{cat_name}_{factory_id}_{len(prods)}.db", db_bytes)
+            finally:
+                if os.path.exists(temp_cat_db):
+                    os.remove(temp_cat_db)
+
     zip_buffer.seek(0)
     response = StreamingResponse(iter([zip_buffer.getvalue()]), media_type="application/zip")
-    response.headers["Content-Disposition"] = f"attachment; filename=Attributes_{factory_id}.zip"
+    response.headers["Content-Disposition"] = f"attachment; filename=Export_{factory_id}.zip"
     return response
 
-@router.post("/import/{factory_id}")
-async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = await file.read()
-    
-    dataframes = []
-    if file.filename.endswith(".zip"):
-        with zipfile.ZipFile(io.BytesIO(content)) as thezip:
-            for zipinfo in thezip.infolist():
-                if zipinfo.filename.endswith(".csv"):
-                    with thezip.open(zipinfo) as thefile:
-                        # Try UTF-8 with BOM first, fallback to latin-1
-                        raw = thefile.read()
-                        try:
-                            df = pd.read_csv(io.BytesIO(raw), dtype=str, sep=";", encoding="utf-8-sig")
-                        except Exception:
-                            df = pd.read_csv(io.BytesIO(raw), dtype=str, sep=";", encoding="latin-1")
-                        dataframes.append(df)
-    elif file.filename.endswith(".csv"):
-        try:
-            df = pd.read_csv(io.BytesIO(content), dtype=str, sep=";", encoding="utf-8-sig")
-        except Exception:
-            df = pd.read_csv(io.BytesIO(content), dtype=str, sep=";", encoding="latin-1")
-        dataframes.append(df)
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .csv or .zip")
-    
+@router.post("/export/attributes/start/{factory_id}")
+async def start_export_attributes_zip(
+    factory_id: str,
+    factory_name: str = "",
+    account: str = "JV",
+    req: ExportRequest = None,
+    db: Session = Depends(get_db)
+):
+    from tasks import export_factory_attributes_zip_task
+    eans = req.product_eans if req else []
+    try:
+        task = export_factory_attributes_zip_task.delay(
+            factory_id=str(factory_id),
+            factory_name=str(factory_name or factory_id),
+            account=str(account) if account else None,
+            product_eans=eans if eans else None
+        )
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": "Attributes ZIP export task started"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start export task: {e}")
+
+@router.get("/export/attributes/status/{task_id}")
+async def get_export_attributes_status(task_id: str):
+    from celery.result import AsyncResult
+    task_result = AsyncResult(task_id)
+    response = {
+        "task_id": task_id,
+        "status": task_result.status,
+        "result": task_result.result if task_result.ready() else None
+    }
+    if task_result.status == "PROGRESS":
+        response["progress"] = task_result.info
+    elif task_result.status == "FAILURE":
+        response["error"] = str(task_result.info)
+    return response
+
+@router.get("/export/attributes/download/{task_id}")
+async def download_export_attributes_zip(task_id: str):
+    from celery.result import AsyncResult
+    clean_id = "".join(c for c in task_id if c.isalnum() or c in ("-", "_"))
+    file_path = os.path.join(os.path.dirname(__file__), "..", "static", "exports", f"{clean_id}.zip")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Export ZIP file not found or expired")
+
+    filename = "Attributes_export.zip"
+    tr = AsyncResult(task_id)
+    if tr.ready() and isinstance(tr.result, dict) and tr.result.get("filename"):
+        filename = tr.result["filename"]
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/zip"
+    )
+
+def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str, db: Session) -> dict:
     updated_categories = 0
     updated_attributes = 0
     skipped_eans = 0
 
-    # Pre-load all existing mappings for this factory in one query
     existing_mappings = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id == factory_id
-    ).all()
+    ).all() if factory_id else []
     mappings_by_ean = {m.product_ean: m for m in existing_mappings}
     valid_eans = set(mappings_by_ean.keys())
 
-    # Collect all EANs from all dataframes for bulk attr pre-fetch
+    if not valid_eans and factory_id:
+        try:
+            from services.factory_scope import get_authoritative_factory_eans
+            import asyncio
+            auth = asyncio.run(get_authoritative_factory_eans(factory_id))
+            if auth:
+                valid_eans = set(auth)
+        except Exception:
+            pass
+
     all_eans_in_file: set = set()
     for df in dataframes:
-        if "EAN" not in df.columns:
+        ean_col = next((c for c in df.columns if str(c).strip().upper() == "EAN"), None)
+        if not ean_col:
             continue
-        for raw_ean in df["EAN"].dropna():
+        for raw_ean in df[ean_col].dropna():
             ean = str(raw_ean).strip().replace('="', '').replace('"', '').replace('=', '')
             if ean and ean != "nan":
                 all_eans_in_file.add(ean)
 
-    # Collect new/updated objects — bulk commit at end
     new_mappings: list = []
     new_attrs: list = []
     eans_to_revalidate: set = set()
 
     for df in dataframes:
-        if "EAN" not in df.columns:
+        ean_col = next((c for c in df.columns if str(c).strip().upper() == "EAN"), None)
+        if not ean_col:
             continue
-        is_category = "Category_Name" in df.columns
+        cat_name_col = next((c for c in df.columns if str(c).strip().upper() == "CATEGORY_NAME"), None)
+        is_category = cat_name_col is not None
 
         for _, row in df.iterrows():
-            raw_ean = str(row["EAN"]).strip()
+            raw_ean = str(row[ean_col]).strip()
             ean = raw_ean.replace('="', '').replace('"', '').replace('=', '')
             if not ean or ean == "nan":
                 continue
@@ -241,11 +345,17 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
                 new_mappings.append(db_mapping)
                 mappings_by_ean[ean] = db_mapping
 
-            if is_category:
-                raw_cat_name = str(row.get("Category_Name", "")).strip()
+            pic_main_col = next((c for c in df.columns if str(c).strip().lower() in ("pic_main", "image_url", "image url")), None)
+            if pic_main_col:
+                new_img = row.get(pic_main_col)
+                if isinstance(new_img, str):
+                    new_img_str = new_img.strip()
+                    if new_img_str and new_img_str != "nan" and new_img_str.startswith("http") and new_img_str != str(db_mapping.image_url or "").strip():
+                        db_mapping.image_url = new_img_str
+
+            if is_category and cat_name_col:
+                raw_cat_name = str(row.get(cat_name_col, "")).strip()
                 if raw_cat_name and raw_cat_name != "nan":
-                    # Validate and convert to ID by Name
-                    from services.categories_repo import get_category_by_id
                     cat = get_category_by_id(raw_cat_name)
                     if cat:
                         new_cat_id = str(cat.get("categoryId"))
@@ -255,7 +365,6 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
                             eans_to_revalidate.add(ean)
                             updated_categories += 1
                 else:
-                    # If cell is cleared, we unmap the category
                     if db_mapping.category_id:
                         db_mapping.category_id = None
                         db_mapping.status = "Not Mapped"
@@ -265,9 +374,8 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
                 attrs_to_save = {}
                 for col in df.columns:
                     col_str = str(col).strip()
-                    if col_str in ("EAN", "Product_Name", "Price", "Image URL"):
+                    if col_str.upper() in ("PIC_MAIN", "EAN", "PRODUCT_NAME", "PRICE", "IMAGE URL", "IMAGE_URL"):
                         continue
-                    # Strip out (High), (Middle), (Low) suffixes added during export
                     clean_attr_name = re.sub(r'\s*\([^)]*\)$', '', col_str).strip()
                     if not clean_attr_name:
                         continue
@@ -276,7 +384,6 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
                         attrs_to_save[clean_attr_name] = val
 
                 if attrs_to_save:
-                    # Delete old values for these keys
                     db.query(models.ProductAttribute).filter(
                         models.ProductAttribute.product_ean == ean,
                         models.ProductAttribute.attribute_name.in_(list(attrs_to_save.keys()))
@@ -286,14 +393,12 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
                     updated_attributes += 1
                     eans_to_revalidate.add(ean)
 
-    # Bulk insert — single commit
     if new_mappings:
         db.add_all(new_mappings)
     if new_attrs:
         db.add_all(new_attrs)
     db.commit()
 
-    # Revalidate and update statuses in bulk
     if eans_to_revalidate:
         all_attrs_q = db.query(models.ProductAttribute).filter(
             models.ProductAttribute.product_ean.in_(eans_to_revalidate)
@@ -313,10 +418,127 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
             db_mapping.status = "Error" if errors else "Ready"
 
         db.commit()
-    
+
     return {
         "status": "success",
         "updated_categories": updated_categories,
         "updated_attributes": updated_attributes,
-        "skipped_foreign_eans": skipped_eans
+        "skipped_foreign_eans": skipped_eans,
+        "imported_count": updated_attributes or updated_categories,
+        "matched_categories": updated_categories
     }
+
+def process_attribute_import_from_db(db_path: str, factory_id: str, db: Session) -> dict:
+    sqlite_conn = sqlite3.connect(db_path)
+    cur = sqlite_conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attributes'")
+    tbl = cur.fetchone()
+    table_name = "attributes" if tbl else None
+    if not table_name:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tbls = cur.fetchall()
+        table_name = tbls[0][0] if tbls else None
+
+    if not table_name:
+        sqlite_conn.close()
+        return {"error": "No tables found in SQLite database"}
+
+    df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', sqlite_conn)
+    sqlite_conn.close()
+
+    if not factory_id:
+        ean_col = next((c for c in df.columns if str(c).strip().upper() == "EAN"), None)
+        if ean_col:
+            first_eans = [str(x).strip() for x in df[ean_col].dropna().head(10)]
+            for fean in first_eans:
+                m = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == fean).first()
+                if m and m.factory_id:
+                    factory_id = m.factory_id
+                    break
+
+    return process_attribute_dataframes([df], factory_id=factory_id, db=db)
+
+@router.post("/import/{factory_id}")
+async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    content = await file.read()
+    
+    dataframes = []
+    if file.filename.endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(content)) as thezip:
+            csv_infos = [z for z in thezip.infolist() if z.filename.endswith(".csv") and not z.filename.startswith("__MACOSX")]
+            db_infos = [z for z in thezip.infolist() if (z.filename.endswith(".db") or z.filename.endswith(".sqlite")) and not z.filename.startswith("__MACOSX")]
+
+            target_infos = []
+            if csv_infos and db_infos:
+                max_csv_time = max(z.date_time for z in csv_infos)
+                max_db_time = max(z.date_time for z in db_infos)
+                target_infos = db_infos if max_db_time > max_csv_time else csv_infos
+            elif db_infos:
+                target_infos = db_infos
+            else:
+                target_infos = csv_infos
+
+            for info in target_infos:
+                if info.filename.endswith(".csv"):
+                    with thezip.open(info) as thefile:
+                        raw = thefile.read()
+                        try:
+                            df = pd.read_csv(io.BytesIO(raw), dtype=str, sep=";", encoding="utf-8-sig")
+                        except Exception:
+                            df = pd.read_csv(io.BytesIO(raw), dtype=str, sep=";", encoding="latin-1")
+                        dataframes.append(df)
+                elif info.filename.endswith(".db") or info.filename.endswith(".sqlite"):
+                    db_bytes = thezip.read(info)
+                    fd, temp_db = tempfile.mkstemp(suffix=".sqlite")
+                    os.close(fd)
+                    try:
+                        with open(temp_db, "wb") as f:
+                            f.write(db_bytes)
+                        sqlite_conn = sqlite3.connect(temp_db)
+                        cur = sqlite_conn.cursor()
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attributes'")
+                        tbl = cur.fetchone()
+                        table_name = "attributes" if tbl else None
+                        if not table_name:
+                            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                            tbls = cur.fetchall()
+                            table_name = tbls[0][0] if tbls else None
+                        if table_name:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', sqlite_conn)
+                            dataframes.append(df)
+                        sqlite_conn.close()
+                    finally:
+                        if os.path.exists(temp_db):
+                            os.remove(temp_db)
+    elif file.filename.endswith(".csv"):
+        try:
+            df = pd.read_csv(io.BytesIO(content), dtype=str, sep=";", encoding="utf-8-sig")
+        except Exception:
+            df = pd.read_csv(io.BytesIO(content), dtype=str, sep=";", encoding="latin-1")
+        dataframes.append(df)
+    elif file.filename.endswith(".db") or file.filename.endswith(".sqlite"):
+        fd, temp_db = tempfile.mkstemp(suffix=".sqlite")
+        os.close(fd)
+        try:
+            with open(temp_db, "wb") as f:
+                f.write(content)
+            sqlite_conn = sqlite3.connect(temp_db)
+            cur = sqlite_conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attributes'")
+            tbl = cur.fetchone()
+            table_name = "attributes" if tbl else None
+            if not table_name:
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tbls = cur.fetchall()
+                table_name = tbls[0][0] if tbls else None
+            if table_name:
+                df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', sqlite_conn)
+                dataframes.append(df)
+            sqlite_conn.close()
+        finally:
+            if os.path.exists(temp_db):
+                os.remove(temp_db)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .csv, .db or .zip")
+
+    return process_attribute_dataframes(dataframes, factory_id=factory_id, db=db)

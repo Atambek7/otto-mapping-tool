@@ -8,8 +8,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { LayoutDashboard, LogOut, Check, ChevronsUpDown, RefreshCw, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export function TopBar() {
+  const { t } = useTranslation();
   const [factories, setFactories] = useState<{ id: string; name: string; account: string; kind: string }[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -45,7 +47,12 @@ export function TopBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetchWithAuth("/logout", { method: "POST" });
+    } catch (e) {
+      console.error(e);
+    }
     localStorage.removeItem("token");
     router.push("/login");
   };
@@ -86,17 +93,17 @@ export function TopBar() {
                   <span className="truncate">
                     {factoryId 
                       ? (selectedFactory.name || selectedFactory.id) 
-                      : "Выберите фабрику..."}
+                      : t("topbar.select_factory", "Выберите фабрику...")}
                   </span>
                 </div>
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
               <PopoverContent className="w-[300px] p-0" align="start">
                 <Command>
-                  <CommandInput placeholder="Поиск фабрики..." />
+                  <CommandInput placeholder={t("topbar.search_factory", "Поиск фабрики...")} />
                   <CommandList>
                     <CommandEmpty>
-                    {loadError ? "Ошибка загрузки. Нажмите ↻" : "Ничего не найдено."}
+                    {loadError ? t("topbar.load_error", "Ошибка загрузки. Нажмите ↻") : t("common.no_results", "Ничего не найдено.")}
                   </CommandEmpty>
                     <CommandGroup>
                       {factories.map((factory) => (
@@ -104,7 +111,7 @@ export function TopBar() {
                           key={factory.id}
                           value={`${factory.id} ${factory.name || ""}`}
                           onSelect={() => {
-                            router.push(`/dashboard/${factory.id}`);
+                            router.push(`/dashboard/factories/${factory.id}`);
                             setOpen(false);
                           }}
                         >
@@ -131,7 +138,7 @@ export function TopBar() {
               size="icon"
               onClick={loadFactories}
               disabled={loading}
-              title="Обновить список фабрик"
+              title={t("factories.refresh_list", "Обновить список фабрик")}
               className="text-slate-500 hover:text-slate-900"
             >
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -147,7 +154,7 @@ export function TopBar() {
             className="text-slate-500 hover:text-slate-900"
           >
             <LogOut className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline-block">Выйти</span>
+            <span className="hidden sm:inline-block">{t("nav.logout", "Выйти")}</span>
           </Button>
         </div>
       </div>

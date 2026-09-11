@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import StreamingResponse, Response, FileResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from database import get_db
 import models
 import auth
@@ -9,6 +11,17 @@ import asyncio
 from database import SessionLocal
 from services.automapper import auto_map_product, predict_category, extract_attributes, format_product_info
 from services.okb_sync import sync_product_from_okb
+from services.constant_attributes import get_defaults_for_account
+
+def ensure_default_attributes(db: Session, ean: str, account: str):
+    defaults = get_defaults_for_account(account)
+    existing = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean == ean).all()
+    existing_map = {a.attribute_name: a for a in existing}
+    for k, v in defaults.items():
+        if k not in existing_map:
+            db.add(models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v))
+        elif not str(existing_map[k].attribute_value).strip():
+            existing_map[k].attribute_value = v
 import openai
 
 router = APIRouter(
@@ -89,31 +102,191 @@ async def bulk_export(format: str, req: BulkExportRequest, db: Session = Depends
         return response
 
     elif format == "db":
-        fd, path = tempfile.mkstemp(suffix=".sqlite")
-        os.close(fd)
-        conn = sqlite3.connect(path)
-        cur = conn.cursor()
-        cur.execute('''CREATE TABLE mappings (
-            product_ean TEXT,
-            factory_id TEXT,
-            category_id TEXT,
-            status TEXT,
-            validation_errors TEXT
-        )''')
+        from services.roma_db import build_roma_sqlite_db
+        items = []
         for m in mappings:
-            cur.execute("INSERT INTO mappings VALUES (?, ?, ?, ?, ?)", 
-                        (m.product_ean, m.factory_id, m.category_id, m.status, m.validation_errors))
-        conn.commit()
-        conn.close()
-        
-        def iterfile():
-            with open(path, mode="rb") as file_like:
-                yield from file_like
-            os.remove(path)
-            
-        return StreamingResponse(iterfile(), media_type="application/octet-stream", headers={"Content-Disposition": "attachment; filename=bulk_export.sqlite"})
+            items.append({
+                "ean": m.product_ean,
+                "old_prod_ref": m.product_ean,
+                "sku": m.product_ean,
+                "collection": m.factory_id,
+                "category_id": m.category_id,
+                "price_otto": m.price,
+                "price_af": m.price_af or m.price,
+                "title": m.product_name,
+                "pic_main": m.image_url
+            })
+        target_account = mappings[0].account_name if mappings else "JV"
+        path = await build_roma_sqlite_db(items, account=target_account)
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+        return Response(
+            content=content, 
+            media_type="application/x-sqlite3", 
+            headers={"Content-Disposition": f"attachment; filename=NEW_BATCH_{target_account}.db"}
+        )
         
     raise HTTPException(status_code=400, detail="Invalid format")
+
+class ExportDbRequest(BaseModel):
+    product_eans: List[str] = []
+
+@router.api_route("/export-db/{factory_id}", methods=["GET", "POST"])
+async def export_factory_db(
+    factory_id: str, 
+    account: str = "JV", 
+    factory_name: str = "",
+    req: ExportDbRequest = None,
+    db: Session = Depends(get_db)
+):
+    from services.roma_db import build_roma_sqlite_db
+    query = db.query(models.ProductMapping).filter(
+        models.ProductMapping.factory_id == factory_id,
+        models.ProductMapping.account_name == account
+    )
+    if req and req.product_eans:
+        query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
+
+    mappings = query.all()
+    if not mappings:
+        from routers.aftercool import force_sync_metadata
+        try:
+            await force_sync_metadata(factory_id=factory_id, account=account, dataset="lister", db=db)
+            query = db.query(models.ProductMapping).filter(
+                models.ProductMapping.factory_id == factory_id,
+                models.ProductMapping.account_name == account
+            )
+            if req and req.product_eans:
+                query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
+            mappings = query.all()
+        except Exception as e:
+            print(f"Auto-sync metadata for export-db failed: {e}")
+
+    target_name = factory_name or factory_id
+    items = []
+    for m in mappings:
+        items.append({
+            "ean": m.product_ean,
+            "product": m.product_name,
+            "title": m.product_name,
+            "price_otto": m.price,
+            "price_af": m.price_af,
+            "price": m.price or m.price_af,
+            "collection": target_name,
+            "category_id": m.category_id,
+            "pic_main": m.image_url
+        })
+    path = await build_roma_sqlite_db(items, account=account, factory_name=target_name)
+    try:
+        with open(path, "rb") as f:
+            content = f.read()
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+    safe_name = "".join(c for c in target_name if c.isalnum() or c in ("_", "-"))
+    return Response(
+        content=content, 
+        media_type="application/x-sqlite3", 
+        headers={"Content-Disposition": f"attachment; filename=NEW_BATCH_{account}_{safe_name}.db"}
+    )
+
+@router.post("/export-db/start/{factory_id}")
+async def start_export_factory_db(
+    factory_id: str,
+    account: str = "JV",
+    factory_name: str = "",
+    req: ExportDbRequest = None,
+    db: Session = Depends(get_db)
+):
+    from tasks import export_factory_db_task
+    eans = req.product_eans if req else []
+    try:
+        task = export_factory_db_task.delay(
+            factory_id=str(factory_id),
+            account=str(account),
+            factory_name=str(factory_name or factory_id),
+            product_eans=eans if eans else None
+        )
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": "Export task started in background"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start export task: {e}")
+
+@router.get("/export-db/status/{task_id}")
+async def get_export_db_status(task_id: str):
+    from celery.result import AsyncResult
+    task_result = AsyncResult(task_id)
+    response = {
+        "task_id": task_id,
+        "status": task_result.status,
+        "result": task_result.result if task_result.ready() else None
+    }
+    if task_result.status == "PROGRESS":
+        response["progress"] = task_result.info
+    elif task_result.status == "FAILURE":
+        response["error"] = str(task_result.info)
+    return response
+
+@router.get("/export-db/download/{task_id}")
+async def download_export_db(task_id: str):
+    from celery.result import AsyncResult
+    clean_id = "".join(c for c in task_id if c.isalnum() or c in ("-", "_"))
+    file_path = os.path.join(os.path.dirname(__file__), "..", "static", "exports", f"{clean_id}.db")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Export file not found or expired")
+
+    filename = "NEW_BATCH_export.db"
+    tr = AsyncResult(task_id)
+    if tr.ready() and isinstance(tr.result, dict) and tr.result.get("filename"):
+        filename = tr.result["filename"]
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/x-sqlite3"
+    )
+
+@router.post("/db/import")
+async def import_db(
+    file: UploadFile = File(...),
+    factory_id: str = Form(None),
+    account: str = Form("JV"),
+    db: Session = Depends(get_db)
+):
+    import shutil
+    import tempfile
+    import sqlite3
+    from services.roma_db import import_roma_sqlite_db
+    fd, temp_path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Check whether this DB is Roma's NEW_BATCH or an attributes DB
+        conn = sqlite3.connect(temp_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='NEW_BATCH'")
+        has_new_batch = cur.fetchone() is not None
+        conn.close()
+
+        if has_new_batch:
+            result = import_roma_sqlite_db(temp_path, factory_id=factory_id, account=account, db=db)
+            return result
+        else:
+            from routers.csv_workflow import process_attribute_import_from_db
+            result = process_attribute_import_from_db(temp_path, factory_id=factory_id, db=db)
+            return result
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 class AutoMapProductModel(BaseModel):
     ean: str
@@ -221,15 +394,24 @@ class SyncOkbBulkRequest(BaseModel):
     product_eans: List[str]
     factory_id: str
     account: str = "JV"
+    products_data: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/sync-okb-bulk")
 async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
+    row_dict = {}
+    if req.products_data:
+        for pd in req.products_data:
+            if isinstance(pd, dict) and pd.get("ean"):
+                row_dict[str(pd["ean"])] = pd.get("row")
+
+    from services.okb_sync import sync_product_data
     sem = asyncio.Semaphore(5)
     
     async def process(ean: str):
         async with sem:
-            result = await sync_product_from_okb(ean, req.factory_id, req.account)
-            await asyncio.sleep(0.3)
+            row = row_dict.get(str(ean))
+            result = await sync_product_data(ean, req.factory_id, req.account, row=row)
+            await asyncio.sleep(0.1)
             return result
                 
     results = await asyncio.gather(*(process(ean) for ean in req.product_eans))
@@ -250,8 +432,8 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
     for res in results:
         if res.get("status") == "success":
             ean = res["ean"]
-            cat_id = res["category_id"]
-            attributes = res["attributes"]
+            cat_id = res.get("category_id")
+            attributes = res.get("attributes", {})
             
             # Update mapping
             db_mapping = mapping_dict.get(ean)
@@ -266,19 +448,16 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
             
             # Upsert attributes
             for k, v in attributes.items():
-                if not v.strip():
+                if not str(v).strip():
                     continue
                 db_attr = attrs_orm_dict.get(ean, {}).get(k)
                 if db_attr:
-                    db_attr.attribute_value = v
+                    db_attr.attribute_value = str(v).strip()
                 else:
-                    new_attr = models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v)
+                    new_attr = models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=str(v).strip())
                     db.add(new_attr)
                     attrs_orm_dict.setdefault(ean, {})[k] = new_attr
                     
-            # Delete old attributes not in new payload? Let's keep it simple and just overwrite.
-            # (OKB sync normally replaces all, but for now we just upsert).
-            
             errors = validate_product(ean, cat_id, attributes)
             db_mapping.status = "Error" if errors else "Ready"
             res["errors"] = errors
@@ -352,6 +531,7 @@ async def assign_category(mapping: CategoryMappingBase, db: Session = Depends(ge
         )
         db.add(db_mapping)
     
+    ensure_default_attributes(db, mapping.product_ean, mapping.account)
     db.commit()
     return {"status": "success"}
 
@@ -371,6 +551,7 @@ async def assign_category_bulk(mapping: CategoryMappingBulk, db: Session = Depen
                 status="Need Attributes"
             )
             db.add(db_mapping)
+        ensure_default_attributes(db, ean, mapping.account)
     db.commit()
     return {"status": "success", "count": len(mapping.product_eans)}
 
@@ -480,8 +661,11 @@ async def get_product_mapping(product_ean: str, db: Session = Depends(get_db)):
     }
 
 @router.get("/factory/{factory_id}")
-async def get_factory_mappings(factory_id: str, db: Session = Depends(get_db)):
-    mappings = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id).all()
+async def get_factory_mappings(factory_id: str, account: str = None, db: Session = Depends(get_db)):
+    query = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
+    if account:
+        query = query.filter(models.ProductMapping.account_name == account)
+    mappings = query.all()
     result = {}
     for m in mappings:
         # Get category name
@@ -523,33 +707,165 @@ async def save_attributes(mapping: AttributeMappingBase, db: Session = Depends(g
 @router.post("/attributes/bulk")
 async def save_attributes_bulk(mapping: AttributeMappingBulk, db: Session = Depends(get_db)):
     from services.validator import validate_product
-    
-    keys = list(mapping.attributes.keys())
-    
-    for ean in mapping.product_eans:
-        # Delete old matching attributes for this EAN for the keys being updated
-        if keys:
-            db.query(models.ProductAttribute).filter(
-                models.ProductAttribute.product_ean == ean,
-                models.ProductAttribute.attribute_name.in_(keys)
-            ).delete(synchronize_session=False)
-            
-        # Save new
-        for k, v in mapping.attributes.items():
-            if v.strip(): # Only save non-empty
-                db.add(models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v))
-                
-        # Re-validate
-        db_mapping = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == ean).first()
-        if db_mapping:
-            # get all attributes
-            all_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean == ean).all()
-            attr_dict = {a.attribute_name: a.attribute_value for a in all_attrs}
-            errors = validate_product(ean, db_mapping.category_id, attr_dict)
-            if errors:
-                db_mapping.status = "Error"
-            else:
-                db_mapping.status = "Ready"
+
+    if not mapping.product_eans:
+        return {"status": "success"}
+
+    keys = [k for k, v in mapping.attributes.items() if v and v.strip()]
+    if not keys:
+        return {"status": "success"}
+
+    # 1. Bulk delete old matching attributes in a single query
+    db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(mapping.product_eans),
+        models.ProductAttribute.attribute_name.in_(keys)
+    ).delete(synchronize_session=False)
+
+    # 2. Bulk add new attributes
+    new_attrs = [
+        models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=mapping.attributes[k].strip())
+        for ean in mapping.product_eans
+        for k in keys
+    ]
+    if new_attrs:
+        db.add_all(new_attrs)
+    db.flush()
+
+    # 3. Bulk re-validate all affected mappings
+    mappings_to_validate = db.query(models.ProductMapping).filter(
+        models.ProductMapping.product_ean.in_(mapping.product_eans)
+    ).all()
+    all_db_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(mapping.product_eans)
+    ).all()
+
+    attrs_by_ean = {}
+    for a in all_db_attrs:
+        if a.product_ean not in attrs_by_ean:
+            attrs_by_ean[a.product_ean] = {}
+        attrs_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+
+    for m in mappings_to_validate:
+        attr_dict = attrs_by_ean.get(m.product_ean, {})
+        errors = validate_product(m.product_ean, m.category_id, attr_dict)
+        m.status = "Error" if errors else "Ready"
 
     db.commit()
     return {"status": "success"}
+
+
+class MassEditSchemaRequest(BaseModel):
+    product_eans: List[str]
+
+@router.post("/mass-edit/schema")
+async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends(get_db)):
+    """
+    Returns the intersection of attribute schemas across all categories of selected products,
+    along with each product's current attribute values for those shared attributes.
+    """
+    if not req.product_eans:
+        return {"shared_attrs": [], "current_values": {}, "categories": []}
+
+    mappings_list = db.query(models.ProductMapping).filter(
+        models.ProductMapping.product_ean.in_(req.product_eans)
+    ).all()
+
+    if not mappings_list:
+        return {"shared_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
+
+    cat_to_eans: dict = {}
+    ean_to_cat: dict = {}
+    for m in mappings_list:
+        if not m.category_id:
+            continue
+        cid = str(m.category_id)
+        cat_to_eans.setdefault(cid, []).append(m.product_ean)
+        ean_to_cat[m.product_ean] = cid
+
+    if not cat_to_eans:
+        return {"shared_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
+
+    from services.categories_repo import get_category_by_id, get_groups
+
+    def load_schema_for_cat(cat_id: str) -> list:
+        cat = get_category_by_id(cat_id)
+        if not cat:
+            return []
+        group_id = str(cat.get("category_group_id", ""))
+        group_data = get_groups().get(group_id)
+        if not group_data:
+            return []
+        raw_attrs = group_data.get("attributes", {}).get("attributes", [])
+        result = []
+        for a in raw_attrs:
+            is_req = a.get("relevance") == "HIGH" or a.get("name") == "Marke"
+            attr_type = "text"
+            if a.get("type") in ("FLOAT", "INTEGER"):
+                attr_type = "number"
+            elif a.get("allowedValues"):
+                attr_type = "select"
+            result.append({
+                "id": str(a.get("attributeId", "")),
+                "name": a.get("name", ""),
+                "type": attr_type,
+                "required": is_req,
+                "options": [
+                    v if isinstance(v, str) else v.get("value", str(v))
+                    for v in a.get("allowedValues", [])
+                ] if a.get("allowedValues") else None
+            })
+        return result
+
+    schemas_by_cat: dict = {}
+    for cid in cat_to_eans.keys():
+        schemas_by_cat[cid] = load_schema_for_cat(cid)
+
+    all_cat_ids = list(cat_to_eans.keys())
+
+    if len(all_cat_ids) == 1:
+        shared_names = {a["name"] for a in schemas_by_cat[all_cat_ids[0]]}
+    else:
+        sets = [set(a["name"] for a in schemas_by_cat[cid]) for cid in all_cat_ids]
+        shared_names = sets[0].intersection(*sets[1:])
+
+    first_schema = schemas_by_cat[all_cat_ids[0]]
+    required_in_any = set()
+    for schema in schemas_by_cat.values():
+        for a in schema:
+            if a["required"]:
+                required_in_any.add(a["name"])
+
+    shared_attrs = []
+    for a in first_schema:
+        if a["name"] in shared_names:
+            shared_attrs.append({
+                **a,
+                "required": a["name"] in required_in_any,
+                "from_multiple_cats": len(all_cat_ids) > 1
+            })
+
+    db_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(req.product_eans)
+    ).all()
+
+    current_values: dict = {}
+    for a in db_attrs:
+        if a.attribute_name in shared_names:
+            current_values.setdefault(a.product_ean, {})[a.attribute_name] = a.attribute_value
+
+    cat_infos = []
+    for cid, eans in cat_to_eans.items():
+        cat = get_category_by_id(cid)
+        cat_name = cat.get("name", cid) if cat else cid
+        cat_infos.append({"id": cid, "name": cat_name, "ean_count": len(eans)})
+
+    unmapped_eans = [e for e in req.product_eans if e not in ean_to_cat]
+
+    return {
+        "shared_attrs": shared_attrs,
+        "current_values": current_values,
+        "categories": cat_infos,
+        "unmapped_eans": unmapped_eans,
+        "total_eans": len(req.product_eans),
+        "mapped_eans": len([e for e in req.product_eans if e in ean_to_cat])
+    }

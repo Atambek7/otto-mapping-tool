@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export async function fetchWithAuth(
   url: string,
@@ -16,18 +16,24 @@ export async function fetchWithAuth(
     headers["Content-Type"] = "application/json";
   }
 
+  // Include Bearer header if token exists in localStorage (backwards-compatibility),
+  // but credentials: "include" sends HttpOnly cookie automatically.
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-
+  const fetchOptions: RequestInit = {
+    ...options,
+    headers,
+    credentials: options.credentials || "include",
+  };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(`${API_URL}${url}`, { ...options, headers });
+      const response = await fetch(`${API_URL}${url}`, fetchOptions);
 
       if (response.status === 401) {
-        if (typeof window !== "undefined") {
+        if (typeof window !== "undefined" && window.location.pathname !== "/login") {
           localStorage.removeItem("token");
           window.location.href = "/login";
         }
@@ -43,6 +49,5 @@ export async function fetchWithAuth(
       throw err;
     }
   }
-  // Never reached, but TS needs it
   throw new Error("fetchWithAuth: exhausted retries");
 }

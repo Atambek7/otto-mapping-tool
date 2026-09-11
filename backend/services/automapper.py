@@ -22,6 +22,13 @@ GROUPS_PATH = os.path.join(DATA_DIR, "category_groups.json")
 CATEGORIES = []
 GROUPS = {}
 
+_client_cache = {}
+
+def get_openai_client(api_key: str) -> AsyncOpenAI:
+    if api_key not in _client_cache:
+        _client_cache[api_key] = AsyncOpenAI(api_key=api_key)
+    return _client_cache[api_key]
+
 # Inverted index: word -> [(category_dict, score_weight)]
 # score_weight: 3 for name, 1 for path
 WORD_TO_CAT = defaultdict(list)
@@ -218,7 +225,7 @@ Based on the product information, choose the single most appropriate category ID
     if not custom_api_key:
         print("Error: No API key provided")
         return None
-    local_client = AsyncOpenAI(api_key=custom_api_key)
+    local_client = get_openai_client(custom_api_key)
     try:
         response = await local_client.chat.completions.create(
             model=MODEL_NAME,
@@ -309,7 +316,7 @@ CRITICAL RULES:
     if not custom_api_key:
         print("Error: No API key provided")
         return None
-    local_client = AsyncOpenAI(api_key=custom_api_key)
+    local_client = get_openai_client(custom_api_key)
     try:
         response = await local_client.chat.completions.create(
             model=MODEL_NAME,

@@ -17,10 +17,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-5.6-luna")
 FACTORY_ID = "504135"
 
-AFTERCOOL_LOGIN_URL = "https://aftercool.de/auth/login"
-AFTERCOOL_BASE_URL = "https://aftercool.de"
-USERNAME = "Miras"
-PASSWORD = "Miras112112"
+AFTERCOOL_LOGIN_URL = os.environ.get("AFTERCOOL_LOGIN_URL", "https://aftercool.de/auth/login")
+AFTERCOOL_BASE_URL = os.environ.get("AFTERCOOL_BASE_URL", "https://aftercool.de")
+USERNAME = os.environ.get("AFTERCOOL_USERNAME")
+PASSWORD = os.environ.get("AFTERCOOL_PASSWORD")
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CATEGORIES_PATH = os.path.join(DATA_DIR, "categories.json")

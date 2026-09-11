@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 interface AttributeComboboxProps {
   name: string;
@@ -14,6 +15,7 @@ interface AttributeComboboxProps {
 }
 
 export function AttributeCombobox({ name, value, options, placeholder, onChange, dimmed, isAiFilled, className }: AttributeComboboxProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Local draft — doesn't call onChange on every keystroke
   const [draft, setDraft] = useState(value || "");
@@ -78,7 +80,7 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
           onChange={handleInput}
           onBlur={handleBlur}
           onFocus={() => { if (options) setOpen(true); }}
-          placeholder={placeholder || `Введите ${name.toLowerCase()}...`}
+          placeholder={placeholder || t("product_drawer.enter_attribute", { name: name.toLowerCase() })}
           className={className || [
             "w-full h-8 text-sm border rounded-md px-2 pr-8 outline-none transition-all",
             isAiFilled
@@ -103,7 +105,7 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
               type="button"
               onMouseDown={(e) => { e.preventDefault(); clearValue(); }}
               className="pointer-events-auto text-slate-900 hover:text-black dark:text-slate-400 dark:hover:text-slate-200 text-xs p-0.5 leading-none rounded"
-              title="Очистить"
+              title={t("product_drawer.clear")}
             >✕</button>
           )}
           {options && (
@@ -134,7 +136,7 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
             </button>
           )) : (
             <div className="px-3 py-2 text-slate-400 text-xs italic">
-              {draft ? "Нет совпадений — значение будет сохранено как введено" : "Нет вариантов"}
+              {draft ? t("product_drawer.no_matches_save_draft") : t("product_drawer.no_options")}
             </div>
           )}
         </div>

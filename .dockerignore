@@ -1,0 +1,38 @@
+# Git & system
+.git/
+.vscode/
+.idea/
+*.log
+
+# Node
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+
+# Python & virtualenv
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Static files & databases
+backend/static/
+static/
+postgres_data/
+scratch/
+*.db
+*.sqlite
+*.sqlite3
+celerybeat-schedule*
+
+# Env
+.env
+.env.local
+backend/.env
+frontend/.env.local

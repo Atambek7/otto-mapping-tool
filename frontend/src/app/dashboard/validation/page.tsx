@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { FactoryCard } from "@/components/factories/FactoryCard";
 import { useAccount } from "@/lib/useAccount";
 import { useDragSelection } from "@/hooks/useDragSelection";
+import { useTranslation } from "react-i18next";
 
 interface InvalidFactoryGroup {
   factoryId: string;
@@ -25,6 +26,7 @@ interface InvalidFactoryGroup {
 export default function ValidationIndexPage() {
   const router = useRouter();
   const { account } = useAccount();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [groupedFactories, setGroupedFactories] = useState<InvalidFactoryGroup[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -59,56 +61,86 @@ export default function ValidationIndexPage() {
   const loadGroups = async () => {
     setLoading(true);
     try {
-      const res = await fetchWithAuth("/validation/products");
-      if (res.ok) {
-        const data = await res.json();
-        const items = Array.isArray(data) ? data : (data?.items ?? []);
-
-        // Load cached global factory names map
-        let factoryNames: Record<string, string> = {};
-        const savedNames = localStorage.getItem("otto_all_factory_names");
-        if (savedNames) {
-          try {
-            factoryNames = JSON.parse(savedNames);
-          } catch (e) {}
+      // 1. Try fast server-aggregated summary first
+      let summaryData: any[] | null = null;
+      try {
+        const sumRes = await fetchWithAuth(`/validation/summary?account=${account}`);
+        if (sumRes.ok) {
+          const raw = await sumRes.json();
+          if (Array.isArray(raw)) summaryData = raw;
         }
+      } catch (e) {}
 
-        // Also check if we can populate from otto_factories_list
-        const savedList = localStorage.getItem("otto_factories_list");
-        if (savedList) {
-          try {
-            const parsed = JSON.parse(savedList);
-            const list = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
-            list.forEach((f: any) => {
-              if (f.id && f.name) factoryNames[String(f.id)] = f.name;
+      let items: any[] = [];
+      if (!summaryData) {
+        const res = await fetchWithAuth(`/validation/products?account=${account}`);
+        if (res.ok) {
+          const data = await res.json();
+          items = Array.isArray(data) ? data : (data?.items ?? []);
+        }
+      }
+
+      // Load cached global factory names map
+      let factoryNames: Record<string, string> = {};
+      const savedNames = localStorage.getItem("otto_all_factory_names");
+      if (savedNames) {
+        try {
+          factoryNames = JSON.parse(savedNames);
+        } catch (e) {}
+      }
+
+      // Also check if we can populate from otto_factories_list
+      const savedList = localStorage.getItem("otto_factories_list");
+      if (savedList) {
+        try {
+          const parsed = JSON.parse(savedList);
+          const list = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
+          list.forEach((f: any) => {
+            if (f.id && f.name) factoryNames[String(f.id)] = f.name;
+          });
+        } catch (e) {}
+      }
+
+      const fidsToCheck = summaryData 
+        ? summaryData.map((s: any) => String(s.factory_id))
+        : items.map((p: any) => String(p.factory_id));
+      const uniqueFids = Array.from(new Set(fidsToCheck)) as string[];
+      const hasMissingNames = uniqueFids.some(fid => !factoryNames[fid] || factoryNames[fid] === fid);
+
+      if (hasMissingNames || Object.keys(factoryNames).length === 0) {
+        try {
+          const factRes = await fetchWithAuth("/aftercool/factories");
+          if (factRes.ok) {
+            const raw = await factRes.json();
+            const allRawFactories = Array.isArray(raw) ? raw : (raw?.items ?? []);
+            allRawFactories.forEach((f: any) => {
+              if (f.id && f.name) {
+                factoryNames[String(f.id)] = f.name;
+              }
             });
-          } catch (e) {}
-        }
-
-        // Check if any factory in validation results is missing its name
-        const uniqueFids = Array.from(new Set(items.map((p: any) => String(p.factory_id)))) as string[];
-        const hasMissingNames = uniqueFids.some(fid => !factoryNames[fid] || factoryNames[fid] === fid);
-
-        if (hasMissingNames || Object.keys(factoryNames).length === 0) {
-          try {
-            const factRes = await fetchWithAuth("/aftercool/factories");
-            if (factRes.ok) {
-              const raw = await factRes.json();
-              const allRawFactories = Array.isArray(raw) ? raw : (raw?.items ?? []);
-              allRawFactories.forEach((f: any) => {
-                if (f.id && f.name) {
-                  factoryNames[String(f.id)] = f.name;
-                }
-              });
-              localStorage.setItem("otto_all_factory_names", JSON.stringify(factoryNames));
-            }
-          } catch (e) {
-            console.error("Failed to fetch factory names", e);
+            localStorage.setItem("otto_all_factory_names", JSON.stringify(factoryNames));
           }
+        } catch (e) {
+          console.error("Failed to fetch factory names", e);
         }
+      }
 
-        const groups: Record<string, { count: number; breakdown: Record<string, number> }> = {};
-        items.forEach((p: any) => {
+      const groups: Record<string, { count: number; breakdown: Record<string, number> }> = {};
+      if (summaryData) {
+        summaryData.forEach((s: any) => {
+          // Only show factories that actually have errors or need attributes
+          const errCount = s.errors ?? 0;
+          const needCount = s.need_attributes ?? 0;
+          if (errCount === 0 && needCount === 0) return;
+          const fid = String(s.factory_id);
+          const breakdown: Record<string, number> = {};
+          if (errCount > 0) breakdown["Missing Required Fields"] = errCount;
+          if (needCount > 0) breakdown["Needs Attributes"] = needCount;
+          groups[fid] = { count: s.count, breakdown };
+        });
+      } else {
+        // Fallback: only include items that actually have errors
+        items.filter((p: any) => Array.isArray(p.errors) && p.errors.length > 0).forEach((p: any) => {
           const fid = String(p.factory_id);
           if (!groups[fid]) groups[fid] = { count: 0, breakdown: {} };
           groups[fid].count++;
@@ -117,16 +149,19 @@ export default function ValidationIndexPage() {
             groups[fid].breakdown[label] = (groups[fid].breakdown[label] || 0) + 1;
           });
         });
+      }
 
-        const result: InvalidFactoryGroup[] = Object.keys(groups).map(fid => ({
-          factoryId: fid,
-          name: factoryNames[fid] || fid,
-          invalidCount: groups[fid].count,
-          errorBreakdown: groups[fid].breakdown,
-        }));
+        const result: InvalidFactoryGroup[] = Object.keys(groups)
+          // Extra safety: exclude groups with no breakdown entries (no real issues)
+          .filter(fid => Object.keys(groups[fid].breakdown).length > 0)
+          .map(fid => ({
+            factoryId: fid,
+            name: factoryNames[fid] || fid,
+            invalidCount: groups[fid].count,
+            errorBreakdown: groups[fid].breakdown,
+          }));
         result.sort((a, b) => b.invalidCount - a.invalidCount);
         setGroupedFactories(result);
-      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -165,34 +200,65 @@ export default function ValidationIndexPage() {
   };
 
   return (
-    <div className="space-y-5 pb-20">
+    <div className="space-y-6 pb-20">
       {/* ── HEADER ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-zinc-100 tracking-tight flex items-center gap-2">
-            <ShieldCheck className="w-6 h-6 text-indigo-600" />
-            Validation Center
-            <span className="text-sm font-normal text-slate-400 ml-1">({account})</span>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            {t("validation.title")}
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md ml-1">
+              {account}
+            </span>
           </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Actionable Inbox — нажмите на фабрику, чтобы исправить ошибки
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            {t("validation.subtitle")}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-            <button onClick={() => setViewMode("grid")} className={cn("p-1.5 rounded-lg transition-colors", viewMode === "grid" ? "bg-white shadow-sm text-indigo-500 dark:bg-[#0B0F19] dark:text-indigo-400" : "text-slate-400 hover:text-slate-600")}>
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button onClick={() => setViewMode("list")} className={cn("p-1.5 rounded-lg transition-colors", viewMode === "list" ? "bg-white shadow-sm text-indigo-500 dark:bg-[#0B0F19] dark:text-indigo-400" : "text-slate-400 hover:text-slate-600")}>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+            <button
+              onClick={() => setViewMode("list")}
+              title={t("validation.view_list")}
+              className={cn(
+                "p-1 rounded-md transition-colors",
+                viewMode === "list"
+                  ? "bg-white dark:bg-card text-indigo-600 dark:text-indigo-400 shadow-xs"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              )}
+            >
               <List className="w-4 h-4" />
             </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              title={t("validation.view_grid")}
+              className={cn(
+                "p-1 rounded-md transition-colors",
+                viewMode === "grid"
+                  ? "bg-white dark:bg-card text-indigo-600 dark:text-indigo-400 shadow-xs"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              )}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
           </div>
-          <Button variant="outline" onClick={loadGroups} disabled={loading} className="gap-2 shrink-0">
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Обновить
-          </Button>
+
           <Button
             variant="outline"
-            className="gap-2 shrink-0"
+            size="sm"
+            onClick={loadGroups}
+            disabled={loading}
+            className="gap-1.5 h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium hover:bg-slate-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>{t("common.refresh")}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium hover:bg-slate-50"
             onClick={() => {
               if (selectedIds.size === filteredFactories.length && filteredFactories.length > 0) {
                 setSelectedIds(new Set());
@@ -201,35 +267,47 @@ export default function ValidationIndexPage() {
               }
             }}
           >
-            {selectedIds.size === filteredFactories.length && filteredFactories.length > 0 ? "Снять выбор" : "Выбрать все"}
+            {selectedIds.size === filteredFactories.length && filteredFactories.length > 0
+              ? t("validation.deselect_all")
+              : t("validation.select_all")}
           </Button>
         </div>
       </div>
 
-      {/* ── DATA QUALITY SUMMARY (top error breakdown) ── */}
+      {/* ── TOP SUMMARY (Compact strip + top errors) ── */}
       {!loading && groupedFactories.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {/* Total errors tile */}
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl p-4 flex flex-col justify-between">
-            <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400 mb-2">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Всего</span>
-            </div>
-            <div className="text-3xl font-extrabold text-red-600 dark:text-red-400 tabular-nums">{totalInvalid.toLocaleString()}</div>
-            <div className="text-xs text-red-500/70 dark:text-red-400/60 mt-1">{groupedFactories.length} фабрик</div>
+          {/* Total Affected */}
+          <div className="bg-white dark:bg-card border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">
+              {t("validation.total_affected")}
+            </span>
+            <span className="text-2xl font-bold text-rose-600 dark:text-rose-400 tabular-nums tracking-tight mt-1">
+              {totalInvalid.toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              {t("validation.across_catalogs", { count: groupedFactories.length })}
+            </span>
           </div>
-          {/* Top 4 error type tiles */}
+
+          {/* Top Error Types */}
           {globalBreakdown.map(([label, count]) => (
-            <div key={label} className="bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <div className="flex items-center gap-1.5 mb-2">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="text-xs text-slate-500 dark:text-slate-400 truncate leading-none" title={label}>{label}</span>
+            <div key={label} className="bg-white dark:bg-card border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider truncate block" title={label}>
+                    {label}
+                  </span>
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                </div>
+                <span className="text-xl font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
+                  {count.toLocaleString()}
+                </span>
               </div>
-              <div className="text-2xl font-bold text-slate-800 dark:text-white tabular-nums">{count.toLocaleString()}</div>
-              <div className="mt-2 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div className="mt-2.5 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.round((count / totalInvalid) * 100)}%` }}
+                  className="h-full bg-indigo-600 rounded-full transition-all duration-700"
+                  style={{ width: `${Math.min(100, Math.round((count / Math.max(1, totalInvalid)) * 100))}%` }}
                 />
               </div>
             </div>
@@ -243,28 +321,37 @@ export default function ValidationIndexPage() {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поиск по фабрике или ID..."
-          className="pl-9 bg-white dark:bg-[#0B0F19] rounded-xl border-slate-200 dark:border-slate-800 shadow-sm dark:text-white"
+          placeholder={t("validation.filter_placeholder")}
+          className="pl-9 h-9 text-xs rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card shadow-xs"
         />
         {search && (
-          <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-            <X className="w-4 h-4" />
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
 
-      {/* ── FACTORY LIST ── */}
+      {/* ── FACTORIES LIST / GRID ── */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-28 bg-white dark:bg-card rounded-xl border border-slate-200/60 dark:border-slate-800 animate-pulse" />
+          ))}
         </div>
       ) : groupedFactories.length === 0 ? (
-        <div className="p-16 text-center flex flex-col items-center justify-center space-y-3 bg-white dark:bg-[#0B0F19] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/30 rounded-full flex items-center justify-center">
-            <ShieldCheck className="w-8 h-8 text-emerald-500" />
+        <div className="py-20 text-center flex flex-col items-center justify-center space-y-3 bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 p-8 shadow-xs">
+          <div className="w-14 h-14 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center">
+            <ShieldCheck className="w-7 h-7" />
           </div>
-          <p className="text-slate-600 dark:text-slate-300 font-semibold text-lg">Ошибок нет!</p>
-          <p className="text-sm text-slate-400 max-w-sm">Все товары аккаунта {account} готовы к выгрузке.</p>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+            {t("validation.inbox_clear_title")}
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
+            {t("validation.inbox_clear_desc", { account })}
+          </p>
         </div>
       ) : (
         <div className={cn("relative select-none", viewMode === "grid" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" : "flex flex-col gap-2")}>
@@ -295,35 +382,43 @@ export default function ValidationIndexPage() {
         </div>
       )}
 
-      {/* ── SELECTION BAR ── */}
+      {/* ── FLOATING SELECTION BAR ── */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl shadow-red-500/20 flex items-center gap-4 z-50 animate-in slide-in-from-bottom-4 border border-slate-700/50">
-          {/* Scope */}
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white dark:bg-card text-slate-900 dark:text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center gap-3 z-50 animate-in slide-in-from-bottom-4">
           <div className="flex items-center gap-2 shrink-0">
-            <div className="w-7 h-7 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-xs font-bold text-red-300">
+            <div className="h-6 px-2 rounded-md bg-rose-50 dark:bg-rose-950/60 border border-rose-200/80 dark:border-rose-900/60 flex items-center justify-center text-xs font-bold text-rose-600 dark:text-rose-400">
               {selectedIds.size}
             </div>
             <div className="text-xs leading-tight">
-              <div className="text-slate-200 font-medium">{selectedIds.size} фабрик выбрано</div>
-              <div className="text-slate-500">
-                {Array.from(selectedIds).reduce((s, id) => s + (groupedFactories.find(f => f.factoryId === id)?.invalidCount || 0), 0).toLocaleString()} товаров
+              <div className="text-slate-900 dark:text-white font-medium">
+                {t("validation.floating_selected", { count: selectedIds.size })}
+              </div>
+              <div className="text-slate-400 text-[10px]">
+                {t("validation.floating_items", {
+                  count: Array.from(selectedIds).reduce((s, id) => s + (groupedFactories.find(f => f.factoryId === id)?.invalidCount || 0), 0).toLocaleString()
+                })}
               </div>
             </div>
           </div>
-          <div className="w-px h-8 bg-slate-700/70" />
-          <button
+
+          <div className="w-px h-6 bg-slate-200 dark:bg-slate-700" />
+
+          <Button
+            size="sm"
             onClick={handleExportCSV}
             disabled={isExporting}
-            className="flex items-center gap-2 h-9 px-4 text-sm font-semibold rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white transition-all shadow-md shadow-red-500/30 disabled:opacity-60"
+            className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shadow-xs"
           >
-            {isExporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
-            Экспорт CSV
-          </button>
+            {isExporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
+            <span>{t("validation.export_csv")}</span>
+          </Button>
+
           <button
             onClick={() => setSelectedIds(new Set())}
-            className="p-1.5 text-slate-500 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
+            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+            title={t("validation.deselect_all")}
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}

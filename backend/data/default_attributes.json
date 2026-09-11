@@ -1,0 +1,32 @@
+{
+  "global": {
+    "Art Herstellung": "Fertigung aus Europa",
+    "Art Polsterung": "Wellenunterfederung ; Polyätherschaum-Polsterung",
+    "Belastbarkeit pro Sitzplatz": "140 Kg",
+    "Geschlecht": "Unisex",
+    "Hinweis Maßangaben": "Alle Angaben sind ca. Maße",
+    "Informationen zur Datennutzung (nach EU Data Act)": "Ihre personenbezogenen Daten werden nur zur Bearbeitung IhrerBestellungen, für Marketing (mit Zustimmung) und zur Kundenbetreuungverwendet. Sie haben jederzeit das Recht auf Auskunft, Berichtigungoder Löschung Ihrer Daten. Weitere Informationen finden Sie inunserer Datenschutzerklärung.",
+    "Lieferzustand": "teilmontiert",
+    "Pflegehinweise": "keine scharfen Haushaltsreiniger verwenden",
+    "Wissenswert": "Handgefertigte Polstermöbel vereinen traditionelle Handwerkskunst mit individuellem Design. Jedes Möbelstück wird mit größter Sorgfalt und Liebe zum Detail gefertigt, wodurch einzigartige Unikate entstehen, die durch höchste Qualität, Langlebigkeit und erstklassigen Komfort überzeugen.",
+    "Warnhinweise": "Keine Warnhinweise vorhanden",
+    "Farbhinweise": "Bitte beachten Sie, dass die Farben auf Ihrem Monitor von den Originalfarbtönen abweichen können.",
+    "Hinweis Lieferumfang": "Es wird alles geliefert, was in der Produktbeschreibung angegeben ist. Die Dekoration und Beimöbel sind nicht im Lieferumfang enthalten."
+  },
+  "accounts": {
+    "JV": {
+      "Marke": "JVMOEBEL",
+      "Marke laut BattVO": "JVMOEBEL",
+      "Markeninformation": "Jvmoebel® ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Langlebigkeit schaffen wir Möbelstücke, die jedes Zuhause bereichern. Entdecken Sie Komfort und Eleganz in jedem Detail.",
+      "Materialhinweis": "Keine zusätzlichen Hinweise / JVmoebel® verwendet sorgfältig ausgewählte und hochwertige Materialien, um Langlebigkeit, Stabilität und ein ansprechendes Design zu gewährleisten.",
+      "WEEE-Reg.-Nr. DE": "46974041"
+    },
+    "XL": {
+      "Marke": "XLMOEBEL",
+      "Marke laut BattVO": "XLMOEBEL",
+      "Markeninformation": "XLmoebel ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Langlebigkeit schaffen wir Möbelstücke, die jedes Zuhause bereichern. Entdecken Sie Komfort und Eleganz in jedem Detail.",
+      "Materialhinweis": "XLmoebel verwendet sorgfältig ausgewählte und hochwertige Materialien, um Langlebigkeit, Stabilität und ein ansprechendes Design zu gewährleisten.",
+      "WEEE-Reg.-Nr. DE": "80120806"
+    }
+  }
+}

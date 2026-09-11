@@ -14,64 +14,105 @@ router = APIRouter(
     tags=["validation"],
 )
 
+@router.get("/summary")
+async def get_validation_summary(account: str = None, db: Session = Depends(get_db)):
+    """
+    Fast aggregated validation summary grouped by factory_id using composite index.
+    """
+    from sqlalchemy import func, case
+    acc_name = account or "JV"
+
+    rows = db.query(
+        models.ProductMapping.factory_id,
+        func.count(models.ProductMapping.id).label("total_affected"),
+        func.count(case((models.ProductMapping.status == "Error", 1))).label("errors_count"),
+        func.count(case((models.ProductMapping.status == "Need Attributes", 1))).label("need_attrs_count")
+    ).filter(
+        models.ProductMapping.account_name == acc_name,
+        models.ProductMapping.status.in_(["Error", "Need Attributes"])
+    ).group_by(models.ProductMapping.factory_id).all()
+
+    return [
+        {
+            "factory_id": r.factory_id,
+            "count": r.total_affected,
+            "errors": r.errors_count,
+            "need_attributes": r.need_attrs_count
+        }
+        for r in rows
+    ]
+
 @router.get("/products")
-async def get_invalid_products(factory_id: str = None, db: Session = Depends(get_db)):
-    # We fetch mappings for the factory and re-validate on the fly
-    # BUT we exclude "Not Mapped" items so that completely untouched products don't clutter the validation tab.
-    query = db.query(models.ProductMapping).filter(models.ProductMapping.status != "Not Mapped")
+async def get_invalid_products(factory_id: str = None, account: str = None, limit: int = 500, db: Session = Depends(get_db)):
+    # Only fetch mappings that are in Error or Need Attributes state — skip Ready/Not Mapped entirely.
+    # This is much faster than fetching all products and re-validating each one.
+    query = db.query(models.ProductMapping).filter(
+        models.ProductMapping.status.in_(["Error", "Need Attributes"])
+    )
     if factory_id:
         query = query.filter(models.ProductMapping.factory_id == factory_id)
-        
-    mappings = query.all()
-    
-    # Pre-fetch all attributes
+    if account:
+        query = query.filter(models.ProductMapping.account_name == account)
+
+    mappings = query.limit(limit).all()
+
+    # Pre-fetch all attributes in one batch query
     eans = [m.product_ean for m in mappings]
     if not eans:
         return []
-        
+
     db_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans)).all()
-    attr_by_ean = {}
+    attr_by_ean: dict = {}
     for a in db_attrs:
         if a.product_ean not in attr_by_ean:
             attr_by_ean[a.product_ean] = {}
         attr_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+
     # Fetch category names using in-memory JSON cache
     cat_ids = list(set([m.category_id for m in mappings if m.category_id]))
-    
+
     from services.validator import validate_product, get_category_by_id
-    
+
     cat_name_by_id = {}
     for cid in cat_ids:
         cat_info = get_category_by_id(cid)
         if cat_info:
             cat_name_by_id[cid] = cat_info.get("name", cid)
-    
+
     result = []
+    status_updates = []
     for m in mappings:
         ean = m.product_ean
         attr_map = attr_by_ean.get(ean, {})
         errors = validate_product(ean, m.category_id, attr_map)
-        
-        # If there are errors, we return it to the frontend Validation page
+
         if errors:
             cat_name = cat_name_by_id.get(m.category_id, m.category_id)
+            img = m.image_url or ""
+            if "|" in img:
+                img = img.split("|")[0].strip()
+            elif "," in img:
+                img = img.split(",")[0].strip()
+
             result.append({
                 "product_ean": m.product_ean,
                 "factory_id": m.factory_id,
                 "category_id": m.category_id,
                 "category_name": cat_name,
                 "status": m.status,
+                "product_name": m.product_name or "",
+                "image_url": img,
+                "price": m.price or "",
                 "errors": errors
             })
-            # Optionally, we can sync the DB status if it was wrongly marked as "Ready"
-            if m.status == "Ready":
-                m.status = "Error"
         else:
-            # If valid, but DB says Error, auto-correct it
-            if m.status != "Ready":
-                m.status = "Ready"
-                
-    db.commit() # Save any auto-corrected statuses
+            # Product is now valid — auto-correct DB status to Ready
+            m.status = "Ready"
+            status_updates.append(m)
+
+    # Only commit if there were auto-corrections
+    if status_updates:
+        db.commit()
     return result
 
 from pydantic import BaseModel

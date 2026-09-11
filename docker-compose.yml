@@ -8,16 +8,78 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./backend/mapping_tool.db:/app/mapping_tool.db
-      - ./backend/users.json:/app/users.json
-      - ./backend/data:/app/data
+      - ./backend:/app
     env_file:
       - ./backend/.env
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
       - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: otto_mapping_worker
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: otto_mapping_beat
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.celery_app", "beat", "--loglevel=info"]
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql://otto_user:otto_pass@db:5432/otto_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: otto_mapping_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:15-alpine
@@ -27,20 +89,29 @@ services:
       POSTGRES_USER: otto_user
       POSTGRES_PASSWORD: otto_pass
       POSTGRES_DB: otto_db
-    ports:
-      - "5432:5432"
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otto_user -d otto_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8001
+        - NEXT_PUBLIC_API_URL=/api
+        - API_URL=http://backend:8001
     container_name: otto_mapping_frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      - API_URL=http://backend:8001
     depends_on:
       - backend
+
+volumes:
+  redis_data:

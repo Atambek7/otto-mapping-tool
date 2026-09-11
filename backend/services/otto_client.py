@@ -25,7 +25,10 @@ class OttoMarketClient:
             "Authorization": self._get_auth_header(),
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        data = {"grant_type": "client_credentials"}
+        data = {
+            "grant_type": "client_credentials",
+            "scope": "products orders availability shipping-profiles"
+        }
 
         response = requests.post(url, headers=headers, data=data)
         response.raise_for_status()

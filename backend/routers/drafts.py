@@ -13,6 +13,7 @@ class DraftCreate(BaseModel):
     data_json: str
     is_ok: bool = False
 
+@router.post("")
 @router.post("/")
 async def save_draft(
     draft: DraftCreate, 

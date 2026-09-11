@@ -14,19 +14,29 @@ class UserSettingsUpdate(BaseModel):
 
 class UserSettingsResponse(BaseModel):
     username: str
-    openai_api_key: Optional[str] = None
+    has_openai_key: bool
+    openai_api_key_masked: Optional[str] = None
+
+def mask_key(key: Optional[str]) -> Optional[str]:
+    if not key:
+        return None
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:4]}...{key[-4:]}"
 
 @router.get("/me", response_model=UserSettingsResponse)
 def get_my_settings(current_user: User = Depends(auth.get_current_user)):
     return {
         "username": current_user.username,
-        "openai_api_key": current_user.openai_api_key
+        "has_openai_key": bool(current_user.openai_api_key),
+        "openai_api_key_masked": mask_key(current_user.openai_api_key)
     }
 
 @router.post("/me", response_model=UserSettingsResponse)
 def update_my_settings(payload: UserSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     if payload.openai_api_key is not None:
-        current_user.openai_api_key = payload.openai_api_key
+        val = payload.openai_api_key.strip()
+        current_user.openai_api_key = val if val else None
         db.commit()
         import sync_users
         sync_users.dump_users_to_json()
@@ -34,5 +44,6 @@ def update_my_settings(payload: UserSettingsUpdate, db: Session = Depends(get_db
         
     return {
         "username": current_user.username,
-        "openai_api_key": current_user.openai_api_key
+        "has_openai_key": bool(current_user.openai_api_key),
+        "openai_api_key_masked": mask_key(current_user.openai_api_key)
     }

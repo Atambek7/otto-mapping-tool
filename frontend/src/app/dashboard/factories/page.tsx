@@ -16,6 +16,7 @@ import { useAccount } from "@/lib/useAccount";
 import { useDragSelection } from "@/hooks/useDragSelection";
 import { FactoryCard } from "@/components/factories/FactoryCard";
 import { BatchActionBar } from "@/components/factories/BatchActionBar";
+import { useTranslation } from "react-i18next";
 
 interface Factory {
   id: string;
@@ -45,6 +46,7 @@ export default function DashboardPage() {
   
   const [cachedIds, setCachedIds] = useState<Record<string, boolean>>({});
   const { account } = useAccount();
+  const { t } = useTranslation();
 
   // ── FILTERING & SORTING ──
   const filtered = useMemo(() => {
@@ -107,8 +109,12 @@ export default function DashboardPage() {
       const data = await res.json();
       const all: Factory[] = Array.isArray(data) ? data : data?.items ?? [];
       const f_data = all.filter((f) => f.account === account && f.kind === "lister" && (f.items_count > 0 || cacheMap[f.id]));
-      setFactories(f_data);
-      localStorage.setItem("otto_factories_list", JSON.stringify(f_data));
+      const compactList = f_data.map(f => ({ id: f.id, name: f.name, items_count: f.items_count, account: f.account, kind: f.kind }));
+      try {
+        localStorage.setItem("otto_factories_list", JSON.stringify(compactList));
+      } catch (e) {
+        console.warn("LocalStorage quota reached:", e);
+      }
       setError(false);
     } catch (e) {
       console.error(e);
@@ -121,26 +127,35 @@ export default function DashboardPage() {
 
   useEffect(() => { load(); }, [account]);
 
-  // ── BATCH ACTIONS ──
+  // ── BATCH ACTIONS (PARALLEL CONCURRENCY) ──
   const handleBatchCache = async () => {
     if (selectedIds.size === 0) return;
     setDownloading(true);
     const ids = Array.from(selectedIds);
     setDownloadProgress({ current: 0, total: ids.length });
     
-    for (let i = 0; i < ids.length; i++) {
-      const fid = ids[i];
-      try {
-        const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
-        if (res.ok) {
-          const data = await res.json();
-          const items = data?.items || data || [];
-          // Pass true as second argument to mark as manually pinned
-          await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
-          setCachedIds(prev => ({ ...prev, [fid]: true }));
-        }
-      } catch (e) { console.error(e); }
-      setDownloadProgress({ current: i + 1, total: ids.length });
+    const concurrency = 3;
+    let completed = 0;
+    for (let i = 0; i < ids.length; i += concurrency) {
+      const chunk = ids.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async (fid) => {
+          try {
+            const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
+            if (res.ok) {
+              const data = await res.json();
+              const items = data?.items || data || [];
+              await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
+              setCachedIds(prev => ({ ...prev, [fid]: true }));
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            completed++;
+            setDownloadProgress({ current: completed, total: ids.length });
+          }
+        })
+      );
     }
     setDownloading(false);
     setDownloadProgress(null);
@@ -151,13 +166,21 @@ export default function DashboardPage() {
     if (selectedIds.size === 0) return;
     setDownloading(true);
     const ids = Array.from(selectedIds);
-    for (let i = 0; i < ids.length; i++) {
-      const fid = ids[i];
-      try {
-        await import('@/lib/cache').then(m => m.deleteCachedFactory(fid));
-        setCachedIds(prev => { const n = { ...prev }; delete n[fid]; return n; });
-      } catch (e) { console.error(e); }
-    }
+    const { deleteCachedFactory } = await import('@/lib/cache');
+    await Promise.all(
+      ids.map(async (fid) => {
+        try {
+          await deleteCachedFactory(fid);
+        } catch (e) {
+          console.error(e);
+        }
+      })
+    );
+    setCachedIds(prev => {
+      const nextMap = { ...prev };
+      ids.forEach(fid => delete nextMap[fid]);
+      return nextMap;
+    });
     setDownloading(false);
     setSelectedIds(new Set());
   };
@@ -237,7 +260,7 @@ export default function DashboardPage() {
     if (totalProducts === 0) {
       setIsAutoMapping(false);
       setSelectedIds(new Set());
-      setTimeout(() => alert("Нет товаров для обработки."), 100);
+      setTimeout(() => alert(t("factories.no_products_alert")), 100);
       return;
     }
 
@@ -263,90 +286,194 @@ export default function DashboardPage() {
     setIsAutoMapping(false);
     setAutoMapProgress(null);
     setSelectedIds(new Set());
-    setTimeout(() => alert(`Автозаполнение завершено для ${ids.length} фабрик! Проверьте результаты в Validation.`), 100);
+    setTimeout(() => alert(t("factories.auto_map_complete", { count: ids.length })), 100);
   };
 
   // ── UI HELPERS ──
   const stats = useMemo(() => ({
     total: factories.length,
+    totalItems: factories.reduce((sum, f) => sum + (f.items_count || 0), 0),
     ok: factories.filter((f) => f.items_count > 0).length,
     missing: factories.filter((f) => f.items_count === 0).length,
     cached: factories.filter((f) => cachedIds[f.id]).length,
   }), [factories, cachedIds]);
 
   const statusLabel = (f: Factory) => {
-    if (f.items_count > 0) return { text: `${f.items_count} товаров`, cls: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" };
-    if (cachedIds[f.id]) return { text: "Доступно в кэше", cls: "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50" };
-    return { text: "Нет данных", cls: "bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800/50" };
+    if (f.items_count > 0) return { text: `${f.items_count} ${t("factories.items_suffix")}`, cls: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50" };
+    if (cachedIds[f.id]) return { text: t("factories.in_cache"), cls: "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50" };
+    return { text: t("factories.no_data"), cls: "bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800/50" };
   };
 
-  // (Moved statusBadge to FactoryCard internally)
-
   return (
-    <div className="space-y-6 pb-16">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+    <div className="space-y-6 pb-20">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-zinc-100 tracking-tight">Рабочие папки {account}</h1>
-          <p className="text-sm text-slate-500 mt-1">Фабрики {account} · Lister — выберите папку для маппинга категорий</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">{t("factories.title")}</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            {t("factories.subtitle", { account })}
+          </p>
         </div>
-        <Button variant="outline" onClick={() => load(true)} disabled={loading || isRefreshing} className="gap-2 shrink-0">
-          <RefreshCw className={`w-4 h-4 ${(loading || isRefreshing) ? "animate-spin" : ""}`} /> Обновить список
+        <Button
+          variant="outline"
+          onClick={() => load(true)}
+          disabled={loading || isRefreshing}
+          className="gap-2 shrink-0 border-slate-200 dark:border-slate-800 bg-white dark:bg-card hover:bg-slate-50 dark:hover:bg-slate-900"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${(loading || isRefreshing) ? "animate-spin" : ""}`} />
+          <span>{isRefreshing ? t("factories.refreshing") : t("factories.refresh_list")}</span>
         </Button>
       </div>
 
-      {!loading && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: "Всего фабрик", value: stats.total, color: "text-slate-700 dark:text-white" },
-            { label: "Активных", value: stats.ok, color: "text-emerald-600 dark:text-emerald-400" },
-            { label: "Без данных", value: stats.missing, color: "text-slate-400 dark:text-white" },
-            { label: "Кэшировано", value: stats.cached, color: "text-indigo-600 dark:text-indigo-400" },
-          ].map((s) => (
-            <div key={s.label} className="bg-white dark:bg-[#0B0F19] rounded-2xl border border-slate-200/60 dark:border-slate-800 p-4 shadow-sm">
-              <p className="text-xs text-slate-500 dark:text-white mb-1">{s.label}</p>
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-            </div>
-          ))}
+      {/* Compact Summary Strip */}
+      {!loading && !error && (
+        <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-5">
+          <div className="p-3.5 sm:p-4">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("factories.total_products")}</span>
+            <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400 tracking-tight mt-0.5 block">
+              {stats.totalItems.toLocaleString()}
+            </span>
+          </div>
+          <div className="p-3.5 sm:p-4">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("factories.factories_count")}</span>
+            <span className="text-xl font-bold text-slate-900 dark:text-white tracking-tight mt-0.5 block">
+              {stats.total.toLocaleString()}
+            </span>
+          </div>
+          <div className="p-3.5 sm:p-4">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("factories.active")}</span>
+            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5 block">
+              {stats.ok.toLocaleString()}
+            </span>
+          </div>
+          <div className="p-3.5 sm:p-4">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("factories.no_data")}</span>
+            <span className="text-xl font-bold text-slate-400 dark:text-slate-500 tracking-tight mt-0.5 block">
+              {stats.missing.toLocaleString()}
+            </span>
+          </div>
+          <div className="p-3.5 sm:p-4 col-span-2 sm:col-span-1">
+            <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("factories.cached")}</span>
+            <span className="text-xl font-bold text-indigo-700 dark:text-indigo-300 tracking-tight mt-0.5 block">
+              {stats.cached.toLocaleString()}
+            </span>
+          </div>
         </div>
       )}
 
+      {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по названию или ID фабрики..." className="pl-9 bg-white dark:bg-[#0B0F19] rounded-xl border-slate-200 dark:border-slate-800 shadow-sm dark:text-white" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("factories.search_placeholder")}
+            className="pl-9 bg-white dark:bg-card rounded-lg border-slate-200 dark:border-slate-800 text-sm shadow-xs placeholder:text-slate-400"
+          />
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant={showOnlyCached ? "default" : "outline"} size="sm" className={cn("h-9 rounded-xl shadow-sm font-medium transition-colors", showOnlyCached ? "bg-indigo-600 hover:bg-indigo-700 text-white border-transparent" : "border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0B0F19] text-slate-600 dark:text-white")} onClick={() => setShowOnlyCached(!showOnlyCached)}>
-            <Database className="w-4 h-4 mr-2" /> В кэше ({stats.cached})
+          <Button
+            variant={showOnlyCached ? "default" : "outline"}
+            size="sm"
+            className={cn(
+              "h-9 rounded-lg font-medium transition-colors text-xs gap-1.5",
+              showOnlyCached
+                ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                : "border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+            )}
+            onClick={() => setShowOnlyCached(!showOnlyCached)}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>{t("factories.cached_btn", { count: stats.cached })}</span>
           </Button>
 
           <div className="relative">
-            <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="appearance-none bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800 rounded-xl h-9 pl-10 pr-8 text-sm text-slate-700 dark:text-white shadow-sm focus:outline-none cursor-pointer">
-              <option value="count_desc">По кол-ву товаров (убывание)</option>
-              <option value="count_asc">По кол-ву товаров (возрастание)</option>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as any)}
+              className="appearance-none bg-white dark:bg-card border border-slate-200 dark:border-slate-800 rounded-lg h-9 pl-9 pr-8 text-xs font-medium text-slate-700 dark:text-slate-300 shadow-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+            >
+              <option value="count_desc">{t("factories.sort_desc")}</option>
+              <option value="count_asc">{t("factories.sort_asc")}</option>
             </select>
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><ArrowUpDown className="w-4 h-4" /></div>
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronDown className="w-4 h-4" /></div>
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <ArrowUpDown className="w-3.5 h-3.5" />
+            </div>
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <ChevronDown className="w-3.5 h-3.5" />
+            </div>
           </div>
 
-          <Button variant="outline" size="sm" className="h-9 rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0B0F19] shadow-sm text-slate-600 dark:text-white font-medium" onClick={() => setSelectedIds(selectedIds.size === filtered.length ? new Set() : new Set(filtered.map(f => f.id)))}>
-            {selectedIds.size === filtered.length ? "Снять выбор" : "Выбрать все"}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+            onClick={() => setSelectedIds(selectedIds.size === filtered.length ? new Set() : new Set(filtered.map(f => f.id)))}
+          >
+            {selectedIds.size === filtered.length ? t("factories.deselect_all") : t("factories.select_all")}
           </Button>
 
-          <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-            <button onClick={() => setViewMode("grid")} className={cn("p-1.5 rounded-lg transition-colors", viewMode === "grid" ? "bg-white shadow-sm text-rose-500 dark:bg-[#0B0F19] dark:text-rose-400" : "text-slate-400 hover:text-slate-600")}><LayoutGrid className="w-4 h-4" /></button>
-            <button onClick={() => setViewMode("list")} className={cn("p-1.5 rounded-lg transition-colors", viewMode === "list" ? "bg-white shadow-sm text-rose-500 dark:bg-[#0B0F19] dark:text-rose-400" : "text-slate-400 hover:text-slate-600")}><List className="w-4 h-4" /></button>
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+            <button
+              onClick={() => setViewMode("list")}
+              title={t("validation.view_list")}
+              className={cn(
+                "p-1 rounded-md transition-colors",
+                viewMode === "list"
+                  ? "bg-white dark:bg-card text-indigo-600 dark:text-indigo-400 shadow-xs"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              )}
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              title={t("validation.view_grid")}
+              className={cn(
+                "p-1 rounded-md transition-colors",
+                viewMode === "grid"
+                  ? "bg-white dark:bg-card text-indigo-600 dark:text-indigo-400 shadow-xs"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              )}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
 
+      {/* Main Content Area */}
       {error ? (
-        <div className="py-20 flex flex-col items-center gap-3 text-slate-400 border border-dashed rounded-2xl"><AlertCircle className="w-10 h-10 opacity-40" /><p className="text-sm">Не удалось загрузить фабрики. Проверьте, запущен ли бэкенд.</p><Button variant="outline" onClick={() => load(true)} className="gap-2 mt-2"><RefreshCw className="w-4 h-4" /> Повторить</Button></div>
+        <div className="py-16 flex flex-col items-center justify-center text-center bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 p-8">
+          <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-3">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white">{t("factories.error_title")}</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mt-1 mb-4">
+            {t("factories.error_desc")}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => load(true)} className="gap-2">
+            <RefreshCw className="w-3.5 h-3.5" /> {t("factories.retry")}
+          </Button>
+        </div>
       ) : loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
+        <div className={cn("relative", viewMode === "grid" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" : "flex flex-col gap-2")}>
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="h-20 bg-white dark:bg-card rounded-xl border border-slate-200/60 dark:border-slate-800 p-4 animate-pulse" />
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="py-20 text-center text-slate-400 border border-dashed rounded-2xl">Фабрики не найдены</div>
+        <div className="py-16 flex flex-col items-center justify-center text-center bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 p-8">
+          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mb-3">
+            <Search className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-slate-900 dark:text-white">{t("factories.empty_title")}</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mt-1">
+            {t("factories.empty_desc")}
+          </p>
+        </div>
       ) : (
         <div className={cn("relative select-none", viewMode === "grid" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" : "flex flex-col gap-2")}>
           {filtered.map((f, index) => (
@@ -375,6 +502,7 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Floating Batch Action Bar */}
       <BatchActionBar
         selectedIds={selectedIds}
         cachedIds={cachedIds}

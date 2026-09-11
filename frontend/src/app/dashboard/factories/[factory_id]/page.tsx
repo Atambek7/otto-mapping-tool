@@ -11,15 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CategoryAutocomplete } from "@/components/CategoryAutocomplete";
 import { ProductDrawer } from "@/components/ProductDrawer";
+import { MassEditDrawer } from "@/components/MassEditDrawer";
 import { toast } from "sonner";
 
 import {
-  Download, RefreshCw, Search, ArrowUpDown, ArrowUp, ArrowDown, Database, Wifi, X, Sparkles, Loader2, ChevronLeft, Upload, FileDown, FileArchive, Bot
+  Download, RefreshCw, Search, ArrowUpDown, ArrowUp, ArrowDown, Database, Wifi, X, Sparkles, Loader2, ChevronLeft, Upload, FileDown, FileArchive, Bot, Play, Pause, Clock, AlertCircle, Calendar, ChevronDown, ChevronRight, FileSpreadsheet, Check, Layers
 } from "lucide-react";
 import { useAccount } from "@/lib/useAccount";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AttributeCombobox } from "@/components/AttributeCombobox";
+import { ImageHoverPreview, HoverImagePreviewState } from "@/components/ImageHoverPreview";
+import DripScheduleModal from "@/components/DripScheduleModal";
+import { useTranslation } from "react-i18next";
 
 // --- Helpers ---
 function parseSpecifics(raw: any) {
@@ -40,21 +44,25 @@ const getRowKey = (p: any, index: number): string => {
 
 const VirtualRow = React.memo(({
   index, top, height, product, ean, rowKey, img, price, mapData, isSelected,
-  isDraggingCurrent, handleRowMouseDown, toggleSelection, setActiveProduct
+  isDraggingCurrent, handleRowMouseDown, toggleSelection, setActiveProduct,
+  onImageHover, onImageLeave, isMirrored
 }: {
   index: number; top: number; height: number; product: any; ean: string; rowKey: string; img: string; price: string; mapData: any;
-  isSelected: boolean; isDraggingCurrent: boolean;
+  isSelected: boolean; isDraggingCurrent: boolean; isMirrored?: boolean;
   handleRowMouseDown: (index: number, rowKey: string, e: React.MouseEvent) => void;
   toggleSelection: (rowKey: string) => void;
   setActiveProduct: (p: any) => void;
+  onImageHover: (img: string, name: string, price: string, e: React.MouseEvent<HTMLElement>) => void;
+  onImageLeave: () => void;
 }) => {
+  const { t } = useTranslation();
   const row = product.row || {};
   return (
     <div
       data-row-index={index}
       className={cn(
-        "absolute top-0 left-0 w-full flex items-center border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-[#1A1D2B] cursor-pointer transition-colors text-sm select-none",
-        isSelected && "bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-900/10 dark:hover:bg-indigo-900/20"
+        "absolute top-0 left-0 w-full flex items-center border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 cursor-pointer transition-colors text-sm select-none",
+        isSelected && "bg-indigo-50/50 hover:bg-indigo-50/70 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/30"
       )}
       style={{
         height: `${height}px`,
@@ -63,27 +71,74 @@ const VirtualRow = React.memo(({
       onMouseDown={(e) => handleRowMouseDown(index, rowKey, e)}
       onClick={(e) => { if (!isDraggingCurrent) setActiveProduct(product); }}
     >
-      <div className="w-12 px-4" data-no-drag onClick={(e) => e.stopPropagation()}>
+      <div className="w-12 px-4 shrink-0" data-no-drag onClick={(e) => e.stopPropagation()}>
         <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(rowKey)} />
       </div>
-      <div className="w-24 px-4">
-        <div className="w-20 h-20 rounded-md border border-slate-200 bg-white flex items-center justify-center p-0.5 overflow-hidden shadow-sm">
-          {img ? <img src={img} className="w-full h-full object-contain" /> : "-"}
+      <div className="w-24 px-3 shrink-0" data-no-drag>
+        <div
+          className="w-16 h-16 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-center p-1 overflow-hidden shadow-xs hover:ring-2 hover:ring-indigo-500/30 transition-all cursor-zoom-in relative"
+          onMouseEnter={(e) => {
+            if (img) onImageHover(img, row.Artikelbeschreibung || product.name || "", price !== "-" ? `${price}` : "", e);
+          }}
+          onMouseLeave={onImageLeave}
+        >
+          {img ? (
+            <img
+              src={img}
+              className={cn("w-full h-full object-contain transition-transform", isMirrored && "-scale-x-100")}
+              alt=""
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
+          )}
+          {isMirrored && img && (
+            <div className="absolute bottom-0.5 right-0.5 px-1 py-0.2 bg-purple-600/90 text-white text-[8px] font-bold rounded">
+              XL
+            </div>
+          )}
         </div>
       </div>
-      <div className="flex-1 px-4 truncate font-medium text-slate-700 dark:text-white">{row.Artikelbeschreibung || product.name || ""}</div>
-      <div className="w-48 px-4 font-mono text-xs text-slate-500 dark:text-white">{ean}</div>
-      <div className="w-24 px-4 font-medium text-slate-700 dark:text-white">{price !== "-" ? `${price} €` : "-"}</div>
-      <div className="w-64 px-4 truncate text-slate-600 dark:text-white">
-        {mapData?.category
-          ? <span className={mapData.status === "Error" ? "text-slate-500 dark:text-white" : ""}>{mapData.category_name || mapData.category}</span>
-          : <span className="text-slate-400 dark:text-white italic">Not mapped</span>}
+      <div className="flex-1 px-4 min-w-0">
+        <p className="font-medium text-slate-900 dark:text-white text-sm line-clamp-2 leading-snug">
+          {row.Artikelbeschreibung || product.name || t("workspace.untitled_product")}
+        </p>
       </div>
-      <div className="w-40 px-4">
-        {mapData?.status === "Ready" ? <Badge className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30">Ready</Badge> :
-          mapData?.status === "Need Attributes" ? <Badge className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30">Needs Attrs</Badge> :
-            mapData?.status === "Error" ? <Badge className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30">Error</Badge> :
-              <Badge variant="outline" className="text-slate-400 dark:border-slate-700 dark:text-slate-500">Unmapped</Badge>}
+      <div className="w-48 px-4 shrink-0">
+        <span className="font-mono text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 inline-block">
+          {ean || t("workspace.no_ean")}
+        </span>
+      </div>
+      <div className="w-24 px-4 shrink-0 font-semibold text-slate-900 dark:text-white tabular-nums text-sm">
+        {price !== "-" ? `${price} €` : "—"}
+      </div>
+      <div className="w-64 px-4 shrink-0 truncate text-xs text-slate-700 dark:text-slate-300">
+        {mapData?.category ? (
+          <span className={mapData.status === "Error" ? "text-slate-500 dark:text-slate-400" : "font-medium"}>
+            {mapData.category_name || mapData.category}
+          </span>
+        ) : (
+          <span className="text-slate-400 italic">{t("workspace.not_mapped")}</span>
+        )}
+      </div>
+      <div className="w-40 px-4 shrink-0">
+        {mapData?.status === "Ready" ? (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/60">
+            {t("workspace.status_ready")}
+          </span>
+        ) : mapData?.status === "Need Attributes" ? (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/60">
+            {t("workspace.status_need")}
+          </span>
+        ) : mapData?.status === "Error" ? (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800/60">
+            {t("workspace.status_error")}
+          </span>
+        ) : (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200/80 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-700/50">
+            {t("workspace.status_unmapped")}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -93,18 +148,61 @@ export default function FactoryWorkspace() {
   const params = useParams();
   const factoryId = params?.factory_id as string;
   const { account } = useAccount();
+  const { t } = useTranslation();
 
   const [products, setProducts] = useState<any[]>([]);
   const [factoryName, setFactoryName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false);
+  const [totalCatalogCount, setTotalCatalogCount] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sort, setSort] = useState({ col: "", dir: "asc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [popupPos, setPopupPos] = useState<{ x: number, y: number } | null>(null);
+  const [isMassEditOpen, setIsMassEditOpen] = useState(false);
+
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    if (isExportMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isExportMenuOpen]);
 
   const [activeProduct, setActiveProduct] = useState<any | null>(null);
+  const [previewImage, setPreviewImage] = useState<HoverImagePreviewState | null>(null);
+
+  const handleImageHover = useCallback((imgUrl: string, name: string, price: string, e: React.MouseEvent<HTMLElement>) => {
+    if (!imgUrl || isDragging.current) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setPreviewImage({
+      url: imgUrl,
+      name,
+      price,
+      isMirrored: account === "XL",
+      rect: {
+        top: r.top,
+        left: r.left,
+        right: r.right,
+        bottom: r.bottom,
+        height: r.height,
+      },
+    });
+  }, [account]);
+
+  const handleImageLeave = useCallback(() => {
+    setPreviewImage(null);
+  }, []);
+
   const [isAutoMapping, setIsAutoMapping] = useState(false);
   const [isSyncingOkb, setIsSyncingOkb] = useState(false);
   const isSyncCancelled = useRef(false);
@@ -115,14 +213,77 @@ export default function FactoryWorkspace() {
     title: string;
     current?: number;
     total?: number;
+    percent?: number;
+    eta?: string;
+    message?: string;
     isIndeterminate?: boolean;
     colorClass?: string;
     onCancel?: () => void;
   } | null>(null);
 
+  // Drip Feed Pipeline state
+  const [isDripModalOpen, setIsDripModalOpen] = useState(false);
+  const [activePlan, setActivePlan] = useState<any | null>(null);
+
+  const fetchActivePlan = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`/pipeline/plans?account_name=${account}&factory_id=${factoryId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const current = data.find((p: any) => p.status === "active" || p.status === "paused") || null;
+        setActivePlan(current);
+      }
+    } catch (err) {
+      console.error("Failed to fetch active plan", err);
+    }
+  }, [account, factoryId]);
+
+  useEffect(() => {
+    fetchActivePlan();
+    const interval = setInterval(fetchActivePlan, 15000);
+    return () => clearInterval(interval);
+  }, [fetchActivePlan]);
+
+  const handlePausePlan = async (planId: number) => {
+    try {
+      const res = await fetchWithAuth(`/pipeline/plan/${planId}/pause`, { method: "POST" });
+      if (res.ok) {
+        toast.success(t("workspace.toast_paused"));
+        fetchActivePlan();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleResumePlan = async (planId: number) => {
+    try {
+      const res = await fetchWithAuth(`/pipeline/plan/${planId}/resume`, { method: "POST" });
+      if (res.ok) {
+        toast.success(t("workspace.toast_resumed"));
+        fetchActivePlan();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCancelPlan = async (planId: number) => {
+    if (!confirm(t("workspace.confirm_cancel_plan"))) return;
+    try {
+      const res = await fetchWithAuth(`/pipeline/plan/${planId}/cancel`, { method: "POST" });
+      if (res.ok) {
+        toast.success(t("workspace.toast_plan_cancelled"));
+        fetchActivePlan();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // Drag & Drop overlay state
   const [isDragOver, setIsDragOver] = useState(false);
-  const [dragFileType, setDragFileType] = useState<"csv" | "zip" | "unknown" | null>(null);
+  const [dragFileType, setDragFileType] = useState<"csv" | "zip" | "db" | "unknown" | null>(null);
   const dragCounterRef = useRef(0);
 
   // Mappings state: EAN -> { category, status, category_name, attributes }
@@ -148,7 +309,7 @@ export default function FactoryWorkspace() {
   const fetchMappings = useCallback(async () => {
     if (!factoryId) return;
     try {
-      const mapRes = await fetchWithAuth(`/mapping/factory/${factoryId}`);
+      const mapRes = await fetchWithAuth(`/mapping/factory/${factoryId}?account=${account}`);
       if (mapRes.ok) {
         const mapData = await mapRes.json();
         const normalized: Record<string, { category: string, status: string, category_name?: string }> = {};
@@ -161,7 +322,7 @@ export default function FactoryWorkspace() {
     } catch (e) {
       console.error("Failed to fetch mappings", e);
     }
-  }, [factoryId]);
+  }, [factoryId, account]);
 
   const handleOkbSync = async () => {
     if (!factoryId || selectedIds.size === 0 || !account) return;
@@ -183,7 +344,7 @@ export default function FactoryWorkspace() {
     }
 
     if (hasFilledAttrs) {
-      if (!confirm("Внимание! У некоторых выбранных товаров уже заполнены атрибуты. Синхронизация с OKB удалит их и заменит на данные из кэша. Продолжить?")) {
+      if (!confirm(t("workspace.confirm_okb_overwrite"))) {
         return;
       }
     }
@@ -191,7 +352,7 @@ export default function FactoryWorkspace() {
     setIsSyncingOkb(true);
     isSyncCancelled.current = false;
     setTaskProgress({
-      title: "Загрузка данных с OKB...",
+      title: t("workspace.task_loading_okb"),
       current: 0,
       total: eansToSync.length,
       colorClass: "from-emerald-500 to-teal-500",
@@ -206,6 +367,11 @@ export default function FactoryWorkspace() {
     for (let i = 0; i < eansToSync.length; i += chunkSize) {
       if (isSyncCancelled.current) break;
       const chunk = eansToSync.slice(i, i + chunkSize);
+      const chunkProducts = selectedProducts.filter(p => chunk.includes(p.ean || p.row?.EAN));
+      const productsData = chunkProducts.map(p => ({
+        ean: p.ean || p.row?.EAN,
+        row: p.row || {}
+      }));
 
       try {
         const res = await fetchWithAuth("/mapping/sync-okb-bulk", {
@@ -213,14 +379,15 @@ export default function FactoryWorkspace() {
           body: JSON.stringify({
             product_eans: chunk,
             factory_id: factoryId,
-            account: account
+            account: account,
+            products_data: productsData
           })
         });
         if (res.ok) {
           const data = await res.json();
           for (const r of (data.results || [])) {
             if (r.status === "success") ok++;
-            else if (r.status === "not_found") notFound++;
+            else if (r.status === "not_found" || r.status === "unresolved") notFound++;
             else error++;
           }
         }
@@ -235,7 +402,7 @@ export default function FactoryWorkspace() {
 
     if (!isSyncCancelled.current) {
       setTimeout(async () => {
-        alert(`OKB Sync done. Found: ${ok}, Not Found: ${notFound}, Error: ${error}`);
+        alert(t("workspace.alert_okb_done", { ok, notFound, error }));
         await fetchMappings();
       }, 100);
     } else {
@@ -247,10 +414,12 @@ export default function FactoryWorkspace() {
     if (!factoryId || !account) return;
     const load = async () => {
       // 1. Instant cache render (0-15ms)
-      const cached = await getCachedFactory(factoryId);
+      const cached = await getCachedFactory(factoryId, account);
       if (cached?.products.length) {
         setProducts(cached.products);
+        setTotalCatalogCount(cached.total || cached.products.length);
         setLoading(false);
+        setIsBackgroundLoading(false);
       } else {
         setLoading(true);
       }
@@ -259,17 +428,45 @@ export default function FactoryWorkspace() {
       let all = cached?.products || [];
       if (!all.length || all.length === 500) {
         try {
-          const res = await fetchWithAuth(`/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=10000&include_row=1`);
-          if (res.ok) {
+          setIsBackgroundLoading(true);
+          all = [];
+          let offset = 0;
+          let limit = 50; // Super fast initial chunk (50 items) for immediate perceived load!
+
+          while (true) {
+            const res = await fetchWithAuth(
+              `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${limit}&offset=${offset}&include_row=1`
+            );
+            if (!res.ok) break;
             const data = await res.json();
-            all = data?.items || data || [];
-            await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() });
+            const chunk = data?.items || data || [];
+            if (!Array.isArray(chunk) || chunk.length === 0) break;
+            all = all.concat(chunk);
+
+            if (data?.total) {
+              setTotalCatalogCount(data.total);
+            }
+
+            // Immediately display products on screen as soon as first 50 items arrive!
+            setProducts([...all]);
+            setLoading(false);
+
+            if (chunk.length < limit) break;
+            offset += limit;
+            // Subsequent chunks: 500 items for high network throughput
+            limit = 500;
+          }
+
+          if (all.length > 0) {
+            await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
             setProducts(all);
+            setTotalCatalogCount(all.length);
           }
         } catch (e) {
           console.error(e);
         } finally {
           setLoading(false);
+          setIsBackgroundLoading(false);
         }
       }
 
@@ -306,107 +503,82 @@ export default function FactoryWorkspace() {
   }, [factoryId, account, fetchMappings]);
 
   const handleSync = async () => {
-    setLoading(true);
+    setIsBackgroundLoading(true);
     try {
-      const res = await fetchWithAuth(`/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=10000&include_row=1`);
-      if (res.ok) {
+      let all: any[] = [];
+      let offset = 0;
+      let limit = 50;
+
+      while (true) {
+        const res = await fetchWithAuth(
+          `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${limit}&offset=${offset}&include_row=1&refresh=true`
+        );
+        if (!res.ok) break;
         const data = await res.json();
-        const all = data?.items || data || [];
-        await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() });
+        const chunk = data?.items || data || [];
+        if (!Array.isArray(chunk) || chunk.length === 0) break;
+        all = all.concat(chunk);
+
+        if (data?.total) {
+          setTotalCatalogCount(data.total);
+        }
+
+        setProducts([...all]);
+        setLoading(false);
+
+        if (chunk.length < limit) break;
+        offset += limit;
+        limit = 500;
+      }
+
+      if (all.length > 0) {
+        await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
         setProducts(all);
+        setTotalCatalogCount(all.length);
         await fetchMappings();
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsBackgroundLoading(false);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const handleGlobalExport = () => {
-    if (products.length === 0) return;
-
-    // Format according to Otto Market Products V5 API (Create/Update Product Variations)
-    const payload = products.map(p => {
-      const ean = p.ean || (p.row || {}).EAN || "";
-      const name = p.name || (p.row || {})["Artikelbeschreibung"] || "";
-
-      const rawPrice = p.price || (p.row || {}).Startpreis || (p.row || {}).SofortkaufenPreis || "0";
-      const priceStr = String(rawPrice).replace(',', '.').replace(/[^0-9.]/g, '');
-      const price = parseFloat(priceStr) || 0;
-
-      const mapping = mappings[ean] || {};
-      const catName = mapping.category_name || mapping.category || "";
-      const attributes = mapping.attributes || {};
-
-      // Convert flat attributes map to arrays of strings (typical for Otto API)
-      const formattedAttributes: Record<string, string[]> = {};
-      for (const [key, value] of Object.entries(attributes)) {
-        if (value !== null && value !== "") {
-          formattedAttributes[key] = [String(value)];
-        }
-      }
-
-      const row = p.row || {};
-      const img1 = row.GalleryURL || row.PictureURL || "";
-      const img2 = row.PictureURLs || "";
-      const allImgs = [img1, ...img2.split('|')].map(u => u.trim()).filter(Boolean);
-      const imageUrls = Array.from(new Set(allImgs));
-
-      return {
-        sku: ean,
-        ean: ean,
-        productReference: ean, // groups variations into a single product
-        category: catName,
-        pricing: {
-          standardPrice: {
-            amount: price,
-            currency: "EUR"
-          }
-        },
-        productDescription: {
-          title: name,
-          description: (p.row || {})["Beschreibung"] || name
-        },
-        media: {
-          images: imageUrls.filter(u => u).map((url: string) => ({
-            url: url.trim(),
-            type: "IMAGE"
-          }))
-        },
-        attributes: formattedAttributes,
-        delivery: {
-          type: "PARCEL",
-          deliveryTime: 3
-        }
-      };
-    });
-
-    const jsonContent = JSON.stringify(payload, null, 2);
-
-    const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Factory_${factoryName || factoryId}_Otto_V5.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const handleGlobalExport = async () => {
+    if (!factoryId) return;
+    try {
+      const res = await fetchWithAuth(`/export/otto_json/${factoryId}?account=${account}`);
+      if (!res.ok) { alert(t("workspace.alert_file_gen_error")); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const cleanName = (factoryName || factoryId).replace(/[\\/:*?"<>|]/g, "_");
+      a.download = `${cleanName}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert(t("workspace.alert_file_download_error"));
+    }
   };
 
   const handlePublishToOtto = async () => {
     const readyProducts = processed.filter(p => mappings[p.ean || p.row?.EAN]?.status === "Ready");
     if (readyProducts.length === 0) {
-      alert("No 'Ready' products available to publish.");
+      alert(t("workspace.alert_no_ready_to_pub"));
       return;
     }
-    if (!confirm(`Are you sure you want to publish ${readyProducts.length} products to Otto?`)) {
+    if (!confirm(t("workspace.confirm_pub_otto", { count: readyProducts.length }))) {
       return;
     }
 
     setIsPublishing(true);
     setTaskProgress({
-      title: "Publishing to Otto...",
+      title: t("workspace.task_pub_otto"),
       current: 0,
       total: readyProducts.length,
       colorClass: "from-emerald-500 to-teal-500",
@@ -510,7 +682,7 @@ export default function FactoryWorkspace() {
     }
 
     setTaskProgress({
-      title: "Нейросеть обрабатывает товары...",
+      title: t("workspace.task_ai_processing"),
       current: 0,
       total: payloadProducts.length,
       colorClass: "from-indigo-500 to-purple-500",
@@ -559,19 +731,19 @@ export default function FactoryWorkspace() {
         } else {
           const errorCode = res.headers.get("x-error-code");
           if (errorCode === "OPENAI_API_KEY_MISSING") {
-            toast.error("Отсутствует ключ ChatGPT", {
+            toast.error(t("product_drawer.toast_openai_missing_title"), {
               id: "openai-error-toast",
-              description: "Перейдите в настройки и укажите ваш OpenAI API ключ.",
+              description: t("product_drawer.toast_openai_missing_desc"),
               duration: 7000,
             });
           } else if (errorCode === "OPENAI_API_ERROR") {
-            toast.error("Ошибка API ChatGPT", {
+            toast.error(t("product_drawer.toast_openai_error_title"), {
               id: "openai-error-toast",
-              description: "Ошибка при обращении к OpenAI — проверьте баланс или лимиты.",
+              description: t("product_drawer.toast_openai_error_desc"),
               duration: 7000,
             });
           } else {
-            toast.error("Ошибка нейромаппинга", { id: "openai-error-toast" });
+            toast.error(t("workspace.toast_ai_mapping_error"), { id: "openai-error-toast" });
           }
           isAutoMappingCancelled.current = true; // stop the loop
           break;
@@ -596,7 +768,7 @@ export default function FactoryWorkspace() {
   const [isUploading, setIsUploading] = useState(false);
 
   const handleExportCategories = async () => {
-    setTaskProgress({ title: "Синхронизация данных товаров...", isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+    setTaskProgress({ title: t("workspace.task_sync_metadata"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
     try {
       // First sync product names and prices from Aftercool so they appear in the CSV
       await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST" });
@@ -604,7 +776,7 @@ export default function FactoryWorkspace() {
       console.warn("Metadata sync failed, exporting with available data", e);
     }
 
-    setTaskProgress({ title: "Экспорт категорий...", isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+    setTaskProgress({ title: t("workspace.task_export_cat"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
     try {
       const selectedProducts = processed.filter((p, i) => selectedIds.has(getRowKey(p, i)));
       const eans = Array.from(new Set(selectedProducts.map(p => p.ean || p.row?.EAN).filter(Boolean)));
@@ -615,7 +787,7 @@ export default function FactoryWorkspace() {
       }
 
       const res = await fetchWithAuth(`/csv/export/categories/${factoryId}`, options);
-      if (!res.ok) { setTimeout(() => alert("Export failed: " + res.statusText), 100); return; }
+      if (!res.ok) { setTimeout(() => alert(t("workspace.export_failed", { error: res.statusText })), 100); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -623,39 +795,295 @@ export default function FactoryWorkspace() {
       a.download = `Categories_${factoryName || factoryId}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { console.error(e); setTimeout(() => alert("Export failed."), 100); }
+    } catch (e) { console.error(e); setTimeout(() => alert(t("workspace.export_failed", { error: "" })), 100); }
     finally { setTaskProgress(null); }
   };
 
+  const formatEta = (seconds?: number): string => {
+    if (seconds === undefined || seconds === null || seconds <= 0) return "";
+    if (seconds < 60) return `~${seconds} сек`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s > 0 ? `~${m} мин ${s} сек` : `~${m} мин`;
+  };
+
   const handleExportAttributes = async () => {
-    setTaskProgress({ title: "Экспорт атрибутов...", isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+    const isSelected = selectedIds.size > 0;
+    const targetProducts = isSelected
+      ? processed.filter((p, i) => selectedIds.has(getRowKey(p, i)))
+      : processed;
+
+    const eans = Array.from(new Set(targetProducts.map(p => p.ean || p.row?.EAN).filter(Boolean)));
+    if (eans.length === 0) {
+      alert("Нет активных товаров для экспорта атрибутов.");
+      return;
+    }
+
+    let isCancelled = false;
+
+    setTaskProgress({
+      title: t("workspace.task_export_attr"),
+      current: 0,
+      total: eans.length,
+      percent: 0,
+      eta: "рассчитывается...",
+      isIndeterminate: false,
+      colorClass: "from-purple-500 to-indigo-500",
+      onCancel: () => {
+        isCancelled = true;
+        setTaskProgress(null);
+      }
+    });
+
     try {
-      const selectedProducts = processed.filter((p, i) => selectedIds.has(getRowKey(p, i)));
-      const eans = Array.from(new Set(selectedProducts.map(p => p.ean || p.row?.EAN).filter(Boolean)));
-      const options: any = { method: "GET" };
-      if (eans.length > 0) {
-        options.method = "POST";
-        options.body = JSON.stringify({ product_eans: eans });
+      const startRes = await fetchWithAuth(
+        `/csv/export/attributes/start/${factoryId}?account=${account}&factory_name=${encodeURIComponent(factoryName || "")}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_eans: eans })
+        }
+      );
+
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({}));
+        alert(err.detail || t("workspace.export_failed", { error: "" }));
+        setTaskProgress(null);
+        return;
       }
 
-      const res = await fetchWithAuth(`/csv/export/attributes/${factoryId}`, options);
-      if (!res.ok) { setTimeout(() => alert("Export failed: " + res.statusText), 100); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Attributes_${factoryName || factoryId}.zip`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) { console.error(e); setTimeout(() => alert("Export failed."), 100); }
-    finally { setTaskProgress(null); }
+      const { task_id } = await startRes.json();
+      if (!task_id) {
+        throw new Error("Не удалось получить идентификатор задачи");
+      }
+
+      while (!isCancelled) {
+        await new Promise((r) => setTimeout(r, 1000));
+        if (isCancelled) break;
+
+        const sRes = await fetchWithAuth(`/csv/export/attributes/status/${task_id}`);
+        if (!sRes.ok) continue;
+
+        const sData = await sRes.json();
+
+        if (sData.status === "PROGRESS" && sData.progress) {
+          const p = sData.progress;
+          const etaText = formatEta(p.eta_seconds);
+          setTaskProgress({
+            title: p.message || t("workspace.task_export_attr"),
+            current: p.current,
+            total: p.total,
+            percent: p.percent,
+            eta: etaText,
+            isIndeterminate: false,
+            colorClass: "from-purple-500 to-indigo-500",
+            onCancel: () => {
+              isCancelled = true;
+              setTaskProgress(null);
+            }
+          });
+        } else if (sData.status === "SUCCESS") {
+          setTaskProgress({
+            title: "Загрузка архива...",
+            current: eans.length,
+            total: eans.length,
+            percent: 100,
+            eta: "готов",
+            isIndeterminate: false,
+            colorClass: "from-purple-500 to-indigo-500"
+          });
+
+          const downRes = await fetchWithAuth(`/csv/export/attributes/download/${task_id}`);
+          if (downRes.ok) {
+            const blob = await downRes.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            const finalFilename = sData.result?.filename || `Attributes_${(factoryName || factoryId).replace(/[\\/:*?"<>|]/g, "_")}.zip`;
+            a.download = finalFilename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          } else {
+            alert(t("workspace.alert_file_download_error"));
+          }
+
+          setTimeout(() => setTaskProgress(null), 1200);
+          break;
+        } else if (sData.status === "FAILURE") {
+          alert(`Ошибка экспорта атрибутов: ${sData.error || "Неизвестная ошибка"}`);
+          setTaskProgress(null);
+          break;
+        }
+      }
+    } catch (e) {
+      console.error("Export attributes error:", e);
+      alert(t("workspace.export_failed", { error: "" }));
+      setTaskProgress(null);
+    }
+  };
+
+  const handleExportDB = async () => {
+    // 1. Determine target items: if selected, use selected; otherwise use all active catalog products
+    const isSelected = selectedIds.size > 0;
+    const targetProducts = isSelected
+      ? processed.filter((p, i) => selectedIds.has(getRowKey(p, i)))
+      : processed;
+
+    const eans = Array.from(new Set(targetProducts.map(p => p.ean || p.row?.EAN).filter(Boolean)));
+    if (eans.length === 0) {
+      alert("Нет активных товаров для экспорта.");
+      return;
+    }
+
+    let isCancelled = false;
+
+    setTaskProgress({
+      title: t("workspace.task_export_db"),
+      current: 0,
+      total: eans.length,
+      percent: 0,
+      eta: "рассчитывается...",
+      isIndeterminate: false,
+      colorClass: "from-emerald-500 to-teal-500",
+      onCancel: () => {
+        isCancelled = true;
+        setTaskProgress(null);
+      }
+    });
+
+    try {
+      // 2. Start Celery background task
+      const startRes = await fetchWithAuth(
+        `/mapping/export-db/start/${factoryId}?account=${account}&factory_name=${encodeURIComponent(factoryName || "")}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_eans: eans })
+        }
+      );
+
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({}));
+        alert(err.detail || t("workspace.alert_file_download_error"));
+        setTaskProgress(null);
+        return;
+      }
+
+      const { task_id } = await startRes.json();
+      if (!task_id) {
+        throw new Error("Не удалось получить идентификатор задачи экспорта");
+      }
+
+      // 3. Poll Celery task status with live ETA and progress
+      while (!isCancelled) {
+        await new Promise((r) => setTimeout(r, 1000));
+        if (isCancelled) break;
+
+        const sRes = await fetchWithAuth(`/mapping/export-db/status/${task_id}`);
+        if (!sRes.ok) continue;
+
+        const sData = await sRes.json();
+
+        if (sData.status === "PROGRESS" && sData.progress) {
+          const p = sData.progress;
+          const etaText = formatEta(p.eta_seconds);
+          setTaskProgress({
+            title: p.message || t("workspace.task_export_db"),
+            current: p.current,
+            total: p.total,
+            percent: p.percent,
+            eta: etaText,
+            isIndeterminate: false,
+            colorClass: "from-emerald-500 to-teal-500",
+            onCancel: () => {
+              isCancelled = true;
+              setTaskProgress(null);
+            }
+          });
+        } else if (sData.status === "SUCCESS") {
+          // Task completed: trigger download
+          setTaskProgress({
+            title: "Загрузка файла...",
+            current: eans.length,
+            total: eans.length,
+            percent: 100,
+            eta: "готов",
+            isIndeterminate: false,
+            colorClass: "from-emerald-500 to-teal-500"
+          });
+
+          const downRes = await fetchWithAuth(`/mapping/export-db/download/${task_id}`);
+          if (downRes.ok) {
+            const blob = await downRes.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            const finalFilename = sData.result?.filename || `NEW_BATCH_${account}_${(factoryName || factoryId).replace(/[\\/:*?"<>|]/g, "_")}.db`;
+            a.download = finalFilename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          } else {
+            alert(t("workspace.alert_file_download_error"));
+          }
+
+          setTimeout(() => setTaskProgress(null), 1200);
+          break;
+        } else if (sData.status === "FAILURE") {
+          alert(`Ошибка экспорта: ${sData.error || "Неизвестная ошибка"}`);
+          setTaskProgress(null);
+          break;
+        }
+      }
+    } catch (e) {
+      console.error("Export DB error:", e);
+      alert(t("workspace.alert_file_download_error"));
+      setTaskProgress(null);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const isDb = file.name.endsWith(".db") || file.name.endsWith(".sqlite");
+    if (isDb) {
+      setIsUploading(true);
+      setTaskProgress({ title: t("workspace.task_import_db"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("factory_id", factoryId);
+      formData.append("account", account);
+      try {
+        const res = await fetchWithAuth("/mapping/db/import", {
+          method: "POST",
+          body: formData
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setTaskProgress(null);
+          alert(t("workspace.alert_db_import_success", { imported: data.imported_count || 0, matched: data.matched_categories || 0 }));
+          await fetchMappings();
+        } else {
+          setTaskProgress(null);
+          alert(t("workspace.alert_db_import_error"));
+        }
+      } catch (err) {
+        console.error(err);
+        setTaskProgress(null);
+        alert(t("workspace.alert_db_network_error"));
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+      return;
+    }
+
     setIsUploading(true);
-    setTaskProgress({ title: "Загрузка и обработка CSV...", isIndeterminate: true, colorClass: "from-amber-500 to-orange-500" });
+    setTaskProgress({ title: t("workspace.task_upload_csv"), isIndeterminate: true, colorClass: "from-amber-500 to-orange-500" });
     const formData = new FormData();
     formData.append("file", file);
     try {
@@ -666,17 +1094,17 @@ export default function FactoryWorkspace() {
       if (res.ok) {
         const data = await res.json();
         const msgParts = [];
-        if (data.updated_categories) msgParts.push(`Категории: ${data.updated_categories}`);
-        if (data.updated_attributes) msgParts.push(`Атрибуты: ${data.updated_attributes}`);
-        if (data.skipped_foreign_eans) msgParts.push(`Пропущено (чужие EAN): ${data.skipped_foreign_eans}`);
+        if (data.updated_categories) msgParts.push(t("workspace.import_categories_count", { count: data.updated_categories }));
+        if (data.updated_attributes) msgParts.push(t("workspace.import_attributes_count", { count: data.updated_attributes }));
+        if (data.skipped_foreign_eans) msgParts.push(t("workspace.import_skipped_count", { count: data.skipped_foreign_eans }));
         
         let finalAlert = "";
         if ((data.updated_categories || 0) > 0 || (data.updated_attributes || 0) > 0) {
-          finalAlert = "✅ Импорт успешно завершен!\n" + msgParts.join(" | ");
+          finalAlert = t("workspace.import_success") + "\n" + msgParts.join(" | ");
         } else if ((data.skipped_foreign_eans || 0) > 0) {
-          finalAlert = `⚠️ Данные не обновлены.\nВсе EAN оказались чужими (пропущено: ${data.skipped_foreign_eans}).`;
+          finalAlert = t("workspace.import_skipped_all", { count: data.skipped_foreign_eans });
         } else {
-          finalAlert = "ℹ️ Данные не обновлены (совпадают с текущими или файл пуст).";
+          finalAlert = t("workspace.import_no_changes");
         }
 
         setTaskProgress(null);
@@ -685,12 +1113,12 @@ export default function FactoryWorkspace() {
       } else {
         const err = await res.json().catch(() => ({}));
         setTaskProgress(null);
-        setTimeout(() => alert("Ошибка импорта: " + (err.detail || res.statusText)), 100);
+        setTimeout(() => alert(t("workspace.import_error", { error: err.detail || res.statusText })), 100);
       }
     } catch (err) {
       console.error(err);
       setTaskProgress(null);
-      setTimeout(() => alert("Ошибка при отправке файла."), 100);
+      setTimeout(() => alert(t("workspace.import_network_error")), 100);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -707,10 +1135,10 @@ export default function FactoryWorkspace() {
       const items = Array.from(e.dataTransfer.items);
       const fileItem = items.find(i => i.kind === "file");
       if (fileItem) {
-        // We can't read filename on dragenter in all browsers, use type hint
-        const type = fileItem.type;
+        const type = fileItem.type || "";
         if (type === "application/zip" || type === "application/x-zip-compressed") setDragFileType("zip");
         else if (type === "text/csv" || type === "application/csv") setDragFileType("csv");
+        else if (type.includes("sqlite") || type.includes("db") || type.includes("database")) setDragFileType("db");
         else setDragFileType("unknown");
       }
       setIsDragOver(true);
@@ -745,9 +1173,41 @@ export default function FactoryWorkspace() {
 
     const isZip = file.name.endsWith(".zip");
     const isCsv = file.name.endsWith(".csv");
+    const isDb = file.name.endsWith(".db") || file.name.endsWith(".sqlite");
 
-    if (!isZip && !isCsv) {
-      alert("Неподдерживаемый формат файла. Перетяните ZIP (атрибуты) или CSV (категории).");
+    if (!isZip && !isCsv && !isDb) {
+      alert(t("workspace.alert_unsupported_format"));
+      return;
+    }
+
+    if (isDb) {
+      setIsUploading(true);
+      setTaskProgress({ title: t("workspace.task_import_db"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("factory_id", factoryId);
+      formData.append("account", account);
+      try {
+        const res = await fetchWithAuth("/mapping/db/import", {
+          method: "POST",
+          body: formData
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setTaskProgress(null);
+          alert(t("workspace.alert_db_import_success", { imported: data.imported_count || 0, matched: data.matched_categories || 0 }));
+          await fetchMappings();
+        } else {
+          setTaskProgress(null);
+          alert(t("workspace.alert_db_import_error"));
+        }
+      } catch (err) {
+        console.error(err);
+        setTaskProgress(null);
+        alert(t("workspace.alert_db_network_error"));
+      } finally {
+        setIsUploading(false);
+      }
       return;
     }
 
@@ -755,16 +1215,18 @@ export default function FactoryWorkspace() {
     const factoryIdInFile = file.name.match(/(?:Categories|Attributes)_([\d]+)/i)?.[1];
     if (factoryIdInFile && factoryIdInFile !== factoryId) {
       const confirmed = window.confirm(
-        `⚠️ Внимание! Файл "${file.name}" принадлежит другой фабрике (ID: ${factoryIdInFile}), ` +
-        `а вы сейчас находитесь в фабрике ${factoryName || factoryId} (ID: ${factoryId}).\n\n` +
-        `Импорт из чужой фабрики применит данные только к товарам, которые совпадают по EAN.\n` +
-        `Чужие EAN будут пропущены.\n\nПродолжить?`
+        t("workspace.confirm_foreign_factory", {
+          file: file.name,
+          foreignId: factoryIdInFile,
+          factory: factoryName || factoryId,
+          currentId: factoryId
+        })
       );
       if (!confirmed) return;
     }
 
     setIsUploading(true);
-    const label = isZip ? "Импорт атрибутов из ZIP..." : "Импорт категорий из CSV...";
+    const label = isZip ? t("workspace.task_import_attr_zip") : t("workspace.task_import_cat_csv");
     setTaskProgress({ title: label, isIndeterminate: true, colorClass: isZip ? "from-purple-500 to-pink-500" : "from-amber-500 to-orange-500" });
 
     const formData = new FormData();
@@ -775,17 +1237,17 @@ export default function FactoryWorkspace() {
       if (res.ok) {
         const data = await res.json();
         const msgParts = [];
-        if (data.updated_categories) msgParts.push(`Категории: ${data.updated_categories}`);
-        if (data.updated_attributes) msgParts.push(`Атрибуты: ${data.updated_attributes}`);
-        if (data.skipped_foreign_eans) msgParts.push(`Пропущено (чужие EAN): ${data.skipped_foreign_eans}`);
+        if (data.updated_categories) msgParts.push(t("workspace.import_categories_count", { count: data.updated_categories }));
+        if (data.updated_attributes) msgParts.push(t("workspace.import_attributes_count", { count: data.updated_attributes }));
+        if (data.skipped_foreign_eans) msgParts.push(t("workspace.import_skipped_count", { count: data.skipped_foreign_eans }));
         
         let finalAlert = "";
         if ((data.updated_categories || 0) > 0 || (data.updated_attributes || 0) > 0) {
-          finalAlert = "✅ Импорт успешно завершен!\n" + msgParts.join(" | ");
+          finalAlert = t("workspace.import_success") + "\n" + msgParts.join(" | ");
         } else if ((data.skipped_foreign_eans || 0) > 0) {
-          finalAlert = `⚠️ Данные не обновлены.\nВсе EAN оказались чужими (пропущено: ${data.skipped_foreign_eans}).`;
+          finalAlert = t("workspace.import_skipped_all", { count: data.skipped_foreign_eans });
         } else {
-          finalAlert = "ℹ️ Данные не обновлены (совпадают с текущими или файл пуст).";
+          finalAlert = t("workspace.import_no_changes");
         }
 
         setTaskProgress(null);
@@ -794,12 +1256,12 @@ export default function FactoryWorkspace() {
       } else {
         const err = await res.json().catch(() => ({}));
         setTaskProgress(null);
-        setTimeout(() => alert("❌ Ошибка импорта: " + (err.detail || res.statusText)), 100);
+        setTimeout(() => alert(t("workspace.import_error", { error: err.detail || res.statusText })), 100);
       }
     } catch (err) {
       console.error(err);
       setTaskProgress(null);
-      setTimeout(() => alert("❌ Ошибка при отправке файла."), 100);
+      setTimeout(() => alert(t("workspace.import_network_error")), 100);
     } finally {
       setIsUploading(false);
     }
@@ -989,7 +1451,14 @@ export default function FactoryWorkspace() {
     return counts;
   }, [products, mappings]);
 
-  if (loading) return <div className="p-10 text-slate-400 flex items-center gap-3"><Loader2 className="w-5 h-5 animate-spin" /> Loading products...</div>;
+  if (loading && products.length === 0) {
+    return (
+      <div className="p-10 text-slate-500 dark:text-slate-400 flex items-center gap-3">
+        <Loader2 className="w-5 h-5 animate-spin text-indigo-600 dark:text-indigo-400" />
+        <span className="text-sm font-medium">{t("workspace.connecting_catalog")}</span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1008,127 +1477,407 @@ export default function FactoryWorkspace() {
               <FileArchive className="w-14 h-14 text-purple-500" />
             ) : dragFileType === "csv" ? (
               <FileDown className="w-14 h-14 text-amber-500" />
+            ) : dragFileType === "db" ? (
+              <Database className="w-14 h-14 text-blue-500" />
             ) : (
               <Upload className="w-14 h-14 text-indigo-400" />
             )}
             <p className="text-xl font-bold text-slate-800 dark:text-white">
-              {dragFileType === "zip" ? "Отпустите для импорта атрибутов (ZIP)" :
-               dragFileType === "csv" ? "Отпустите для импорта категорий (CSV)" :
-               "Отпустите файл для импорта"}
+              {dragFileType === "zip" ? t("workspace.drag_drop_zip") :
+               dragFileType === "csv" ? t("workspace.drag_drop_csv") :
+               dragFileType === "db" ? t("workspace.drag_drop_db") :
+               t("workspace.drag_drop_any")}
             </p>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Поддерживается: <span className="font-semibold text-amber-600">CSV</span> (категории) и{" "}
-              <span className="font-semibold text-purple-600">ZIP</span> (атрибуты)
+              {t("workspace.drag_drop_supported")}
             </p>
           </div>
         </div>
       )}
-      {/* ── HEADER ── */}
-      <div className="flex items-center justify-between gap-4">
-        <Link href="/dashboard/factories">
-          <Button variant="outline" size="sm" className="dark:bg-transparent dark:border-slate-800 dark:hover:bg-slate-900">
-            <ChevronLeft className="w-4 h-4 mr-1" /> Назад
-          </Button>
-        </Link>
-
-        <div className="flex flex-col items-center">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white leading-tight">{factoryName || factoryId}</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{products.length.toLocaleString()} товаров загружено</p>
+      {/* ── BREADCRUMB & HEADER ── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+          <Link href="/dashboard/factories" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+            {t("workspace.factories_crumb")}
+          </Link>
+          <span>/</span>
+          <span className="text-slate-700 dark:text-slate-300 font-medium truncate max-w-xs sm:max-w-md">
+            {factoryName || factoryId}
+          </span>
         </div>
 
-        <Button onClick={handleSync} disabled={loading} variant="outline" size="sm" className="dark:bg-transparent dark:border-slate-800 dark:hover:bg-slate-900">
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Обновить
-        </Button>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard/factories">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 w-9 p-0 rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card hover:bg-slate-50 shrink-0"
+              >
+                <ChevronLeft className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+              </Button>
+            </Link>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
+                  {factoryName || factoryId}
+                </h1>
+                {isBackgroundLoading && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800/60 animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin text-indigo-600 dark:text-indigo-400" />
+                    <span>{t("workspace.loading_badge", { current: products.length, total: totalCatalogCount || products.length })}</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {t("workspace.products_in_workspace", {
+                  current: products.length.toLocaleString(),
+                  total: totalCatalogCount && totalCatalogCount > products.length ? t("workspace.of_total", { total: totalCatalogCount.toLocaleString() }) : "",
+                  account
+                })}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleSync}
+              disabled={loading}
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-9 rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium hover:bg-slate-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>{t("common.refresh")}</span>
+            </Button>
+          </div>
+        </div>
       </div>
 
-      {/* ── DATA QUALITY STRIP ── */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: "Ready", value: dataQualityStats.ready, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-900/20", border: "border-emerald-200 dark:border-emerald-800/50", filter: "ready" },
-          { label: "Need Attrs", value: dataQualityStats.needAttrs, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-50 dark:bg-amber-900/20", border: "border-amber-200 dark:border-amber-800/50", filter: "need" },
-          { label: "Error", value: dataQualityStats.error, color: "text-red-600 dark:text-red-400", bg: "bg-red-50 dark:bg-red-900/20", border: "border-red-200 dark:border-red-800/50", filter: "error" },
-          { label: "Unmapped", value: dataQualityStats.unmapped, color: "text-slate-500 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-800/40", border: "border-slate-200 dark:border-slate-700/50", filter: "unmapped" },
-        ].map((s) => (
-          <button
-            key={s.label}
-            onClick={() => setStatusFilter(statusFilter === s.filter ? "" : s.filter)}
-            className={`${s.bg} ${s.border} border rounded-xl p-3 text-left transition-all hover:shadow-sm hover:scale-[1.01] ${statusFilter === s.filter ? "ring-2 ring-offset-1 ring-indigo-500" : ""}`}
+      {/* ── COMPACT SEGMENTED STATUS STRIP ── */}
+      <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-5">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "" ? "bg-slate-50/80 dark:bg-slate-800/40" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.all_items")}</span>
+          <span className="text-lg font-bold text-slate-900 dark:text-white tracking-tight mt-0.5 block">
+            {products.length.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === "ready" ? "" : "ready")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "ready" ? "bg-emerald-50/80 dark:bg-emerald-950/30" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.ready")}</span>
+          <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.ready.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === "need" ? "" : "need")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "need" ? "bg-amber-50/80 dark:bg-amber-950/30" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.need_attrs")}</span>
+          <span className="text-lg font-bold text-amber-600 dark:text-amber-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.needAttrs.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === "error" ? "" : "error")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "error" ? "bg-rose-50/80 dark:bg-rose-950/30" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.errors")}</span>
+          <span className="text-lg font-bold text-rose-600 dark:text-rose-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.error.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === "unmapped" ? "" : "unmapped")}
+          className={cn(
+            "p-3 text-left transition-colors col-span-2 sm:col-span-1",
+            statusFilter === "unmapped" ? "bg-slate-100/80 dark:bg-slate-850" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.unmapped")}</span>
+          <span className="text-lg font-bold text-slate-500 dark:text-slate-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.unmapped.toLocaleString()}
+          </span>
+        </button>
+      </div>
+
+      {/* ── ACTIVE PUBLISH PLAN BANNER (DRIP FEED) ── */}
+      {activePlan && (
+        <div className="bg-white dark:bg-card border border-indigo-200 dark:border-indigo-900/60 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className={`p-2 rounded-lg shrink-0 ${activePlan.status === "paused" ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600" : "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 animate-pulse"}`}>
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-900 dark:text-white text-sm">
+                  {t("workspace.active_drip_feed", { day: activePlan.current_day, total: activePlan.total_days })}
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider ${
+                  activePlan.status === "paused"
+                    ? "bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-400"
+                    : "bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400"
+                }`}>
+                  {activePlan.status === "paused" ? t("workspace.drip_paused") : t("workspace.drip_running")}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                {t("workspace.drip_daily_at", { time: activePlan.daily_time })}{" "}
+                <strong className="text-emerald-600 dark:text-emerald-400 font-semibold">{activePlan.progress?.published || 0}</strong> / {activePlan.total_products} {t("workspace.drip_items")}
+                {activePlan.progress?.failed > 0 && (
+                  <span className="ml-2 text-rose-600 font-medium">· {t("workspace.drip_errors")} {activePlan.progress.failed}</span>
+                )}
+              </p>
+              <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 mt-2 max-w-md overflow-hidden">
+                <div
+                  className="bg-indigo-600 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${activePlan.progress?.percentage || 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            {activePlan.status === "paused" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleResumePlan(activePlan.id)}
+                className="h-8 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800/60 dark:text-emerald-400"
+              >
+                <Play className="w-3.5 h-3.5 mr-1" /> {t("workspace.resume")}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePausePlan(activePlan.id)}
+                className="h-8 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-800/60 dark:text-amber-400"
+              >
+                <Pause className="w-3.5 h-3.5 mr-1" /> {t("workspace.pause")}
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleCancelPlan(activePlan.id)}
+              className="h-8 text-xs border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-800/60 dark:text-rose-400"
+            >
+              {t("workspace.cancel")}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={fetchActivePlan}
+              className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600"
+              title={t("workspace.refresh_status")}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── UNIFIED OPERATIONS TOOLBAR ── */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white dark:bg-card p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        {/* Left: Search & Filter */}
+        <div className="flex flex-1 items-center gap-2.5 max-w-lg">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("workspace.search_placeholder")}
+              className="pl-9 h-9 text-xs rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card"
+            />
+          </div>
+        </div>
+
+        {/* Right: Grouped File Operations & Automation */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Hidden File Input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept=".csv, .zip, .db, .sqlite"
+            onChange={handleFileUpload}
+          />
+
+          {/* Import Button */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
           >
-            <p className={`text-xl font-bold ${s.color}`}>{s.value.toLocaleString()}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{s.label}</p>
-          </button>
-        ))}
-      </div>
+            {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-slate-500" />}
+            <span>{t("workspace.import_btn")}</span>
+          </Button>
 
-      {/* ── UNIFIED SMART TOOLBAR ── */}
-      <div className="flex items-center gap-3 bg-white dark:bg-[#0B0F19] p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск товаров..." className="pl-9 h-9 dark:text-white" />
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportMenuRef}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 gap-1.5 border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+              disabled={products.length === 0}
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>{t("workspace.export_btn")}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
+            </Button>
+
+            {isExportMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-56 bg-white dark:bg-card rounded-xl border border-slate-200 dark:border-slate-800 shadow-lg p-1.5 z-30 animate-in fade-in slide-in-from-top-1">
+                <button
+                  onClick={() => { setIsExportMenuOpen(false); handleGlobalExport(); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-600" />
+                  <div className="text-left">
+                    <div>{t("workspace.export_otto_json")}</div>
+                    <div className="text-[10px] text-slate-400 font-normal">{t("workspace.export_otto_json_desc")}</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setIsExportMenuOpen(false); handleExportDB(); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-600" />
+                  <div className="text-left">
+                    <div>{t("workspace.export_sqlite")}</div>
+                    <div className="text-[10px] text-slate-400 font-normal">
+                      {selectedIds.size > 0 
+                        ? `Экспорт ${selectedIds.size} выбранных товаров` 
+                        : `Экспорт всех ${processed.length} активных товаров`}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setIsExportMenuOpen(false); handleExportCategories(); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                  <div className="text-left">
+                    <div>{t("workspace.export_categories_csv")}</div>
+                    <div className="text-[10px] text-slate-400 font-normal">
+                      {selectedIds.size > 0 
+                        ? `Экспорт ${selectedIds.size} выбранных товаров в CSV` 
+                        : `Экспорт всех ${processed.length} активных товаров в CSV`}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setIsExportMenuOpen(false); handleExportAttributes(); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <FileArchive className="w-3.5 h-3.5 text-purple-600" />
+                  <div className="text-left">
+                    <div>{t("workspace.export_attributes_zip")}</div>
+                    <div className="text-[10px] text-slate-400 font-normal">
+                      {selectedIds.size > 0 
+                        ? `Экспорт ${selectedIds.size} выбранных товаров в ZIP` 
+                        : `Экспорт всех ${processed.length} активных товаров в ZIP`}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Drip Feed Automation */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-semibold text-xs"
+            onClick={() => setIsDripModalOpen(true)}
+            disabled={products.length === 0}
+          >
+            <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>{t("workspace.drip_feed_btn")}</span>
+          </Button>
         </div>
-
-        <div className="w-px h-6 bg-slate-200 dark:bg-slate-700" />
-
-        {/* CSV Import / Export */}
-        <input type="file" ref={fileInputRef} className="hidden" accept=".csv, .zip" onChange={handleFileUpload} />
-        <Button size="sm" variant="outline" className="h-9 border-slate-200 dark:border-slate-700" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-          {isUploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
-          Импорт CSV
-        </Button>
-        <Button size="sm" variant="outline" className="h-9 border-slate-200 dark:border-slate-700" onClick={handleExportCategories} disabled={taskProgress !== null}>
-          {taskProgress?.title === "Экспорт категорий..." ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <FileDown className="w-4 h-4 mr-1.5" />}
-          Категории CSV
-        </Button>
-        <Button size="sm" variant="outline" className="h-9 border-slate-200 dark:border-slate-700" onClick={handleExportAttributes} disabled={taskProgress !== null}>
-          {taskProgress?.title === "Экспорт атрибутов..." ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <FileArchive className="w-4 h-4 mr-1.5" />}
-          Атрибуты ZIP
-        </Button>
-
-        <div className="w-px h-6 bg-slate-200 dark:bg-slate-700" />
-
-        {/* Export to Otto JSON (global) */}
-        <Button size="sm" variant="outline" className="h-9 border-slate-200 dark:border-slate-700" onClick={handleGlobalExport} disabled={products.length === 0}>
-          <Download className="w-4 h-4 mr-1.5" /> Otto JSON
-        </Button>
       </div>
 
       {/* Virtual Table */}
       <div
         ref={parentRef}
-        className="flex-1 overflow-auto bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm relative rounded-b-none"
+        onScroll={() => {
+          if (previewImage) setPreviewImage(null);
+        }}
+        className="flex-1 overflow-auto bg-white dark:bg-card border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs relative"
       >
-
         {/* Header */}
-        <div className="sticky top-0 bg-slate-50 dark:bg-[#0B0F19] border-b border-slate-200 dark:border-slate-800 z-10 shadow-sm flex items-start text-sm font-semibold text-slate-500 dark:text-white py-3">
-          <div className="w-12 px-4 mt-2"><Checkbox onCheckedChange={(c) => setSelectedIds(c ? new Set(processed.map((p, i) => getRowKey(p, i))) : new Set())} /></div>
-          <div className="w-24 px-4 text-xs mt-2">IMG</div>
-          <div className="flex-1 px-4 mt-2 cursor-pointer hover:text-slate-800" onClick={() => toggleSort("name")}>Product Name</div>
-          <div className="w-48 px-4 mt-2 cursor-pointer hover:text-slate-800" onClick={() => toggleSort("ean")}>EAN</div>
-          <div className="w-24 px-4 mt-2">Price</div>
-          <div className="w-64 px-4 flex flex-col gap-1">
-            <span className="cursor-pointer hover:text-slate-800" onClick={() => toggleSort("category")}>Category</span>
+        <div className="sticky top-0 bg-slate-50/90 dark:bg-[#0B0F19]/90 backdrop-blur-xs border-b border-slate-200/80 dark:border-slate-800 z-10 flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400 py-3">
+          <div className="w-12 px-4 shrink-0">
+            <Checkbox onCheckedChange={(c) => setSelectedIds(c ? new Set(processed.map((p, i) => getRowKey(p, i))) : new Set())} />
+          </div>
+          <div className="w-24 px-3 shrink-0 text-[11px] uppercase tracking-wider">{t("workspace.th_image")}</div>
+          <div className="flex-1 px-4 min-w-0 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("name")}>
+            {t("workspace.th_name")}
+          </div>
+          <div className="w-48 px-4 shrink-0 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("ean")}>
+            {t("workspace.th_ean")}
+          </div>
+          <div className="w-24 px-4 shrink-0">{t("workspace.th_price")}</div>
+          <div className="w-64 px-4 shrink-0 flex flex-col gap-1">
+            <span className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("category")}>
+              {t("workspace.th_category")}
+            </span>
             <AttributeCombobox
               name="Filter"
               value={categoryFilter}
               onChange={(val) => setCategoryFilter(val)}
               options={Array.from(new Set(Object.values(mappings).map(m => m.category_name || m.category).filter(Boolean))).sort()}
-              placeholder="Filter..."
-              className="w-full h-7 text-xs border rounded-md px-2 pr-6 outline-none transition-all border-slate-400 dark:border-slate-700 bg-white dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+              placeholder={t("workspace.filter_category_placeholder")}
+              className="w-full h-7 text-xs border rounded-md px-2 pr-6 outline-none border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
             />
           </div>
-          <div className="w-40 px-4 flex flex-col gap-1">
-            <span className="cursor-pointer hover:text-slate-800" onClick={() => toggleSort("status")}>Status</span>
+          <div className="w-40 px-4 shrink-0 flex flex-col gap-1">
+            <span className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("status")}>
+              {t("workspace.th_status")}
+            </span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-7 text-xs px-1 py-0 border-slate-400 dark:border-slate-700 border-solid border bg-white dark:bg-[#0B0F19] rounded-md shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+              className="h-7 text-xs px-2 border-slate-200 dark:border-slate-800 border bg-white dark:bg-card rounded-md shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-700 dark:text-slate-300"
             >
-              <option value="">All Statuses</option>
-              <option value="ready">Ready (Exportable)</option>
-              <option value="need">Need Attrs (Missing Data)</option>
-              <option value="error">Error (Validation Failed)</option>
-              <option value="unmapped">Unmapped (No Category)</option>
+              <option value="">{t("workspace.all_statuses")}</option>
+              <option value="ready">{t("workspace.status_ready")}</option>
+              <option value="need">{t("workspace.status_need")}</option>
+              <option value="error">{t("workspace.status_error")}</option>
+              <option value="unmapped">{t("workspace.status_unmapped")}</option>
             </select>
           </div>
         </div>
@@ -1163,40 +1912,93 @@ export default function FactoryWorkspace() {
                 handleRowMouseDown={handleRowMouseDown}
                 toggleSelection={toggleSelection}
                 setActiveProduct={setActiveProduct}
+                onImageHover={handleImageHover}
+                onImageLeave={handleImageLeave}
+                isMirrored={account === "XL"}
               />
             );
           })}
         </div>
 
+        {/* ── UNDER-PRODUCTS BACKGROUND LOADING INDICATOR ── */}
+        {isBackgroundLoading && (
+          <div className="sticky bottom-0 z-20 flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-white/95 dark:bg-[#0E131F]/95 backdrop-blur-md border-t border-indigo-200/80 dark:border-indigo-900/60 shadow-lg text-xs animate-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
+                <Loader2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-spin" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {t("workspace.under_loading_title")}
+                  </span>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100/80 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                    {t("workspace.under_loading_count", { current: products.length, total: totalCatalogCount || products.length })}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {t("workspace.under_loading_hint")}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              {totalCatalogCount && totalCatalogCount > 0 && (
+                <div className="w-36 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                  <div
+                    className="h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${Math.min(100, Math.round((products.length / totalCatalogCount) * 100))}%` }}
+                  />
+                </div>
+              )}
+              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                {totalCatalogCount && totalCatalogCount > 0
+                  ? `${Math.round((products.length / totalCatalogCount) * 100)}%`
+                  : t("common.loading")}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* ── CONTEXTUAL SELECTION BAR ── */}
         {(selectedIds.size > 0 || taskProgress) && (
-          <div className="selection-popup fixed z-50 flex flex-col justify-center bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl border border-slate-700/50 shadow-2xl shadow-indigo-900/30 animate-in fade-in slide-in-from-bottom-4 duration-200 bottom-8 left-1/2 -translate-x-1/2 min-w-[380px]">
+          <div className="selection-popup fixed z-50 flex flex-col justify-center bg-white dark:bg-card text-slate-900 dark:text-white px-4 py-3 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-indigo-950/10 animate-in fade-in slide-in-from-bottom-4 duration-200 bottom-8 left-1/2 -translate-x-1/2 min-w-[380px]">
             {taskProgress ? (
               /* ── PROGRESS STATE ── */
               <div className="w-full flex flex-col gap-2.5">
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-sm font-medium text-slate-200">
-                    <Loader2 className={`w-4 h-4 animate-spin ${taskProgress.colorClass ? taskProgress.colorClass.split(" ")[0].replace("from-", "text-") : "text-indigo-400"}`} />
-                    {taskProgress.title}
+                <div className="flex justify-between items-center gap-4">
+                  <span className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[240px]" title={taskProgress.title}>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="truncate">{taskProgress.title}</span>
                   </span>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    {taskProgress.eta && (
+                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-md">
+                        {taskProgress.eta.startsWith("~") || taskProgress.eta === "готов" || taskProgress.eta.startsWith("рассчит") 
+                          ? `Осталось: ${taskProgress.eta}` 
+                          : taskProgress.eta}
+                      </span>
+                    )}
                     {!taskProgress.isIndeterminate && taskProgress.current !== undefined && taskProgress.total !== undefined && (
-                      <span className="text-sm font-bold text-slate-300 tabular-nums">
-                        {taskProgress.current} <span className="text-slate-500 font-normal">/ {taskProgress.total}</span>
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 tabular-nums">
+                        {taskProgress.current} <span className="text-slate-400 font-normal">/ {taskProgress.total}</span>
+                        <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                          ({Math.round(((taskProgress.current || 0) / Math.max(1, (taskProgress.total || 1))) * 100)}%)
+                        </span>
                       </span>
                     )}
                     {taskProgress.onCancel && (
-                      <button onClick={taskProgress.onCancel} className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-0.5 rounded-lg hover:bg-red-500/10">Отмена</button>
+                      <button onClick={taskProgress.onCancel} className="text-xs text-rose-600 hover:text-rose-700 transition-colors px-2 py-0.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/30">{t("common.cancel")}</button>
                     )}
                   </div>
                 </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   {taskProgress.isIndeterminate ? (
-                    <div className={`h-full w-full bg-gradient-to-r ${taskProgress.colorClass || "from-indigo-500 to-purple-500"} animate-pulse rounded-full`} />
+                    <div className="h-full w-full bg-emerald-500 animate-pulse rounded-full" />
                   ) : (
                     <div
-                      className={`h-full bg-gradient-to-r ${taskProgress.colorClass || "from-indigo-500 to-purple-500"} rounded-full transition-all duration-500 ease-out`}
-                      style={{ width: `${((taskProgress.current || 0) / Math.max(1, (taskProgress.total || 1))) * 100}%` }}
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${Math.min(100, Math.max(2, ((taskProgress.current || 0) / Math.max(1, (taskProgress.total || 1))) * 100))}%` }}
                     />
                   )}
                 </div>
@@ -1206,55 +2008,77 @@ export default function FactoryWorkspace() {
               <div className="flex items-center gap-3">
                 {/* Selection scope indicator */}
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="w-7 h-7 rounded-full bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-xs font-bold text-indigo-300">{selectedIds.size}</div>
+                  <div className="h-6 px-2 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-900/60 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                    {selectedIds.size}
+                  </div>
                   <div className="text-xs leading-tight">
-                    <div className="text-slate-200 font-medium">{selectedIds.size} выбрано</div>
-                    <div className="text-slate-500">из {processed.length} в таблице</div>
+                    <div className="text-slate-900 dark:text-white font-medium">{t("workspace.selected_count", { count: selectedIds.size })}</div>
+                    <div className="text-slate-400 text-[10px]">{t("workspace.of_products", { total: processed.length })}</div>
                   </div>
                 </div>
 
-                <div className="w-px h-8 bg-slate-700/70 shrink-0" />
+                <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 shrink-0" />
+
+                {/* Mass Edit */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsMassEditOpen(true)}
+                  disabled={isAutoMapping || isSyncingOkb}
+                  className="h-8 px-2.5 text-xs font-medium border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 hover:bg-indigo-50 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 gap-1.5"
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Mass Edit</span>
+                </Button>
+
+                <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 shrink-0" />
 
                 {/* OKB Sync */}
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleOkbSync}
                   disabled={isSyncingOkb}
-                  className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-xl bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white transition-all disabled:opacity-50"
+                  className="h-8 px-2.5 text-xs font-medium border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-slate-700 dark:text-slate-300 hover:bg-slate-50 gap-1.5"
                 >
-                  {isSyncingOkb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-                  OKB Sync
-                </button>
-
-                <div className="w-px h-8 bg-slate-700/70 shrink-0" />
+                  {isSyncingOkb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5 text-slate-500" />}
+                  <span>{t("workspace.okb_sync")}</span>
+                </Button>
 
                 {/* AI Categories */}
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
-                    if (!confirm(`Запустить AI категоризацию для ${selectedIds.size} товаров?`)) return;
+                    if (!confirm(t("workspace.confirm_ai_cat", { count: selectedIds.size }))) return;
                     handleAutoMap(false, "categories");
                   }}
                   disabled={isAutoMapping}
-                  className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all disabled:opacity-50"
+                  className="h-8 px-2.5 text-xs font-medium border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-slate-700 dark:text-slate-300 hover:bg-slate-50 gap-1.5"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> AI Categories
-                </button>
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>{t("workspace.ai_categories")}</span>
+                </Button>
 
                 {/* AI Attributes */}
-                <button
+                <Button
+                  size="sm"
                   onClick={() => {
-                    if (!confirm(`Запустить AI для заполнения атрибутов у ${selectedIds.size} товаров? Уже заполненные вручную поля не перезапишутся.`)) return;
+                    if (!confirm(t("workspace.confirm_ai_attr", { count: selectedIds.size }))) return;
                     handleAutoMap(false, "attributes");
                   }}
                   disabled={isAutoMapping}
-                  className="flex items-center gap-1.5 h-8 px-3 text-xs font-bold rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white transition-all shadow-md shadow-indigo-500/30 disabled:opacity-50"
+                  className="h-8 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shadow-xs"
                 >
-                  <Sparkles className="w-3.5 h-3.5" /> AI Attrs
-                </button>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{t("workspace.ai_attributes")}</span>
+                </Button>
 
                 {/* Close */}
                 <button
                   onClick={() => { setSelectedIds(new Set()); setPopupPos(null); }}
-                  className="ml-1 p-1.5 text-slate-500 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
+                  className="ml-1 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title={t("validation.deselect_all")}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1285,6 +2109,43 @@ export default function FactoryWorkspace() {
         </>
       )}
 
+      {/* ── DRIP SCHEDULE MODAL ── */}
+      <DripScheduleModal
+        factoryId={factoryId}
+        factoryName={factoryName}
+        isOpen={isDripModalOpen}
+        onClose={() => setIsDripModalOpen(false)}
+        onSuccess={() => {
+          fetchActivePlan();
+          fetchMappings();
+        }}
+        selectedEans={selectedIds.size > 0
+          ? processed
+              .filter((p, i) => selectedIds.has(getRowKey(p, i)))
+              .map(p => p.ean || p.row?.EAN || "")
+              .filter(Boolean)
+          : undefined}
+      />
+
+      {/* ── MASS EDIT DRAWER ── */}
+      {isMassEditOpen && (
+        <MassEditDrawer
+          selectedEans={
+            processed
+              .filter((p, i) => selectedIds.has(getRowKey(p, i)))
+              .map(p => p.ean || p.row?.EAN || "")
+              .filter(Boolean)
+          }
+          onClose={() => setIsMassEditOpen(false)}
+          onSaved={() => {
+            setIsMassEditOpen(false);
+            fetchMappings();
+          }}
+        />
+      )}
+
+      {/* ── IMAGE PREVIEW HOVER PORTAL ── */}
+      <ImageHoverPreview preview={previewImage} />
 
     </div>
   );

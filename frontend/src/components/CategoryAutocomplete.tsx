@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fetchWithAuth } from "@/lib/api";
+import { useTranslation } from "react-i18next";
 
 interface Category {
   id: string;
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function CategoryAutocomplete({ value, onChange }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Category[]>([]);
@@ -80,7 +82,7 @@ export function CategoryAutocomplete({ value, onChange }: Props) {
           // if we focus and query is an ID, we might want to clear it to search by name?
           // For now, let the user type to search.
         }}
-        placeholder="Поиск категории (название или группа)..."
+        placeholder={t("product_drawer.category_search_placeholder")}
         className={cn(
           "h-7 text-xs rounded-md px-2 shadow-sm border",
           value
@@ -91,7 +93,7 @@ export function CategoryAutocomplete({ value, onChange }: Props) {
       {open && (
         <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 dark:bg-[#0B0F19] dark:border-slate-800 rounded-xl shadow-xl overflow-hidden">
           {loading && suggestions.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-slate-400">Загрузка...</div>
+            <div className="px-3 py-2 text-xs text-slate-400">{t("common.loading")}</div>
           ) : suggestions.length > 0 ? (
             <div className="max-h-64 overflow-y-auto">
               {suggestions.map((cat) => {
@@ -117,7 +119,7 @@ export function CategoryAutocomplete({ value, onChange }: Props) {
               })}
             </div>
           ) : (
-            <div className="px-3 py-2 text-xs text-slate-400">Ничего не найдено</div>
+            <div className="px-3 py-2 text-xs text-slate-400">{t("product_drawer.nothing_found")}</div>
           )}
         </div>
       )}

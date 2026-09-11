@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { CategoryAutocomplete } from "@/components/CategoryAutocomplete";
 import { fetchWithAuth } from "@/lib/api";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 interface BulkEditorDrawerProps {
   selectedEans: string[];
@@ -17,6 +18,7 @@ interface BulkEditorDrawerProps {
 }
 
 export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClose, onSave }: BulkEditorDrawerProps) {
+  const { t } = useTranslation();
   const [category, setCategory] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [attributes, setAttributes] = useState<Record<string, string>>({});
@@ -93,24 +95,24 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       } else {
         const errorCode = res.headers.get("x-error-code");
         if (errorCode === "OPENAI_API_KEY_MISSING") {
-          toast.error("Отсутствует ключ ChatGPT", {
+          toast.error(t("product_drawer.toast_openai_missing_title"), {
             id: "openai-error-toast",
-            description: "Перейдите в настройки и укажите ваш OpenAI API ключ.",
+            description: t("product_drawer.toast_openai_missing_desc"),
             duration: 7000,
           });
         } else if (errorCode === "OPENAI_API_ERROR") {
-          toast.error("Ошибка API ChatGPT", {
+          toast.error(t("product_drawer.toast_openai_error_title"), {
             id: "openai-error-toast",
-            description: "Ошибка при обращении к OpenAI — проверьте баланс или лимиты.",
+            description: t("product_drawer.toast_openai_error_desc"),
             duration: 7000,
           });
         } else {
-          toast.error("AI не смог определить категорию", { id: "openai-error-toast" });
+          toast.error(t("product_drawer.toast_category_fail"), { id: "openai-error-toast" });
         }
       }
     } catch (e) {
       console.error(e);
-      toast.error("Ошибка соединения с сервером", { id: "network-error-toast" });
+      toast.error(t("product_drawer.toast_network_error"), { id: "network-error-toast" });
     } finally {
       setIsPredictingCategory(false);
     }
@@ -132,24 +134,24 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       } else {
         const errorCode = res.headers.get("x-error-code");
         if (errorCode === "OPENAI_API_KEY_MISSING") {
-          toast.error("Отсутствует ключ ChatGPT", {
+          toast.error(t("product_drawer.toast_openai_missing_title"), {
             id: "openai-error-toast",
-            description: "Перейдите в настройки и укажите ваш OpenAI API ключ.",
+            description: t("product_drawer.toast_openai_missing_desc"),
             duration: 7000,
           });
         } else if (errorCode === "OPENAI_API_ERROR") {
-          toast.error("Ошибка API ChatGPT", {
+          toast.error(t("product_drawer.toast_openai_error_title"), {
             id: "openai-error-toast",
-            description: "Ошибка при обращении к OpenAI — проверьте баланс или лимиты.",
+            description: t("product_drawer.toast_openai_error_desc"),
             duration: 7000,
           });
         } else {
-          toast.error("AI не смог заполнить атрибуты", { id: "openai-error-toast" });
+          toast.error(t("product_drawer.toast_attr_fail"), { id: "openai-error-toast" });
         }
       }
     } catch (e) {
       console.error(e);
-      toast.error("Ошибка соединения с сервером", { id: "network-error-toast" });
+      toast.error(t("product_drawer.toast_network_error"), { id: "network-error-toast" });
     } finally {
       setIsExtractingAttributes(false);
     }
@@ -178,7 +180,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       onClose();
     } catch (e) {
       console.error(e);
-      alert("Failed to save bulk mapping");
+      alert(t("bulk_editor.toast_save_fail"));
     } finally {
       setLoading(false);
     }
@@ -189,7 +191,9 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800/50 bg-indigo-50/50 dark:bg-indigo-900/10">
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Mass Edit ({selectedEans.length} products)</h2>
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+          {t("bulk_editor.title", { count: selectedEans.length })}
+        </h2>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800/50">
           <X className="w-4 h-4" />
         </button>
@@ -199,15 +203,16 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
         <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/50 text-amber-800 dark:text-amber-200/90 text-xs flex gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <p>
-            Changes made here will be applied to <strong>all {selectedEans.length} selected products</strong>. 
-            Empty attribute fields will be ignored and won't overwrite existing product values.
+            {t("bulk_editor.warning", { count: selectedEans.length })}
           </p>
         </div>
 
         {/* Stage 1: Category */}
         <div className="p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">1. Common Category</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {t("bulk_editor.common_category")}
+            </h3>
             <Button 
               variant="outline" 
               size="sm" 
@@ -216,7 +221,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
               className="h-7 text-xs border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
             >
               <Wand2 className="w-3 h-3 mr-1" />
-              {isPredictingCategory ? "Predicting..." : "Auto AI"}
+              {isPredictingCategory ? t("bulk_editor.predicting") : t("bulk_editor.auto_ai")}
             </Button>
           </div>
           <CategoryAutocomplete 
@@ -231,7 +236,9 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
         {/* Stage 2: Attributes */}
         <div className="p-5 border-t border-slate-100 dark:border-slate-800/50 space-y-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">2. Common Attributes</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {t("bulk_editor.common_attributes")}
+            </h3>
             <div className="flex gap-2 items-center">
               {category && schema.length > 0 && (
                 <>
@@ -243,7 +250,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
                     className="h-7 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                   >
                     <Wand2 className="w-3 h-3 mr-1" />
-                    {isExtractingAttributes ? "Extracting..." : "Auto AI"}
+                    {isExtractingAttributes ? t("bulk_editor.extracting") : t("bulk_editor.auto_ai")}
                   </Button>
                   <Button 
                     variant="outline" 
@@ -251,16 +258,16 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
                     onClick={() => handleExtractAttributes(true)} 
                     disabled={isExtractingAttributes || !sampleProduct}
                     className="h-7 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                    title="Использовать Vision для анализа по фото"
+                    title={t("bulk_editor.vision_tooltip")}
                   >
                     <Wand2 className="w-3 h-3 mr-1" />
-                    Vision AI
+                    {t("bulk_editor.vision_ai")}
                   </Button>
                 </>
               )}
               {category && schema.length > 0 && (
                 <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full font-medium">
-                  Loaded
+                  {t("bulk_editor.loaded")}
                 </span>
               )}
             </div>
@@ -268,11 +275,11 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
 
           {!category ? (
             <div className="text-sm text-slate-400 dark:text-slate-500 p-4 border border-dashed dark:border-slate-800 rounded-xl text-center">
-              Select a category to see common attributes.
+              {t("bulk_editor.select_category_prompt")}
             </div>
           ) : schema.length === 0 ? (
             <div className="text-sm text-slate-400 dark:text-slate-500 p-4 border border-dashed dark:border-slate-800 rounded-xl text-center">
-              Loading schema...
+              {t("bulk_editor.loading_schema")}
             </div>
           ) : (
             <div className="space-y-4">
@@ -287,7 +294,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
                       value={attributes[attr.name] || ""}
                       onChange={(e) => handleAttrChange(attr.name, e.target.value)}
                     >
-                      <option value="">Leave unchanged / Do not set</option>
+                      <option value="">{t("bulk_editor.leave_unchanged")}</option>
                       {attr.options?.map((opt: string) => (
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
@@ -297,7 +304,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
                       value={attributes[attr.name] || ""}
                       onChange={(e) => handleAttrChange(attr.name, e.target.value)}
                       className="h-8 text-sm"
-                      placeholder={`Leave blank to ignore...`}
+                      placeholder={t("bulk_editor.leave_blank")}
                     />
                   )}
                 </div>
@@ -311,7 +318,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F19]/50 backdrop-blur-md">
         <Button onClick={handleSave} disabled={loading || !category} className="w-full bg-indigo-600 hover:bg-indigo-700">
           <Save className="w-4 h-4 mr-2" />
-          {loading ? "Applying..." : `Apply to ${selectedEans.length} Products`}
+          {loading ? t("bulk_editor.applying") : t("bulk_editor.apply_btn", { count: selectedEans.length })}
         </Button>
       </div>
 
