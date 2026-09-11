@@ -154,6 +154,14 @@ def create_initial_admin():
             logging.warning(f"Database connection attempt {attempt + 1}/5 failed: {e}. Retrying in 2s...")
             time.sleep(2)
 
+@app.on_event("startup")
+def seed_initial_categories():
+    try:
+        from scripts.seed_categories import seed_categories
+        seed_categories()
+    except Exception as e:
+        logging.warning(f"Failed to auto-seed categories on startup: {e}")
+
 # ====== USER MANAGEMENT (ADMIN ONLY) ======
 from pydantic import BaseModel
 

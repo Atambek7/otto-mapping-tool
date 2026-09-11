@@ -25,6 +25,7 @@ defaults = {
     "CELERY_RESULT_BACKEND": "redis://redis:6379/0",
     "CORS_ORIGINS": "https://omt.automatonsoft.de,http://omt.automatonsoft.de,http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:3200",
     "COOKIE_SECURE": "true",
+    "PUBLIC_BASE_URL": "https://omt.automatonsoft.de",
     "MODEL_NAME": "gpt-4o-mini",
     "ADMIN_USERNAME": "yana",
     "AFTERCOOL_LOGIN_URL": "https://aftercool.de/auth/login",

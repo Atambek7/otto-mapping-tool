@@ -41,6 +41,7 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
           COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL || 'https://omt.automatonsoft.de' }}
           AFTERCOOL_USERNAME: ${{ secrets.AFTERCOOL_USERNAME }}
           AFTERCOOL_PASSWORD: ${{ secrets.AFTERCOOL_PASSWORD }}
           AFTERCOOL_LOGIN_URL: ${{ secrets.AFTERCOOL_LOGIN_URL }}

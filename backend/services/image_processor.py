@@ -66,9 +66,9 @@ async def fetch_image_bytes(url: str, client: httpx.AsyncClient = None) -> bytes
     if not url:
         return None
 
-    # 1. Check local static mirrored image
-    if url.startswith("/static/mirrored/"):
-        filename = os.path.basename(url)
+    # 1. Check local static mirrored image (support both relative /static/mirrored/ and absolute URLs)
+    if url.startswith("/static/mirrored/") or "/static/mirrored/" in url:
+        filename = os.path.basename(url.split("?")[0])
         local_path = os.path.join(STATIC_DIR, filename)
         if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
             try:

@@ -106,8 +106,8 @@ async def preview_pipeline(
 
     # Get category names for preview readability
     cat_ids = {m.category_id for m in mappings if m.category_id}
-    cats = db.query(models.CategoryCache).filter(models.CategoryCache.id.in_(cat_ids)).all()
-    cat_names = {c.id: c.name for c in cats}
+    from services.categories_service import resolve_category_names
+    cat_names = resolve_category_names(cat_ids, db)
 
     def resolve_cat_name(cid: Optional[str]) -> str:
         if not cid:

@@ -30,10 +30,10 @@ def publish_factory_to_otto_task(self, factory_id: str, account_name: str, clien
         payloads = []
         mapping_lookup = {}
         
-        # Pre-fetch all categories in 1 query
+        # Pre-fetch all categories in 1 query with JSON fallback
         cat_ids = list({m.category_id for m in mappings if m.category_id})
-        cats = db.query(models.CategoryCache).filter(models.CategoryCache.id.in_(cat_ids)).all() if cat_ids else []
-        cat_names = {c.id: c.name for c in cats}
+        from services.categories_service import resolve_category_names
+        cat_names = resolve_category_names(cat_ids, db)
 
         # Pre-fetch all attributes for all mappings in 1 query
         eans = [m.product_ean for m in mappings]

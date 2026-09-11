@@ -1,3 +1,4 @@
+import os
 from typing import Dict, Any, List
 
 def format_otto_product(ean: str, aftercool_info: Dict[str, Any], mapping: Dict[str, Any], category_name: str) -> Dict[str, Any]:
@@ -10,9 +11,23 @@ def format_otto_product(ean: str, aftercool_info: Dict[str, Any], mapping: Dict[
     except ValueError:
         price_float = 0.0
 
-    # Images
+    # Images: Otto API strictly requires full absolute URLs (e.g. https://domain.com/static/...)
     images = aftercool_info.get("images", [])
-    media_assets = [{"type": "IMAGE", "location": img} for img in images if img]
+    public_base_url = os.getenv("PUBLIC_BASE_URL", "https://omt.automatonsoft.de").rstrip("/")
+    media_assets = []
+    for img in images:
+        if not img or not isinstance(img, str):
+            continue
+        img_str = img.strip()
+        if not img_str:
+            continue
+        if img_str.startswith("/"):
+            location = f"{public_base_url}{img_str}"
+        elif not (img_str.startswith("http://") or img_str.startswith("https://")):
+            location = f"{public_base_url}/{img_str.lstrip('/')}"
+        else:
+            location = img_str
+        media_assets.append({"type": "IMAGE", "location": location})
 
     # Attributes
     attributes = []

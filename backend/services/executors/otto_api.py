@@ -65,12 +65,8 @@ class OttoApiExecutor(BasePublishExecutor):
         mapping_by_ean = {m.product_ean: m for m in mappings}
 
         category_ids = {m.category_id for m in mappings if m.category_id}
-        categories = (
-            db.query(models.CategoryCache)
-            .filter(models.CategoryCache.id.in_(category_ids))
-            .all()
-        )
-        cat_name_by_id = {c.id: c.name for c in categories}
+        from ..categories_service import resolve_category_names
+        cat_name_by_id = resolve_category_names(category_ids, db)
 
         attributes = (
             db.query(models.ProductAttribute)
