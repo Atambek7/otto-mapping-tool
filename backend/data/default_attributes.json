@@ -13,7 +13,14 @@
     "Wissenswert": "Falls der Artikel nicht Ihrem Farbwunsch entspricht oder die Farbe unpassend ist, können Sie gerne bei uns eine Maßanfertigung oder Farbänderung anfragen.",
     "Warnhinweise": "Wir liefern den Artikel kostenlos bis zur Bordsteinkante. Optional bietet die Spedition jedoch auch einen 2-Mann-Service sowie einen Montageservice an. Diesen Service können Sie direkt bei der Spedition bei der Anlieferung anfragen. Es besteht die Möglichkeit einer 2-Mann-Lieferung sowie der Montage des Artikels",
     "Farbhinweise": "Bitte beachten Sie, dass die Farben auf Ihrem Monitor von den Originalfarbtönen abweichen können.",
-    "Zielgruppe": "Erwachsene ; Jugendliche"
+    "Zielgruppe": "Erwachsene ; Jugendliche",
+    "Design": "Modern",
+    "Lieferumfang": "Es wird alles laut Produktbeschreibung geliefert",
+    "Material Korpus": "Holz",
+    "Material Türen": "Holz",
+    "Montagehinweis": "Es wird eine zweite Person zum Aufbau empfohlen",
+    "Montagehinweise": "Es wird eine zweite Person zum Aufbau empfohlen",
+    "Optik": "uni"
   },
   "accounts": {
     "JV": {
@@ -31,15 +38,8 @@
       "WEEE-Reg.-Nr. DE": "80120806"
     }
   },
-  "sofa_presets": {
-    "Art Rückenkissen": "Mit Schaumstofffüllung",
-    "Ausführung Rückenlehne": "Mit gepolsterten Rückenlehne",
-    "Art der Rollen": "Messing-Rollen",
-    "armrest_options": {
-      "padded": "Mit gepolsterten Armlehnen",
-      "wood": "Mit Holzarmlehnen",
-      "none": "Ohne Armlehnen"
-    },
-    "default_armrest": "Mit gepolsterten Armlehnen"
-  }
+  "design_options": [
+    "Modern",
+    "Klassisch"
+  ]
 }

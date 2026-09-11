@@ -325,7 +325,7 @@ export default function FactoryWorkspace() {
     }
   }, [factoryId, account]);
 
-  const handleApplyDefaultsBulk = async (options?: { sofa?: boolean; armrest?: string; targetGroup?: string }) => {
+  const handleApplyDefaultsBulk = async (options?: { targetGroup?: string; design?: string }) => {
     if (!factoryId || selectedIds.size === 0 || !account) return;
     const selectedEans = processed
       .filter((p, i) => selectedIds.has(getRowKey(p, i)))
@@ -343,8 +343,7 @@ export default function FactoryWorkspace() {
           product_eans: selectedEans,
           account: account,
           target_group: options?.targetGroup || "Erwachsene ; Jugendliche",
-          armrest: options?.armrest || undefined,
-          include_sofa_presets: options?.sofa ?? false,
+          design: options?.design || "Modern",
           overwrite_existing: false,
         }),
       });
