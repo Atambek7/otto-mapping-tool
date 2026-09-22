@@ -64,8 +64,7 @@ class ApplyDefaultsRequest(BaseModel):
     product_eans: List[str]
     account: str = "JV"
     target_group: Optional[str] = "Erwachsene ; Jugendliche"
-    armrest: Optional[str] = None
-    include_sofa_presets: bool = False
+    design: Optional[str] = None
     overwrite_existing: bool = False
 
 # ====== Routes ======
@@ -790,8 +789,7 @@ async def apply_defaults_bulk(req: ApplyDefaultsRequest, db: Session = Depends(g
     defaults_to_apply = get_attributes_for_apply(
         account=req.account,
         target_group=req.target_group,
-        armrest=req.armrest,
-        include_sofa_presets=req.include_sofa_presets
+        design=req.design
     )
 
     if not defaults_to_apply:
