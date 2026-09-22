@@ -11,7 +11,18 @@ import models, auth
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Otto Mapping Tool API")
+app = FastAPI(
+    title="Otto Mapping Tool API",
+    openapi_url="/api/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    servers=[{"url": "/api", "description": "Default API"}]
+)
+
+@app.get("/openapi.json", include_in_schema=False)
+@app.get("/api/openapi.json", include_in_schema=False)
+def get_openapi_endpoint():
+    return app.openapi()
 
 @app.get("/health")
 def health_check():
@@ -38,7 +49,7 @@ from fastapi.staticfiles import StaticFiles
 os.makedirs("static/mirrored", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-from routers import aftercool, drafts, mapping, validation, export, stats, csv_workflow, settings, publish_pipeline, analytics
+from routers import aftercool, drafts, mapping, validation, export, stats, csv_workflow, settings, publish_pipeline, analytics, published_export
 
 # Secure all data routers behind authentication
 auth_dep = [Depends(auth.get_current_user)]
@@ -52,6 +63,9 @@ app.include_router(csv_workflow.router, dependencies=auth_dep)
 app.include_router(settings.router, dependencies=auth_dep)
 app.include_router(publish_pipeline.router, dependencies=auth_dep)
 app.include_router(analytics.router, dependencies=auth_dep)
+
+# Published products export for external services (has its own dual X-API-Key / JWT authentication)
+app.include_router(published_export.router)
 
 # ====== AUTH ROUTES ======
 @app.post("/token")
@@ -94,6 +108,30 @@ async def read_users_me(current_user: models.User = Depends(auth.get_current_use
     return {"username": current_user.username, "is_admin": current_user.is_admin}
 
 # ====== INIT SCRIPT ======
+@app.on_event("startup")
+def apply_safe_migrations():
+    import logging
+    from database import engine
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE publish_queue_items ADD COLUMN IF NOT EXISTS missing_attributes JSON;"))
+            conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS missing_attributes JSON;"))
+            conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS last_error TEXT;"))
+            conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS has_ai_title BOOLEAN DEFAULT FALSE;"))
+            conn.execute(text("""
+                UPDATE product_mappings 
+                SET has_ai_title = TRUE 
+                WHERE account_name = 'XL' 
+                  AND product_name IS NOT NULL 
+                  AND LENGTH(TRIM(product_name)) > 0 
+                  AND LENGTH(TRIM(product_name)) <= 70 
+                  AND (has_ai_title IS NULL OR has_ai_title = FALSE);
+            """))
+            logging.info("Safe migrations applied successfully.")
+    except Exception as e:
+        logging.warning(f"Safe migrations failed (might be already applied or unsupported DB): {e}")
+
 @app.on_event("startup")
 def create_initial_admin():
     admin_username = os.getenv("ADMIN_USERNAME", "yana")
