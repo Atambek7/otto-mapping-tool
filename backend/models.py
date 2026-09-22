@@ -18,6 +18,7 @@ class PlanStatus(str, enum.Enum):
 
 class QueueItemStatus(str, enum.Enum):
     PENDING = "pending"
+    PROCESSING = "processing"
     PUBLISHED = "published"
     FAILED = "failed"
 
@@ -56,18 +57,28 @@ class ProductMapping(Base):
     account_name = Column(Enum(AccountType, name="accounttype", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
     category_id = Column(String, index=True)
     status = Column(String, default="Not Mapped") # Not Mapped, Need Attributes, Ready, Error
+    ai_attributes = Column(JSON, default=list, nullable=True)
+    missing_attributes = Column(JSON, default=list, nullable=True)
+    last_error = Column(Text, nullable=True)
     
     product_name = Column(String, nullable=True)
+    has_ai_title = Column(Boolean, default=False, nullable=True)
     price = Column(String, nullable=True)
     price_af = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True, index=True)
 
 class ProductAttribute(Base):
     __tablename__ = "product_attributes"
+    __table_args__ = (
+        UniqueConstraint("product_ean", "attribute_name", "account_name", name="uq_product_attr_account"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     product_ean = Column(String, index=True)
+    account_name = Column(Enum(AccountType, name="accounttype", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=AccountType.JV, index=True)
     attribute_name = Column(String)
     attribute_value = Column(String)
 
@@ -134,7 +145,11 @@ class PublishQueueItem(Base):
     status = Column(Enum(QueueItemStatus, name="queueitemstatus", create_type=False, values_callable=lambda x: [e.value for e in x]), default=QueueItemStatus.PENDING, nullable=False, index=True)
     attempts = Column(Integer, default=0, nullable=False)
     error_message = Column(Text, nullable=True)
+    missing_attributes = Column(JSON, default=list, nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
+    otto_task_href = Column(String, nullable=True)
+    otto_task_failed_href = Column(String, nullable=True)
+    poll_attempts = Column(Integer, default=0, nullable=False)
 
     plan = relationship("PublishPlan", back_populates="items")
 
@@ -214,5 +229,39 @@ class OttoOrderItem(Base):
     shop_url = Column(String, nullable=True)
 
     order = relationship("OttoOrder", back_populates="items")
+
+
+class AvailabilitySyncLog(Base):
+    """
+    Log of periodic availability (stock quantity) and price synchronization with Aftercool/Otto.
+    """
+    __tablename__ = "availability_sync_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_ean = Column(String, index=True, nullable=False)
+    account_name = Column(String, index=True, nullable=False)
+    factory_id = Column(String, index=True, nullable=True)
+    old_stock = Column(Integer, nullable=True)
+    new_stock = Column(Integer, nullable=True)
+    old_price = Column(String, nullable=True)
+    new_price = Column(String, nullable=True)
+    sync_result = Column(String, nullable=False)  # "ok", "failed", "skipped", "unchanged"
+    error_message = Column(Text, nullable=True)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class SchemaDriftLog(Base):
+    """
+    Log of category schema drift audits against OTTO Categories API.
+    """
+    __tablename__ = "schema_drift_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category_id = Column(String, index=True, nullable=False)
+    category_name = Column(String, nullable=True)
+    has_drift = Column(Boolean, default=False, nullable=False)
+    diff_details = Column(JSON, nullable=True)
+    checked_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
 
 

@@ -28,6 +28,33 @@ def get_openapi_endpoint():
 def health_check():
     return {"status": "ok"}
 
+@app.get("/health/disk-usage")
+def disk_usage():
+    import shutil
+    base_static = os.path.join(os.path.dirname(__file__), "static")
+    mirrored_path = os.path.join(base_static, "mirrored")
+    cache_path = os.path.join(base_static, "cache", "images")
+    
+    def get_dir_stats(path):
+        if not os.path.exists(path):
+            return {"files_count": 0, "total_mb": 0.0}
+        files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        total_bytes = sum(os.path.getsize(f) for f in files)
+        return {
+            "files_count": len(files),
+            "total_mb": round(total_bytes / (1024 * 1024), 2),
+        }
+
+    disk_info = shutil.disk_usage(base_static if os.path.exists(base_static) else "/")
+    return {
+        "status": "ok",
+        "mirrored": get_dir_stats(mirrored_path),
+        "cache": get_dir_stats(cache_path),
+        "disk_free_gb": round(disk_info.free / (1024 ** 3), 2),
+        "disk_total_gb": round(disk_info.total / (1024 ** 3), 2),
+    }
+
+
 
 # ====== CORS ======
 raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
