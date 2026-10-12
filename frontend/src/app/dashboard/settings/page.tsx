@@ -21,8 +21,10 @@ import {
   AlertCircle,
   Sparkles,
   Lock,
-  Globe,
   Check,
+  Globe,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -42,11 +44,22 @@ interface UserSettings {
   openai_api_key_masked: string | null;
 }
 
+interface CheckKeyResult {
+  status: "active" | "exhausted" | "missing" | "error";
+  code?: string;
+  message?: string;
+  email?: string | null;
+  organization?: string | null;
+  has_spend_limit?: boolean;
+}
+
 export default function SettingsPage() {
   const { t, i18n } = useTranslation();
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [checkingKey, setCheckingKey] = useState(false);
+  const [keyStatusResult, setKeyStatusResult] = useState<CheckKeyResult | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -75,6 +88,33 @@ export default function SettingsPage() {
       console.error("Failed to load settings", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckKey = async () => {
+    setCheckingKey(true);
+    setKeyStatusResult(null);
+    try {
+      const payload = inputValue.trim() ? { openai_api_key: inputValue.trim() } : {};
+      const res = await fetchWithAuth("/settings/check-key", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Check failed");
+      const data: CheckKeyResult = await res.json();
+      setKeyStatusResult(data);
+      if (data.status === "active") {
+        toast.success(data.message || t("settings.key_status_active"));
+      } else if (data.status === "exhausted") {
+        toast.error(t("settings.key_status_exhausted"));
+      } else {
+        toast.error(data.message || "Ошибка проверки ключа");
+      }
+    } catch (e) {
+      console.error("Check error", e);
+      toast.error("Не удалось проверить статус ключа OpenAI");
+    } finally {
+      setCheckingKey(false);
     }
   };
 
@@ -346,19 +386,31 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-                <DialogTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/60"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                      {t("settings.openai_delete_btn")}
-                    </Button>
-                  }
-                />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCheckKey}
+                  disabled={checkingKey}
+                  className="h-8 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-850 border-slate-200 dark:border-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${checkingKey ? "animate-spin" : ""}`} />
+                  {checkingKey ? t("settings.checking_key") : t("settings.check_key_btn")}
+                </Button>
+
+                <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                  <DialogTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/60"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        {t("settings.openai_delete_btn")}
+                      </Button>
+                    }
+                  />
                 <DialogContent className="bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800">
                   <DialogHeader>
                     <DialogTitle className="text-base font-semibold text-slate-900 dark:text-white">
@@ -386,6 +438,7 @@ export default function SettingsPage() {
                 </DialogContent>
               </Dialog>
             </div>
+          </div>
           ) : (
             <div className="p-4 rounded-lg bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 flex items-start gap-3">
               <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -448,6 +501,98 @@ export default function SettingsPage() {
                 {t("settings.sec_body")}
               </p>
             </div>
+
+            {/* Key Diagnostic Result Banner */}
+            {keyStatusResult && (
+              <div
+                className={`p-4 rounded-xl border transition-all ${
+                  keyStatusResult.status === "active"
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200"
+                    : keyStatusResult.status === "exhausted"
+                    ? "bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  {keyStatusResult.status === "active" ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-2 flex-1 text-xs">
+                    <div className="font-semibold text-sm">
+                      {keyStatusResult.status === "active"
+                        ? "Соединение с OpenAI успешно и баланс активен!"
+                        : keyStatusResult.status === "exhausted"
+                        ? "Баланс OpenAI исчерпан (credit_balance_exhausted)"
+                        : (keyStatusResult.message || "Статус ключа OpenAI")}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-lg bg-black/5 dark:bg-black/20 font-mono text-[11px]">
+                      {keyStatusResult.email && (
+                        <div>
+                          <span className="opacity-60">Email: </span>
+                          <span className="font-semibold">{keyStatusResult.email}</span>
+                        </div>
+                      )}
+                      {keyStatusResult.organization && (
+                        <div>
+                          <span className="opacity-60">Организация: </span>
+                          <span className="font-semibold">{keyStatusResult.organization}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="opacity-60">Spend Limit проекта: </span>
+                        <span className="font-semibold">
+                          {keyStatusResult.has_spend_limit ? "Включен (активен лимит)" : "Не ограничен"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {keyStatusResult.status === "exhausted" && (
+                      <div className="space-y-1.5 pt-1 text-slate-700 dark:text-slate-300">
+                        <div className="font-medium text-slate-900 dark:text-white">
+                          Почему OpenAI сообщает об отсутствии баланса:
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1 text-[11px] leading-relaxed">
+                          <li>
+                            <strong>Организация vs Личный профиль:</strong> Ключ привязан к организации{" "}
+                            <strong>{keyStatusResult.organization || "XLMOEBEL"}</strong>. Если баланс пополнен в личном профиле (Personal), API организации не имеет к нему доступа.
+                          </li>
+                          <li>
+                            <strong>Лимит расходов проекта (Spend Limit):</strong> В OpenAI Projects включен лимит расходов. Проверьте{" "}
+                            <a
+                              href="https://platform.openai.com/settings/organization/limits"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline text-indigo-500 hover:text-indigo-400 inline-flex items-center gap-0.5"
+                            >
+                              Limits в панели OpenAI <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </li>
+                          <li>
+                            <strong>ChatGPT Plus ($20) vs API баланс:</strong> Подписка ChatGPT Plus не пополняет баланс API platform.openai.com.
+                          </li>
+                          <li>
+                            <strong>Если вы пополнили баланс и создали новый API ключ:</strong> вставьте его в поле выше и нажмите &quot;Сохранить настройки&quot;.
+                          </li>
+                        </ul>
+                        <div className="pt-1.5">
+                          <a
+                            href="https://platform.openai.com/settings/organization/billing/overview"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs transition-colors"
+                          >
+                            Открыть Billing OpenAI <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -458,14 +603,27 @@ export default function SettingsPage() {
               ? t("settings.unsaved_buffer")
               : t("settings.all_up_to_date")}
           </span>
-          <Button
-            onClick={handleSave}
-            disabled={saving || !inputValue.trim()}
-            className="h-9 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-sm transition-colors"
-          >
-            <Save className="w-3.5 h-3.5 mr-1.5" />
-            {saving ? t("common.saving") : t("settings.openai_save_btn")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {(settings?.has_openai_key || inputValue.trim()) && (
+              <Button
+                variant="outline"
+                onClick={handleCheckKey}
+                disabled={checkingKey || saving}
+                className="h-9 px-3.5 text-xs text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${checkingKey ? "animate-spin" : ""}`} />
+                {checkingKey ? t("settings.checking_key") : t("settings.check_key_btn")}
+              </Button>
+            )}
+            <Button
+              onClick={handleSave}
+              disabled={saving || !inputValue.trim()}
+              className="h-9 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs shadow-sm transition-colors"
+            >
+              <Save className="w-3.5 h-3.5 mr-1.5" />
+              {saving ? t("common.saving") : t("settings.openai_save_btn")}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

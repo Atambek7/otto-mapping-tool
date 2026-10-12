@@ -61,17 +61,22 @@ async def get_invalid_products(factory_id: str = None, account: str = None, limi
     if not eans:
         return []
 
-    db_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans)).all()
+    attr_q = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans))
+    if account:
+        attr_q = attr_q.filter(models.ProductAttribute.account_name == account)
+    db_attrs = attr_q.all()
     attr_by_ean: dict = {}
     for a in db_attrs:
-        if a.product_ean not in attr_by_ean:
-            attr_by_ean[a.product_ean] = {}
-        attr_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+        acc = a.account_name or "JV"
+        if (a.product_ean, acc) not in attr_by_ean:
+            attr_by_ean[(a.product_ean, acc)] = {}
+        attr_by_ean[(a.product_ean, acc)][a.attribute_name] = a.attribute_value
 
     # Fetch category names using in-memory JSON cache
     cat_ids = list(set([m.category_id for m in mappings if m.category_id]))
 
     from services.validator import validate_product, get_category_by_id
+    from services.brand_guard import validate_brand_safety
 
     cat_name_by_id = {}
     for cid in cat_ids:
@@ -83,8 +88,12 @@ async def get_invalid_products(factory_id: str = None, account: str = None, limi
     status_updates = []
     for m in mappings:
         ean = m.product_ean
-        attr_map = attr_by_ean.get(ean, {})
+        m_acc = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name or account or "JV")
+        attr_map = attr_by_ean.get((ean, m_acc)) or attr_by_ean.get((ean, "JV"), {})
         errors = validate_product(ean, m.category_id, attr_map)
+        brand_errors = validate_brand_safety(m_acc, attr_map)
+        if brand_errors:
+            errors.extend(brand_errors)
 
         if errors:
             cat_name = cat_name_by_id.get(m.category_id, m.category_id)

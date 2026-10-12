@@ -26,13 +26,15 @@ def distribute_products_round_robin(
     daily_time: str = "08:00",
     tz_name: str = "Europe/Berlin",
     start_date: Optional[date] = None,
+    min_dates: Optional[Dict[str, date]] = None,
 ) -> Dict[str, Any]:
     """
     Distributes products across `days` using an Interleaved Round-Robin category mixture.
     
     1. Groups items by category_id.
     2. Builds an interleaved sequence [c1_0, c2_0, ..., cK_0, c1_1, c2_1, ...]
-    3. Partitions the sequence into days using (i % days) + 1.
+    3. Partitions the sequence into days using round-robin while strictly adhering to `min_dates`
+       (e.g. anti-collision delays from opposite account publication).
     4. Attaches precise scheduled_date in UTC calculated from daily_time in Europe/Berlin.
     """
     if not items:
@@ -67,41 +69,68 @@ def distribute_products_round_robin(
             if idx < len(group):
                 interleaved.append(group[idx])
 
-    # 3. Partition across days using (i % days) + 1
+    # 3. Partition across days respecting min_dates
     if start_date is None:
         start_date = calculate_start_date(daily_time, tz_name)
+
+    # Compute minimum day offset for each item
+    min_day_map: Dict[str, int] = {}
+    if min_dates:
+        for it in interleaved:
+            ean = it.get("product_ean")
+            if ean and ean in min_dates:
+                req_date = min_dates[ean]
+                diff_days = (req_date - start_date).days
+                min_day_map[ean] = max(1, diff_days + 1)
+
+    max_req_day = max(min_day_map.values()) if min_day_map else 1
+    effective_days = max(days, max_req_day)
 
     tz = ZoneInfo(tz_name)
     hour, minute = map(int, daily_time.split(":"))
 
-    daily_schedule: Dict[int, List[Dict[str, Any]]] = {d: [] for d in range(1, days + 1)}
+    daily_schedule: Dict[int, List[Dict[str, Any]]] = {d: [] for d in range(1, effective_days + 1)}
     day_timestamps: Dict[int, datetime] = {}
+    day_counts: Dict[int, int] = {d: 0 for d in range(1, effective_days + 1)}
 
-    for d in range(1, days + 1):
+    for d in range(1, effective_days + 1):
         target_day = start_date + timedelta(days=d - 1)
         local_dt = datetime.combine(target_day, time(hour, minute), tzinfo=tz)
         utc_dt = local_dt.astimezone(timezone.utc)
         day_timestamps[d] = utc_dt
 
     for i, item in enumerate(interleaved):
-        bucket_day = (i % days) + 1
+        ean = item.get("product_ean")
+        min_d = min_day_map.get(ean, 1)
+
+        # Candidate days starting from min_d
+        allowed_days = list(range(min_d, effective_days + 1))
+        # Pick the least populated day among allowed days (stable chronological tie-breaking)
+        best_day = min(allowed_days, key=lambda d: (day_counts[d], d - min_d))
+
+        day_counts[best_day] += 1
         scheduled_item = dict(item)
-        scheduled_item["scheduled_day"] = bucket_day
-        scheduled_item["scheduled_date"] = day_timestamps[bucket_day]
-        daily_schedule[bucket_day].append(scheduled_item)
+        scheduled_item["scheduled_day"] = best_day
+        scheduled_item["scheduled_date"] = day_timestamps[best_day]
+        if min_d > 1:
+            scheduled_item["stagger_delayed"] = True
+            if ean and min_dates and ean in min_dates:
+                scheduled_item["stagger_min_date"] = min_dates[ean].isoformat()
+
+        daily_schedule[best_day].append(scheduled_item)
 
     # 4. Compile category breakdown per day for dashboard preview
     category_summary: Dict[str, Dict[str, int]] = {}
-    for d in range(1, days + 1):
-        day_counts: Dict[str, int] = defaultdict(int)
+    for d in range(1, effective_days + 1):
+        counts: Dict[str, int] = defaultdict(int)
         for itm in daily_schedule[d]:
-            cat = str(itm.get("category_id") or "uncategorized")
-            day_counts[cat] += 1
-        category_summary[f"Day {d}"] = dict(day_counts)
+            cat = str(itm.get("category_name") or itm.get("category_id") or "uncategorized")
+            counts[cat] += 1
+        category_summary[f"Day {d}"] = dict(counts)
 
     return {
         "total_products": len(items),
-        "days": days,
+        "days": effective_days,
         "daily_time": daily_time,
         "timezone": tz_name,
         "start_date": start_date.isoformat(),

@@ -229,6 +229,67 @@ class TestTransferSafety(unittest.TestCase):
         finally:
             loop.close()
 
+    @patch("services.aftercool_twin.get_aftercool_session", new_callable=AsyncMock)
+    @patch("httpx.AsyncClient.get")
+    def test_resolve_target_factory_auto_refresh(self, mock_get, mock_session):
+        import asyncio
+        from unittest.mock import MagicMock
+        from services import aftercool_twin
+        # Reset caches
+        aftercool_twin._FACTORY_MAP_CACHE = {}
+        aftercool_twin._FACTORY_MAP_TIMESTAMP = 0.0
+
+        mock_session.return_value = "dummy-session"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "items": [
+                {"id": "504065", "name": "NEW_BEDINGART_GIZETTA_SPECIAL", "kind": "lister", "account": "JV"},
+                {"id": "483417", "name": "NEW_BEDINGART_GIZETTA_SPECIAL", "kind": "lister", "account": "XL"}
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        loop = asyncio.new_event_loop()
+        try:
+            target_fid = loop.run_until_complete(
+                aftercool_twin.resolve_target_factory_id("504065", "JV", "XL")
+            )
+            self.assertEqual(target_fid, "483417")
+        finally:
+            loop.close()
+
+    @patch("services.aftercool_twin.get_aftercool_session", new_callable=AsyncMock)
+    @patch("httpx.AsyncClient.get")
+    def test_resolve_target_factory_normalization(self, mock_get, mock_session):
+        import asyncio
+        from unittest.mock import MagicMock
+        from services import aftercool_twin
+        # Reset caches
+        aftercool_twin._FACTORY_MAP_CACHE = {}
+        aftercool_twin._FACTORY_MAP_TIMESTAMP = 0.0
+
+        mock_session.return_value = "dummy-session"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # Differing whitespace, differing casing, differing kind
+        mock_response.json.return_value = {
+            "items": [
+                {"id": "504065", "name": "  New_Bedingart_Gizetta_Special  ", "kind": "lister", "account": "jv"},
+                {"id": "483417", "name": "new_bedingart_gizetta_special", "kind": "product", "account": "xl"}
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        loop = asyncio.new_event_loop()
+        try:
+            target_fid = loop.run_until_complete(
+                aftercool_twin.resolve_target_factory_id("504065", "JV", "XL")
+            )
+            self.assertEqual(target_fid, "483417")
+        finally:
+            loop.close()
+
 
 if __name__ == "__main__":
     unittest.main()

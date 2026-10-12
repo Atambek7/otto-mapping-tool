@@ -34,14 +34,17 @@ async def fetch_aftercool_products_for_factory(
     """
     import httpx
     from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
+    from services.aftercool_service import resolve_aftercool_account
 
     if not factory_id:
         return {}
 
+    aftercool_acc = resolve_aftercool_account(str(factory_id).strip(), account)
+
     session = await get_aftercool_session()
     async with httpx.AsyncClient(cookies={"session": session}, timeout=timeout) as client:
         params = {
-            "account": account,
+            "account": aftercool_acc,
             "factory_id": str(factory_id).strip(),
             "include_row": 1,
             "limit": limit,

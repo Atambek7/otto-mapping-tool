@@ -22,6 +22,12 @@ from services.constant_attributes import (
 from services.brand_guard import validate_brand_safety, sanitize_brand_attributes, prepare_attributes_for_transfer, is_forbidden_warranty_attribute
 
 from services.categories_repo import get_allowed_attribute_names, get_category_by_id
+from services.ai_title_generator import (
+    resolve_openai_key,
+    generate_single_ai_title,
+    is_valid_source_title,
+    validate_title_type_consistency,
+)
 
 def is_same_category(cat1, cat2):
     if not cat1 or not cat2:
@@ -69,6 +75,109 @@ def ensure_default_attributes(db: Session, ean: str, account: str, category_id: 
             existing_map[k_lower] = new_attr
         elif not str(existing_map[k_lower].attribute_value).strip():
             existing_map[k_lower].attribute_value = v
+
+def migrate_product_attributes_for_new_category(
+    db: Session,
+    ean: str,
+    account: str,
+    old_cat_id: Optional[str],
+    new_cat_id: Optional[str],
+    db_mapping: Optional[models.ProductMapping] = None
+) -> None:
+    """
+    Intelligently migrates attributes when a product's category is changed:
+    - Preserves all existing attributes compatible with the new category's schema.
+    - Only deletes obsolete/unsupported attributes that do not belong to the new schema.
+    - Ensures standard category default attributes are applied.
+    - Re-validates mapping status (Ready vs Need Attributes).
+    """
+    if not ean or not account:
+        return
+
+    clean_ean = ean.strip()
+    if not db_mapping:
+        db_mapping = db.query(models.ProductMapping).filter(
+            models.ProductMapping.product_ean == clean_ean,
+            models.ProductMapping.account_name == account
+        ).first()
+
+    if not db_mapping:
+        return
+
+    # If new_cat_id is empty or unset, clear mapping category
+    if not new_cat_id:
+        db_mapping.category_id = None
+        db_mapping.status = "Not Mapped"
+        return
+
+    clean_new_cat = str(new_cat_id).strip()
+    
+    # Check if category actually changed
+    old_cat = str(old_cat_id or "").strip()
+    if old_cat and is_same_category(old_cat, clean_new_cat):
+        return
+
+    # Fetch existing attributes from DB
+    existing_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean == clean_ean,
+        models.ProductAttribute.account_name == account
+    ).all()
+
+    allowed_names = get_allowed_attribute_names(clean_new_cat)
+    surviving_attrs_dict = {}
+
+    if allowed_names is not None:
+        # Case-insensitive lookup map of allowed attributes for new category
+        allowed_lower = {a.lower(): a for a in allowed_names}
+        
+        # Universal attributes that must always be preserved
+        for u in ("marke", "farbe", "material", "lieferzeit", "zolltarifnummer"):
+            if u not in allowed_lower:
+                allowed_lower[u] = u.capitalize()
+
+        for a in existing_attrs:
+            k = (a.attribute_name or "").strip()
+            k_lower = k.lower()
+            if k_lower in allowed_lower:
+                # Valid in new category schema: keep it!
+                canonical_name = allowed_lower[k_lower]
+                if a.attribute_name != canonical_name:
+                    a.attribute_name = canonical_name
+                surviving_attrs_dict[canonical_name] = a.attribute_value
+            else:
+                # Obsolete / incompatible with new category: delete from DB
+                db.delete(a)
+    else:
+        # If allowed_names is None (unknown/custom category), preserve existing attributes safely
+        surviving_attrs_dict = {a.attribute_name: a.attribute_value for a in existing_attrs}
+
+    # Clean up ai_attributes list in mapping: only keep flags for surviving attributes
+    if db_mapping.ai_attributes:
+        db_mapping.ai_attributes = [
+            attr for attr in db_mapping.ai_attributes 
+            if attr in surviving_attrs_dict
+        ]
+
+    db_mapping.category_id = clean_new_cat
+
+    # Ensure default constants for the new category (e.g. Marke, Lieferzeit, etc.)
+    ensure_default_attributes(db, clean_ean, account, category_id=clean_new_cat)
+
+    # Re-fetch surviving attributes including defaults to calculate validation status
+    db.flush()
+    refreshed_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean == clean_ean,
+        models.ProductAttribute.account_name == account
+    ).all()
+    attr_map = {a.attribute_name: a.attribute_value for a in refreshed_attrs}
+
+    from services.validator import validate_product
+    errors = validate_product(clean_ean, clean_new_cat, attr_map)
+    if not errors:
+        db_mapping.status = "Ready"
+    else:
+        db_mapping.status = "Need Attributes"
+
 import openai
 
 router = APIRouter(
@@ -371,6 +480,41 @@ class AutoMapProductModel(BaseModel):
     picture_urls: str
     category_id: Optional[str] = None
 
+def format_openai_error(e: Exception) -> str:
+    """Formats raw OpenAI errors into clean, human-readable explanations."""
+    raw = str(e)
+    raw_lower = raw.lower()
+    
+    # 1. Quota / balance exhausted
+    if any(q in raw_lower for q in ("insufficient_quota", "credit_balance_exhausted", "no credits remaining", "quota exceeded")):
+        return (
+            "На вашем балансе OpenAI закончились средства (Quota exceeded). "
+            "Пожалуйста, пополните баланс на platform.openai.com или укажите другой API-ключ в Настройках профиля."
+        )
+    
+    # 2. Invalid or revoked key
+    if any(k in raw_lower for k in ("invalid_api_key", "incorrect api key", "invalid api key")):
+        return "Недействительный OpenAI API-ключ. Проверьте правильность ключа в Настройках профиля."
+        
+    # 3. Rate limits (RPM / TPM)
+    if "rate_limit" in raw_lower or ("429" in raw_lower and "quota" not in raw_lower):
+        return "Превышен лимит запросов к OpenAI. Пожалуйста, подождите минуту перед повторной попыткой."
+        
+    # 4. Model not found / access denied
+    if "model_not_found" in raw_lower or "does not have access" in raw_lower:
+        return "Выбранная модель OpenAI недоступна для вашего API-ключа."
+        
+    # 5. Try extracting clean error message if JSON/dict format
+    import re
+    msg_match = re.search(r"['\"]message['\"]\s*:\s*['\"]([^'\"]+)['\"]", raw)
+    if msg_match:
+        return f"Ошибка OpenAI: {msg_match.group(1)}"
+        
+    if hasattr(e, "message") and getattr(e, "message", None):
+        return f"Ошибка OpenAI: {e.message}"
+        
+    return f"Ошибка OpenAI: {raw[:150]}"
+
 class AutoMapBulkRequest(BaseModel):
     factory_id: str
     account: str = "JV"
@@ -381,13 +525,13 @@ class AutoMapBulkRequest(BaseModel):
 
 @router.post("/auto-map")
 async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
-    if not current_user.openai_api_key:
+    custom_api_key = resolve_openai_key(db=db, user=current_user)
+    if not custom_api_key:
         raise HTTPException(
             status_code=400, 
             detail="OPENAI_API_KEY_MISSING",
             headers={"x-error-code": "OPENAI_API_KEY_MISSING"}
         )
-    custom_api_key = current_user.openai_api_key
     
     # 1. Pre-fetch all necessary data to avoid N+1 and concurrent DB locks
     eans = [p.ean.strip() for p in req.products if p.ean and p.ean.strip()]
@@ -431,6 +575,8 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
                     target=req.target, 
                     custom_api_key=custom_api_key
                 )
+            except openai.OpenAIError as e:
+                raise e
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -447,7 +593,7 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
     except openai.OpenAIError as e:
         raise HTTPException(
             status_code=400,
-            detail=str(e),
+            detail=format_openai_error(e),
             headers={"x-error-code": "OPENAI_API_ERROR"}
         )
     except Exception as e:
@@ -474,13 +620,12 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
                 
             new_cat_id = updates.get("category_id")
             if new_cat_id and db_mapping.category_id and not is_same_category(db_mapping.category_id, new_cat_id):
-                # Category changed during auto-map: clear attributes of the old category and ai_attributes
-                db.query(models.ProductAttribute).filter(
-                    models.ProductAttribute.product_ean == ean,
-                    models.ProductAttribute.account_name == req.account
-                ).delete(synchronize_session=False)
-                db_mapping.ai_attributes = []
-                attrs_orm_dict[ean] = {}
+                migrate_product_attributes_for_new_category(
+                    db, ean, req.account, db_mapping.category_id, new_cat_id, db_mapping=db_mapping
+                )
+                attrs_orm_dict[ean] = {
+                    a.attribute_name: a for a in db.query(models.ProductAttribute).filter_by(product_ean=ean, account_name=req.account).all()
+                }
             if new_cat_id:
                 db_mapping.category_id = new_cat_id
             if updates.get("mapping_status"):
@@ -490,8 +635,12 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
             if new_cat_id:
                 ensure_default_attributes(db, ean, req.account, new_cat_id, attrs_map=attrs_orm_dict.setdefault(ean, {}))
 
+            # Sanitize AI-extracted attributes for the target account (enforcing account brand defaults & cleaning foreign tokens)
+            raw_attrs_to_save = updates.get("attributes_to_save", {})
+            safe_attrs_to_save = sanitize_brand_attributes(req.account, raw_attrs_to_save)
+
             # Insert or update attributes
-            for k, v in updates.get("attributes_to_save", {}).items():
+            for k, v in safe_attrs_to_save.items():
                 if is_forbidden_warranty_attribute(k):
                     continue
                 k_clean = str(k).strip()
@@ -522,7 +671,7 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
                         models.ProductAttribute.account_name == req.account
                     ).all()
                 }
-                for k, v in updates.get("attributes_to_save", {}).items():
+                for k, v in safe_attrs_to_save.items():
                     if not is_forbidden_warranty_attribute(k) and v and str(v).strip():
                         all_current[k] = str(v).strip()
                 val_errs = validate_product(ean, new_cat_id, all_current)
@@ -532,7 +681,7 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
                 res["errors"] = val_errs
 
             # Track AI attributes
-            ai_keys = [k for k, v in updates.get("attributes_to_save", {}).items() if not is_forbidden_warranty_attribute(k) and v and str(v).strip()]
+            ai_keys = [k for k, v in safe_attrs_to_save.items() if not is_forbidden_warranty_attribute(k) and v and str(v).strip()]
             if ai_keys:
                 existing_ai = set(db_mapping.ai_attributes or [])
                 existing_ai.update(ai_keys)
@@ -630,6 +779,9 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
 
             from services.okb_sync import clean_dimension_value, DIMENSION_ATTR_NAMES
             
+            # Sanitize brand attributes before upserting
+            attributes = sanitize_brand_attributes(acc, attributes, ensure_marke=True)
+
             # Upsert attributes
             for k, v in attributes.items():
                 if not str(v).strip() or is_forbidden_warranty_attribute(k):
@@ -663,8 +815,9 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/predict-category")
-async def api_predict_category(req: AutoMapProductModel, current_user: models.User = Depends(auth.get_current_user)):
-    if not current_user.openai_api_key:
+async def api_predict_category(req: AutoMapProductModel, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    custom_key = resolve_openai_key(db=db, user=current_user)
+    if not custom_key:
         raise HTTPException(
             status_code=400, 
             detail="OPENAI_API_KEY_MISSING",
@@ -672,11 +825,11 @@ async def api_predict_category(req: AutoMapProductModel, current_user: models.Us
         )
     product_info = format_product_info(req.title, req.description, req.specifics, req.gallery_url, req.picture_urls)
     try:
-        category_id = await predict_category(product_info, req.title, custom_api_key=current_user.openai_api_key)
+        category_id = await predict_category(product_info, req.title, custom_api_key=custom_key)
     except openai.OpenAIError as e:
         raise HTTPException(
             status_code=400,
-            detail=str(e),
+            detail=format_openai_error(e),
             headers={"x-error-code": "OPENAI_API_ERROR"}
         )
     if not category_id:
@@ -688,8 +841,9 @@ class ExtractAttributesRequest(AutoMapProductModel):
     use_vision: bool = False
 
 @router.post("/extract-attributes")
-async def api_extract_attributes(req: ExtractAttributesRequest, current_user: models.User = Depends(auth.get_current_user)):
-    if not current_user.openai_api_key:
+async def api_extract_attributes(req: ExtractAttributesRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    custom_key = resolve_openai_key(db=db, user=current_user)
+    if not custom_key:
         raise HTTPException(
             status_code=400, 
             detail="OPENAI_API_KEY_MISSING",
@@ -703,12 +857,12 @@ async def api_extract_attributes(req: ExtractAttributesRequest, current_user: mo
             use_vision=req.use_vision, 
             gallery_url=req.gallery_url, 
             picture_urls=req.picture_urls,
-            custom_api_key=current_user.openai_api_key
+            custom_api_key=custom_key
         )
     except openai.OpenAIError as e:
         raise HTTPException(
             status_code=400,
-            detail=str(e),
+            detail=format_openai_error(e),
             headers={"x-error-code": "OPENAI_API_ERROR"}
         )
     if attributes is None:
@@ -726,15 +880,9 @@ async def assign_category(mapping: CategoryMappingBase, db: Session = Depends(ge
     
     if db_mapping:
         if db_mapping.category_id != mapping.category_id:
-            # Delete old attributes for the old category
-            db.query(models.ProductAttribute).filter(
-                models.ProductAttribute.product_ean == clean_ean,
-                models.ProductAttribute.account_name == acc
-            ).delete(synchronize_session=False)
-            db_mapping.ai_attributes = []
-            db_mapping.status = "Need Attributes"
-            
-        db_mapping.category_id = mapping.category_id
+            migrate_product_attributes_for_new_category(
+                db, clean_ean, acc, db_mapping.category_id, mapping.category_id, db_mapping=db_mapping
+            )
         if mapping.factory_id:
             db_mapping.factory_id = mapping.factory_id
     else:
@@ -746,8 +894,8 @@ async def assign_category(mapping: CategoryMappingBase, db: Session = Depends(ge
             status="Need Attributes"
         )
         db.add(db_mapping)
-    
-    ensure_default_attributes(db, clean_ean, acc, category_id=mapping.category_id)
+        ensure_default_attributes(db, clean_ean, acc, category_id=mapping.category_id)
+        
     db.commit()
     return {"status": "success", "account": acc}
 
@@ -761,15 +909,9 @@ async def assign_category_bulk(mapping: CategoryMappingBulk, db: Session = Depen
         ).first()
         if db_mapping:
             if db_mapping.category_id != mapping.category_id:
-                # Delete old attributes
-                db.query(models.ProductAttribute).filter(
-                    models.ProductAttribute.product_ean == ean,
-                    models.ProductAttribute.account_name == mapping.account
-                ).delete(synchronize_session=False)
-                db_mapping.ai_attributes = []
-                db_mapping.status = "Need Attributes"
-                
-            db_mapping.category_id = mapping.category_id
+                migrate_product_attributes_for_new_category(
+                    db, ean, mapping.account, db_mapping.category_id, mapping.category_id, db_mapping=db_mapping
+                )
             if mapping.factory_id:
                 db_mapping.factory_id = mapping.factory_id
         else:
@@ -781,7 +923,7 @@ async def assign_category_bulk(mapping: CategoryMappingBulk, db: Session = Depen
                 status="Need Attributes"
             )
             db.add(db_mapping)
-        ensure_default_attributes(db, ean, mapping.account, category_id=mapping.category_id)
+            ensure_default_attributes(db, ean, mapping.account, category_id=mapping.category_id)
     db.commit()
     return {"status": "success", "count": len(clean_eans)}
 
@@ -993,10 +1135,15 @@ async def get_factory_mappings(factory_id: str, account: str = None, db: Session
         clean_p_af = _clean_price_val(m.price_af)
         clean_p_name = m.product_name if (m.product_name and m.product_name.strip() not in ("Без названия", "None", "null")) else None
         has_ai = bool(m.has_ai_title or (clean_p_name and len(clean_p_name) <= 70 and (account or "JV").upper() == "XL"))
+        # Strict consistency: an item without a category cannot be "Need Attributes" or "Ready"
+        display_status = m.status or "Not Mapped"
+        if (not m.category_id or str(m.category_id).strip() in ("", "0", "None")) and display_status.lower() in ("need attributes", "need_attributes", "partial", "ready"):
+            display_status = "Not Mapped"
+
         result[m.product_ean] = {
             "category_id": m.category_id,
             "category_name": cat_name,
-            "status": m.status,
+            "status": display_status,
             "published_at": m.published_at.isoformat() if m.published_at else None,
             "product_name": clean_p_name,
             "price": clean_p or clean_p_af,
@@ -1085,11 +1232,24 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
     ).first()
 
     if not db_mapping:
+        # Strict protection: If creating mapping for XL, inherit category & status from JV if present
+        inherited_cat_id = None
+        inherited_status = "Not Mapped"
+        if acc == "XL":
+            jv_m = db.query(models.ProductMapping).filter(
+                models.ProductMapping.product_ean == clean_ean,
+                models.ProductMapping.account_name == "JV"
+            ).first()
+            if jv_m and jv_m.category_id:
+                inherited_cat_id = jv_m.category_id
+                inherited_status = jv_m.status or "Need Attributes"
+
         db_mapping = models.ProductMapping(
             product_ean=clean_ean,
             account_name=acc,
             factory_id=req.factory_id,
-            status="Not Mapped"
+            category_id=inherited_cat_id,
+            status=inherited_status
         )
         db.add(db_mapping)
     elif req.factory_id and not db_mapping.factory_id:
@@ -1110,8 +1270,10 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
             num_price = float(raw_price)
             if num_price <= 0:
                 raise ValueError("Price must be greater than 0")
-            clean_price_str = f"{int(num_price)}" if num_price.is_integer() else f"{num_price:.2f}"
+            # Preserve exact manual price entered by user: integer (1500) remains 1500, decimals formatted to 2 decimal places
+            clean_price_str = str(int(num_price)) if num_price.is_integer() else f"{num_price:.2f}"
             db_mapping.price = clean_price_str
+            db_mapping.has_manual_price = True
             updated_fields.append("price")
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Некорректный формат цены. Укажите число больше 0 (например, 1299 или 1299.99)")
@@ -1127,6 +1289,142 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
         "product_name": db_mapping.product_name,
         "price": db_mapping.price,
         "updated_fields": updated_fields
+    }
+
+
+class ApplyPriceEndingRequest(BaseModel):
+    account: str = "JV"
+    ending: str = "99"
+    product_eans: Optional[List[str]] = None
+    items: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/factory/{factory_id}/apply-price-ending")
+async def apply_price_ending(
+    factory_id: str,
+    req: ApplyPriceEndingRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Applies custom cents ending (default .99) to prices of factory products:
+    e.g. 1900 -> 1900.99, 1850.50 -> 1850.99.
+    Marks has_manual_price = True to prevent Aftercool sync overwrite.
+    Invalidates Redis products cache for the factory.
+    """
+    clean_fid = str(factory_id).strip()
+    acc = str(req.account or "JV").upper().strip()
+    raw_ending = str(req.ending or "99").replace(".", "").replace(",", "").strip()
+    if not raw_ending:
+        clean_ending = "99"
+    elif len(raw_ending) == 1:
+        clean_ending = f"0{raw_ending}"
+    else:
+        clean_ending = raw_ending[:2]
+
+    clean_eans = [str(e).strip() for e in (req.product_eans or []) if str(e).strip()]
+
+    query = db.query(models.ProductMapping).filter(
+        models.ProductMapping.account_name == acc
+    )
+    if req.product_eans is not None:
+        if not clean_eans:
+            return {
+                "status": "success",
+                "factory_id": clean_fid,
+                "account": acc,
+                "ending": clean_ending,
+                "updated_count": 0,
+                "updated_prices": {}
+            }
+        query = query.filter(models.ProductMapping.product_ean.in_(clean_eans))
+    elif clean_fid:
+        query = query.filter(models.ProductMapping.factory_id == clean_fid)
+    else:
+        raise HTTPException(status_code=400, detail="factory_id or product_eans is required")
+
+    mappings = query.all()
+    mappings_by_ean = {m.product_ean: m for m in mappings}
+
+    # Fallback items map
+    fallback_prices: Dict[str, Any] = {}
+    if req.items:
+        for it in req.items:
+            e = str(it.get("ean") or it.get("product_ean") or "").strip()
+            p = it.get("price") or it.get("price_af")
+            if e and p:
+                if clean_eans and e not in clean_eans:
+                    continue
+                fallback_prices[e] = p
+                if e not in mappings_by_ean:
+                    inherited_cat_id = None
+                    inherited_status = "Not Mapped"
+                    if acc == "XL":
+                        jv_m = db.query(models.ProductMapping).filter(
+                            models.ProductMapping.product_ean == e,
+                            models.ProductMapping.account_name == "JV"
+                        ).first()
+                        if jv_m and jv_m.category_id:
+                            inherited_cat_id = jv_m.category_id
+                            inherited_status = jv_m.status or "Need Attributes"
+
+                    new_m = models.ProductMapping(
+                        product_ean=e,
+                        account_name=acc,
+                        factory_id=clean_fid,
+                        category_id=inherited_cat_id,
+                        status=inherited_status if inherited_cat_id else "Not Mapped"
+                    )
+                    db.add(new_m)
+                    mappings_by_ean[e] = new_m
+
+    updated_count = 0
+    updated_prices: Dict[str, str] = {}
+    now = datetime.datetime.utcnow()
+
+    for ean, m in mappings_by_ean.items():
+        if clean_eans and ean not in clean_eans:
+            continue
+        # Ensure uncategorized mapping status is Not Mapped
+        if (not m.category_id or str(m.category_id).strip() in ("", "0", "None")) and (m.status or "").lower() in ("need attributes", "need_attributes", "partial", "ready"):
+            m.status = "Not Mapped"
+        raw_p = m.price if (m.price and str(m.price).strip() not in ("-", "—", "0", "0.0", "0.00")) else (m.price_af or fallback_prices.get(ean))
+        if not raw_p or str(raw_p).strip() in ("-", "—", "None", "", "0", "0.0", "0.00"):
+            continue
+
+        try:
+            cleaned_num_str = str(raw_p).replace("€", "").replace("EUR", "").replace("eur", "").replace(",", ".").strip()
+            num_val = float(cleaned_num_str)
+            if num_val <= 0:
+                continue
+
+            new_price = f"{int(num_val)}.{clean_ending}"
+            m.price = new_price
+            m.has_manual_price = True
+            m.last_synced_at = now
+            updated_prices[ean] = new_price
+            updated_count += 1
+        except Exception:
+            continue
+
+    if updated_count > 0:
+        db.commit()
+
+    # Clear Redis cache for this factory so next fetch reflects updated prices
+    if clean_fid:
+        try:
+            from services.aftercool_service import invalidate_products_cache
+            await invalidate_products_cache(acc, clean_fid)
+        except Exception as e:
+            pass
+
+    return {
+        "status": "success",
+        "factory_id": clean_fid,
+        "account": acc,
+        "ending": clean_ending,
+        "updated_count": updated_count,
+        "updated_prices": updated_prices
     }
 
 @router.post("/attributes")
@@ -1173,7 +1471,8 @@ async def save_attributes(mapping: AttributeMappingBase, db: Session = Depends(g
             v_clean = clean_dimension_value(v_clean)
         clean_attributes[k_clean] = v_clean
 
-    # 1. Brand Guard Safety Check
+    # 1. Brand Guard Self-Healing & Safety Check
+    clean_attributes = sanitize_brand_attributes(acc, clean_attributes, ensure_marke=True)
     brand_errors = validate_brand_safety(acc, clean_attributes)
     if brand_errors:
         raise HTTPException(status_code=400, detail=" ; ".join(brand_errors))
@@ -1226,7 +1525,8 @@ async def save_attributes_bulk(mapping: AttributeMappingBulk, db: Session = Depe
 
     clean_attributes = {k: v for k, v in mapping.attributes.items() if not is_forbidden_warranty_attribute(k)}
 
-    # 1. Brand Guard Safety Check
+    # 1. Brand Guard Self-Healing & Safety Check
+    clean_attributes = sanitize_brand_attributes(acc, clean_attributes, ensure_marke=False)
     brand_errors = validate_brand_safety(acc, clean_attributes)
     if brand_errors:
         raise HTTPException(status_code=400, detail=" ; ".join(brand_errors))
@@ -1623,11 +1923,18 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
         final_src_price = src_m.price if _is_pos_price(src_m.price) else (src_m.price_af if _is_pos_price(src_m.price_af) else None)
         final_src_price_af = src_m.price_af if _is_pos_price(src_m.price_af) else None
 
+        is_native_target = (
+            (tgt_acc_str == "XL" and str(final_tgt_fid).startswith("48")) or
+            (tgt_acc_str == "JV" and str(final_tgt_fid).startswith("50"))
+        )
+        mapping_source_acc = None if is_native_target else src_acc_str
+
         if not tgt_m:
             tgt_m = models.ProductMapping(
                 product_ean=tgt_ean,
                 factory_id=final_tgt_fid,
                 account_name=req.target_account,
+                source_account=mapping_source_acc,
                 category_id=target_cat_id,
                 product_name=tgt_pname or src_m.product_name,
                 has_ai_title=False,
@@ -1642,6 +1949,7 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
             if req.copy_categories:
                 tgt_m.category_id = target_cat_id
             tgt_m.factory_id = final_tgt_fid
+            tgt_m.source_account = mapping_source_acc
             if tgt_pname or src_m.product_name:
                 tgt_m.product_name = tgt_pname or src_m.product_name
                 tgt_m.has_ai_title = False
@@ -1700,7 +2008,7 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
     strictly scoped to req.account.
     """
     if not req.product_eans:
-        return {"shared_attrs": [], "current_values": {}, "categories": []}
+        return {"shared_attrs": [], "other_attrs": [], "current_values": {}, "categories": []}
 
     mappings_list = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean.in_(req.product_eans),
@@ -1708,7 +2016,7 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
     ).all()
 
     if not mappings_list:
-        return {"shared_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
+        return {"shared_attrs": [], "other_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
 
     cat_to_eans: dict = {}
     ean_to_cat: dict = {}
@@ -1720,7 +2028,7 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
         ean_to_cat[m.product_ean] = cid
 
     if not cat_to_eans:
-        return {"shared_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
+        return {"shared_attrs": [], "other_attrs": [], "current_values": {}, "categories": [], "unmapped_eans": req.product_eans}
 
     from services.categories_repo import get_category_by_id, get_groups
 
@@ -1789,6 +2097,41 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
                 "from_multiple_cats": len(all_cat_ids) > 1
             })
 
+    other_attrs_dict = {}
+    for cid, schema in schemas_by_cat.items():
+        cat_info = get_category_by_id(cid)
+        cat_name = cat_info.get("name", cid) if cat_info else cid
+        ean_count = len(cat_to_eans.get(cid, []))
+        for a in schema:
+            name = a["name"]
+            if name in shared_names:
+                continue
+            if name not in other_attrs_dict:
+                other_attrs_dict[name] = {
+                    **a,
+                    "applicable_categories": [cat_name],
+                    "applicable_eans_count": ean_count,
+                    "from_multiple_cats": False
+                }
+            else:
+                existing = other_attrs_dict[name]
+                if cat_name not in existing["applicable_categories"]:
+                    existing["applicable_categories"].append(cat_name)
+                    existing["applicable_eans_count"] += ean_count
+                    existing["from_multiple_cats"] = True
+                if a["required"]:
+                    existing["required"] = True
+                if a.get("options"):
+                    if not existing.get("options"):
+                        existing["options"] = list(a["options"])
+                    else:
+                        for opt in a["options"]:
+                            if opt not in existing["options"]:
+                                existing["options"].append(opt)
+
+    other_attrs = list(other_attrs_dict.values())
+    other_attrs.sort(key=lambda x: (not x["required"], -x["applicable_eans_count"], x["name"]))
+
     db_attrs = db.query(models.ProductAttribute).filter(
         models.ProductAttribute.product_ean.in_(req.product_eans),
         models.ProductAttribute.account_name == req.account
@@ -1796,8 +2139,7 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
 
     current_values: dict = {}
     for a in db_attrs:
-        if a.attribute_name in shared_names:
-            current_values.setdefault(a.product_ean, {})[a.attribute_name] = a.attribute_value
+        current_values.setdefault(a.product_ean, {})[a.attribute_name] = a.attribute_value
 
     cat_infos = []
     for cid, eans in cat_to_eans.items():
@@ -1809,6 +2151,7 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
 
     return {
         "shared_attrs": shared_attrs,
+        "other_attrs": other_attrs,
         "current_values": current_values,
         "categories": cat_infos,
         "unmapped_eans": unmapped_eans,
@@ -1821,8 +2164,12 @@ class GenerateAiTitlesRequest(BaseModel):
     factory_id: str
     account: str
     eans: Optional[List[str]] = None
+    titles: Optional[Dict[str, str]] = None
+    current_title: Optional[str] = None
     mode: Optional[str] = None  # "over_70_only" or "all"
     force: Optional[bool] = False  # If True, bypass protection and regenerate even if already has AI title
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
 
 
 def _truncate_title_safely(title: str, max_len: int = 70) -> str:
@@ -1853,25 +2200,15 @@ async def generate_ai_titles(
         raise HTTPException(status_code=400, detail="factory_id is required")
 
     # 1. Resolve OpenAI API key
-    custom_api_key = current_user.openai_api_key or os.environ.get("OPENAI_API_KEY")
+    custom_api_key = resolve_openai_key(db=db, user=current_user)
     if not custom_api_key:
-        user_with_key = db.query(models.User).filter(
-            models.User.openai_api_key.isnot(None),
-            models.User.openai_api_key != ""
-        ).first()
-        if user_with_key:
-            custom_api_key = user_with_key.openai_api_key
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="OPENAI_API_KEY_MISSING",
-                headers={"x-error-code": "OPENAI_API_KEY_MISSING"}
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY_MISSING",
+            headers={"x-error-code": "OPENAI_API_KEY_MISSING"}
+        )
 
-    from services.automapper import get_openai_client
     from services.categories_service import resolve_category_names
-
-    client = get_openai_client(custom_api_key)
 
     # 2. Query target products with strict account isolation
     query = db.query(models.ProductMapping).filter(
@@ -1885,26 +2222,62 @@ async def generate_ai_titles(
 
     mappings = query.all()
 
-    # 3. Apply account-specific filtering and token protection:
-    # JV: only items with current title length > 70
-    # XL: by default protects products that ALREADY have an AI title (or compliant <= 70 title),
-    #     unless force=True is explicitly set to regenerate.
+    # Clean incoming titles from client
+    clean_titles = {str(k).strip(): str(v).strip() for k, v in (req.titles or {}).items() if v and str(v).strip()}
+    single_title = str(req.current_title or "").strip()
+
+    # Strict Protection & Resilience:
+    # If specific EANs were selected/requested (e.g. from drawer or selection)
+    # but some don't have a ProductMapping row in this account yet:
+    # Create them while strictly inheriting category/status from JV (if target is XL)
+    # or using req.category_id, ensuring categories and attributes are never lost.
+    if clean_eans:
+        existing_eans = {m.product_ean for m in mappings}
+        for ean in clean_eans:
+            if ean not in existing_eans:
+                jv_m = db.query(models.ProductMapping).filter(
+                    models.ProductMapping.product_ean == ean,
+                    models.ProductMapping.account_name == "JV"
+                ).first()
+                cat_id = req.category_id or (jv_m.category_id if jv_m else None)
+                st = jv_m.status if (jv_m and jv_m.status) else ("Need Attributes" if cat_id else "Not Mapped")
+                initial_title = clean_titles.get(ean) or (single_title if len(clean_eans) == 1 else None) or (jv_m.product_name if jv_m else None)
+                new_pm = models.ProductMapping(
+                    product_ean=ean,
+                    factory_id=factory_id_clean,
+                    account_name=target_account,
+                    category_id=cat_id,
+                    status=st,
+                    product_name=initial_title,
+                    price=(jv_m.price if jv_m else None)
+                )
+                db.add(new_pm)
+                mappings.append(new_pm)
+        db.flush()
+
+    # Snapshot original categories and statuses for strict preservation guard
+    original_categories = {m.product_ean: m.category_id for m in mappings if m.category_id}
+    original_statuses = {m.product_ean: m.status for m in mappings if m.status}
+
+    # 3. Apply filtering and token protection:
     skipped_count = 0
-    is_over_70_only = (target_account == "JV") or (req.mode == "over_70_only")
-    if is_over_70_only:
-        mappings = [m for m in mappings if len(m.product_name or "") > 70]
-    elif target_account == "XL" and not req.force:
-        total_before = len(mappings)
-        # Skip products that already have a valid AI-generated or <=70 title
-        mappings = [
-            m for m in mappings 
-            if not (m.has_ai_title is True or (m.product_name and 0 < len(m.product_name.strip()) <= 70))
-        ]
-        skipped_count = total_before - len(mappings)
+    if clean_eans:
+        # If user explicitly selected products, process all of them without dropping <= 70 chars
+        if req.mode == "over_70_only":
+            mappings = [m for m in mappings if len(clean_titles.get(m.product_ean) or m.product_name or "") > 70]
+    else:
+        # Mass whole-factory generation:
+        if req.mode == "over_70_only":
+            mappings = [m for m in mappings if len(clean_titles.get(m.product_ean) or m.product_name or "") > 70]
+        elif not req.force:
+            total_before = len(mappings)
+            # Protect products that already have an AI title from repeated generation
+            mappings = [m for m in mappings if not (m.has_ai_title is True)]
+            skipped_count = total_before - len(mappings)
 
     if not mappings:
         msg = (
-            f"Защита от повторной траты токенов: все {skipped_count} товаров уже имеют готовое ИИ-название (до 70 симв.) и были пропущены."
+            f"Защита от повторной траты токенов: все {skipped_count} товаров уже имеют сгенерированное ИИ-название и были пропущены."
             if skipped_count > 0
             else "Нет товаров, требующих обновления названия"
         )
@@ -1919,63 +2292,46 @@ async def generate_ai_titles(
 
     # 4. Resolve categories batch in 1 query
     cat_ids = {m.category_id for m in mappings if m.category_id}
+    if req.category_id:
+        cat_ids.add(req.category_id)
     cat_names = resolve_category_names(cat_ids, db)
+    if req.category_id and req.category_name:
+        cat_names[str(req.category_id)] = req.category_name
 
     # 5. Concurrently generate titles with Semaphore(15)
     sem = asyncio.Semaphore(15)
     updated_map: Dict[str, str] = {}
     errors_map: Dict[str, str] = {}
 
-    SYSTEM_PROMPT = (
-        "Du bist ein professioneller E-Commerce-Texter für Otto. "
-        "Erstelle prägnante, natürliche Produkttitel auf Deutsch bis maximal 70 Zeichen."
-    )
-
     async def generate_one(pm: models.ProductMapping):
         ean = pm.product_ean
-        current_title = (pm.product_name or "").strip()
-        cat_name = cat_names.get(str(pm.category_id), "") or "Möbel"
+        current_title = (
+            clean_titles.get(ean)
+            or (single_title if len(clean_eans) == 1 else "")
+            or (pm.product_name or "")
+        ).strip()
 
-        prompt = (
-            f"Titel: {current_title}\n"
-            f"Kategorie: {cat_name}\n\n"
-            "Regeln:\n"
-            "1. Natürlicher Produkttitel auf Deutsch bis maximal 70 Zeichen.\n"
-            "2. Beginne NICHT mit der Kategorie.\n"
-            "3. Kein Keyword-Stuffing: keine Wortwiederholungen, keine sinnlose Aneinanderreihung von Suchbegriffen.\n"
-            "4. Verwende nur wesentliche Produkteigenschaften.\n"
-            "5. Keine erfundenen Daten, keine Werbefüllwörter (wie Premium, Top, Hochwertig).\n"
-            "6. Antworte NUR mit dem fertigen Titel, ohne Anführungszeichen, ohne Erklärungen."
-        )
+        # Guard: never send empty, placeholder, or invalid titles to AI
+        if not is_valid_source_title(current_title):
+            errors_map[ean] = "Отсутствует или недействительно исходное название товара"
+            return
+
+        cat_name = cat_names.get(str(pm.category_id), "") or req.category_name or "Möbel"
 
         async with sem:
-            for attempt in range(2):
-                try:
-                    resp = await client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=40,
-                        temperature=0.3
-                    )
-                    content = (resp.choices[0].message.content or "").strip()
-                    cleaned = _truncate_title_safely(content, max_len=70)
-
-                    if cleaned and len(cleaned) >= 3 and not cleaned.lower().startswith("entschuldigung"):
-                        updated_map[ean] = cleaned
-                        return
-                    else:
-                        errors_map[ean] = "Model returned empty or invalid title"
-                except Exception as ex:
-                    if attempt == 1:
-                        errors_map[ean] = str(ex)
-                    await asyncio.sleep(0.5)
+            new_title = await generate_single_ai_title(
+                api_key=custom_api_key,
+                current_title=current_title,
+                category_name=cat_name
+            )
+            if new_title:
+                updated_map[ean] = new_title
+            else:
+                errors_map[ean] = "Не удалось сгенерировать корректное название товара"
 
     await asyncio.gather(*(generate_one(m) for m in mappings))
 
-    # 6. Persist updates to DB in a single commit
+    # 6. Persist updates to DB in a single commit with strict category & attribute protection
     if updated_map:
         now_utc = datetime.datetime.utcnow()
         for pm in mappings:
@@ -1983,6 +2339,21 @@ async def generate_ai_titles(
                 pm.product_name = updated_map[pm.product_ean]
                 pm.has_ai_title = True
                 pm.last_synced_at = now_utc
+
+                # Strict safety guard: Category must NEVER be wiped, cleared, or reset by AI title generation
+                orig_cat = original_categories.get(pm.product_ean)
+                if orig_cat and not pm.category_id:
+                    pm.category_id = orig_cat
+                elif not pm.category_id and req.category_id:
+                    pm.category_id = req.category_id
+
+                # Status preservation guard: Never reset 'Ready' or mapped product to 'Not Mapped'
+                orig_st = original_statuses.get(pm.product_ean)
+                if orig_st and orig_st in ("Ready", "Need Attributes", "Error"):
+                    pm.status = orig_st
+                elif pm.category_id and pm.status == "Not Mapped":
+                    pm.status = "Need Attributes"
+
         db.commit()
 
     return {

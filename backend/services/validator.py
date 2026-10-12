@@ -1,6 +1,7 @@
 import os
 import json
 from services.categories_repo import get_category_by_id, get_groups
+from services.brand_guard import is_forbidden_warranty_attribute
 
 def validate_product(ean: str, category_id: str, attributes: dict) -> list:
     """
@@ -23,9 +24,13 @@ def validate_product(ean: str, category_id: str, attributes: dict) -> list:
                 raw_attrs = group_data.get("attributes", {}).get("attributes", [])
                 for a in raw_attrs:
                     attr_name = a.get("name")
+                    if is_forbidden_warranty_attribute(attr_name):
+                        continue
                     val = attributes.get(attr_name, "")
                     
                     is_req = a.get("relevance") == "HIGH" or attr_name == "Marke"
+                    if attr_name == "Ausführung":
+                        is_req = False
                     
                     if is_req:
                         if not val or not str(val).strip():
@@ -41,3 +46,32 @@ def validate_product(ean: str, category_id: str, attributes: dict) -> list:
             errors.append("Выбранная категория не найдена в базе OKB")
             
     return errors
+
+def get_missing_required_attributes(category_id: str, attributes: dict) -> list[str]:
+    """
+    Returns a list of required attribute names that are missing from `attributes`.
+    """
+    missing = []
+    if not category_id:
+        return missing
+    
+    cat = get_category_by_id(category_id)
+    if cat:
+        group_id = str(cat.get("category_group_id"))
+        group_data = get_groups().get(group_id)
+        if group_data:
+            raw_attrs = group_data.get("attributes", {}).get("attributes", [])
+            for a in raw_attrs:
+                attr_name = a.get("name")
+                if is_forbidden_warranty_attribute(attr_name):
+                    continue
+                val = attributes.get(attr_name, "")
+                
+                is_req = a.get("relevance") == "HIGH" or attr_name == "Marke"
+                if attr_name == "Ausführung":
+                    is_req = False
+                
+                if is_req:
+                    if not val or not str(val).strip():
+                        missing.append(attr_name)
+    return missing

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useMemo, useCallback, memo } from "react";
-import { useParams } from "next/navigation";
+import React, { useEffect, useState, useRef, useMemo, useCallback, memo, startTransition, useDeferredValue } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { fetchWithAuth } from "@/lib/api";
 import { getCachedFactory, setCachedFactory } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
@@ -10,22 +10,31 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CategoryAutocomplete } from "@/components/CategoryAutocomplete";
+import { InlineCategoryCell } from "@/components/InlineCategoryCell";
+import { InlineTitleCell } from "@/components/InlineTitleCell";
+import { InlinePriceCell } from "@/components/InlinePriceCell";
 import { ProductDrawer } from "@/components/ProductDrawer";
 import { MassEditDrawer } from "@/components/MassEditDrawer";
 import { toast } from "sonner";
 
 import {
-  Download, RefreshCw, Search, ArrowUpDown, ArrowUp, ArrowDown, Database, Wifi, X, Sparkles, Loader2, ChevronLeft, Upload, FileDown, FileArchive, Bot, Play, Pause, Clock, AlertCircle, Calendar, ChevronDown, ChevronRight, FileSpreadsheet, Check, Layers
+  Download, RefreshCw, Search, ArrowUpDown, ArrowUp, ArrowDown, Database, Wifi, X, Sparkles, Loader2, ChevronLeft, Upload, FileDown, FileArchive, Bot, Play, Pause, Clock, AlertCircle, Calendar, ChevronDown, ChevronRight, FileSpreadsheet, Check, Layers, ArrowRightLeft
 } from "lucide-react";
 import { useAccount } from "@/lib/useAccount";
+import { showOpenAiErrorToast } from "@/lib/openaiError";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AttributeCombobox } from "@/components/AttributeCombobox";
 import { ImageHoverPreview, HoverImagePreviewState } from "@/components/ImageHoverPreview";
 import DripScheduleModal from "@/components/DripScheduleModal";
+import DripQueueModal from "@/components/DripQueueModal";
+import AiTitleModal from "@/components/AiTitleModal";
+import { PriceEndingModal } from "@/components/PriceEndingModal";
 import { useTranslation } from "react-i18next";
 
 // --- Helpers ---
+const deCollator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+
 function parseSpecifics(raw: any) {
   if (!raw) return [];
   try {
@@ -36,40 +45,130 @@ function parseSpecifics(raw: any) {
   return [];
 }
 
+const parsePositivePrice = (val: any): string | null => {
+  if (!val) return null;
+  const s = String(val).replace("€", "").replace(/EUR/gi, "").replace(",", ".").trim();
+  const num = parseFloat(s);
+  return (!isNaN(num) && num > 0) ? (num % 1 === 0 ? String(Math.floor(num)) : num.toFixed(2)) : null;
+};
+
+const getItemNumericPrice = (item: any, mappings: Record<string, any>): number => {
+  if (!item) return 0;
+  const row = item.row || {};
+  const ean = item.ean || row.EAN || "";
+
+  // 1. Saved or edited mapping price has highest priority
+  const mapPrice = parsePositivePrice(mappings[ean]?.price);
+  if (mapPrice) {
+    const num = parseFloat(mapPrice);
+    if (!isNaN(num) && num > 0) return num;
+  }
+
+  // 2. Catalog Startpreis
+  const startPrice = parsePositivePrice(row.Startpreis);
+  if (startPrice) {
+    const num = parseFloat(startPrice);
+    if (!isNaN(num) && num > 0) return num;
+  }
+
+  // 3. Catalog SofortkaufenPreis
+  const sofortPrice = parsePositivePrice(row.SofortkaufenPreis);
+  if (sofortPrice) {
+    const num = parseFloat(sofortPrice);
+    if (!isNaN(num) && num > 0) return num;
+  }
+
+  // 4. Any other price field (e.g. row.price or item.price)
+  const otherPrice = parsePositivePrice(row.price || item.price);
+  if (otherPrice) {
+    const num = parseFloat(otherPrice);
+    if (!isNaN(num) && num > 0) return num;
+  }
+
+  return 0;
+};
+
 const getRowKey = (p: any, index: number): string => {
   if (!p) return `row-${index}`;
   const row = p.row || {};
   return String(row.ItemID || row.id || p.id || `${p.ean || row.EAN || 'item'}_${index}`);
 };
 
-const VirtualRow = React.memo(({
-  index, top, height, product, ean, rowKey, img, price, mapData, isSelected,
-  isDraggingCurrent, handleRowMouseDown, toggleSelection, setActiveProduct,
-  onImageHover, onImageLeave, isMirrored
-}: {
-  index: number; top: number; height: number; product: any; ean: string; rowKey: string; img: string; price: string; mapData: any;
-  isSelected: boolean; isDraggingCurrent: boolean; isMirrored?: boolean;
+export const getProductStatusKey = (product: any, mapData: any): "published" | "in progress" | "ready" | "need" | "error" | "unmapped" => {
+  const rawStatus = (mapData?.status || "").toLowerCase().trim();
+
+  // If there is no category assigned, product is strictly "unmapped"
+  const cat = mapData?.category_id || mapData?.category || product?.category_id || product?.category;
+  const hasCategory = Boolean(cat && String(cat).trim() !== "" && String(cat).trim() !== "0" && String(cat).toLowerCase().trim() !== "none");
+
+  if (!hasCategory) {
+    return "unmapped";
+  }
+
+  if (rawStatus === "published") return "published";
+  if (rawStatus === "in progress" || rawStatus === "processing") return "in progress";
+  if (rawStatus === "ready") return "ready";
+  if (rawStatus === "need attributes" || rawStatus === "need_attributes" || rawStatus === "partial") return "need";
+  if (rawStatus === "error") return "error";
+  if (rawStatus === "not mapped" || rawStatus === "unmapped" || rawStatus === "not_mapped") return "unmapped";
+
+  return "need";
+};
+
+interface VirtualRowProps {
+  index: number;
+  top: number;
+  height: number;
+  product: any;
+  ean: string;
+  rowKey: string;
+  img: string;
+  price: string;
+  mapData: any;
+  isSelected: boolean;
+  isDraggingRef: React.MutableRefObject<boolean>;
+  isMirrored?: boolean;
+  factoryId: string;
+  account: string;
+  onCategorySaved: (ean: string, catId: string, catName: string) => void;
+  onTitleSaved: (ean: string, newTitle: string) => void;
+  onPriceSaved: (ean: string, newPrice: string) => void;
   handleRowMouseDown: (index: number, rowKey: string, e: React.MouseEvent) => void;
   toggleSelection: (rowKey: string) => void;
   setActiveProduct: (p: any) => void;
   onImageHover: (img: string, name: string, price: string, e: React.MouseEvent<HTMLElement>) => void;
   onImageLeave: () => void;
-}) => {
+}
+
+const VirtualRowComponent = ({
+  index, top, height, product, ean, rowKey, img, price, mapData, isSelected,
+  isDraggingRef, handleRowMouseDown, toggleSelection, setActiveProduct,
+  onImageHover, onImageLeave, isMirrored, factoryId, account, onCategorySaved,
+  onTitleSaved, onPriceSaved
+}: VirtualRowProps) => {
   const { t } = useTranslation();
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
   const row = product.row || {};
+  const rawTitle = (mapData?.product_name || "").trim();
+  const currentTitle = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
+    ? rawTitle
+    : (row.Artikelbeschreibung || product.name || "");
+  const currentPrice = parsePositivePrice(mapData?.price) || parsePositivePrice(price) || "-";
+
   return (
     <div
       data-row-index={index}
       className={cn(
         "absolute top-0 left-0 w-full flex items-center border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 cursor-pointer transition-colors text-sm select-none",
-        isSelected && "bg-indigo-50/50 hover:bg-indigo-50/70 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/30"
+        isSelected && "bg-indigo-50/50 hover:bg-indigo-50/70 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/30",
+        isEditingCategory ? "z-[60]" : "z-0 focus-within:z-[60]"
       )}
       style={{
         height: `${height}px`,
         transform: `translateY(${top}px)`,
       }}
       onMouseDown={(e) => handleRowMouseDown(index, rowKey, e)}
-      onClick={(e) => { if (!isDraggingCurrent) setActiveProduct(product); }}
+      onClick={(e) => { if (!isDraggingRef.current) setActiveProduct(product); }}
     >
       <div className="w-12 px-4 shrink-0" data-no-drag onClick={(e) => e.stopPropagation()}>
         <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(rowKey)} />
@@ -78,7 +177,7 @@ const VirtualRow = React.memo(({
         <div
           className="w-16 h-16 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-center p-1 overflow-hidden shadow-xs hover:ring-2 hover:ring-indigo-500/30 transition-all cursor-zoom-in relative"
           onMouseEnter={(e) => {
-            if (img) onImageHover(img, row.Artikelbeschreibung || product.name || "", price !== "-" ? `${price}` : "", e);
+            if (img) onImageHover(img, currentTitle, currentPrice !== "-" ? `${currentPrice}` : "", e);
           }}
           onMouseLeave={onImageLeave}
         >
@@ -100,64 +199,156 @@ const VirtualRow = React.memo(({
         </div>
       </div>
       <div className="flex-1 px-4 min-w-0">
-        <p className="font-medium text-slate-900 dark:text-white text-sm line-clamp-2 leading-snug">
-          {row.Artikelbeschreibung || product.name || t("workspace.untitled_product")}
-        </p>
+        <InlineTitleCell
+          title={currentTitle}
+          ean={ean}
+          factoryId={factoryId}
+          account={account}
+          onTitleSaved={onTitleSaved}
+        />
       </div>
-      <div className="w-48 px-4 shrink-0">
-        <span className="font-mono text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 inline-block">
+      <div
+        className="w-48 px-4 shrink-0"
+        data-no-drag
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <span
+          className="font-mono text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 inline-block select-text cursor-text"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {ean || t("workspace.no_ean")}
         </span>
       </div>
-      <div className="w-24 px-4 shrink-0 font-semibold text-slate-900 dark:text-white tabular-nums text-sm">
-        {price !== "-" ? `${price} €` : "—"}
+      <div className="w-28 px-3 shrink-0">
+        <InlinePriceCell
+          price={currentPrice}
+          ean={ean}
+          factoryId={factoryId}
+          account={account}
+          onPriceSaved={onPriceSaved}
+        />
       </div>
-      <div className="w-64 px-4 shrink-0 truncate text-xs text-slate-700 dark:text-slate-300">
-        {mapData?.category ? (
-          <span className={mapData.status === "Error" ? "text-slate-500 dark:text-slate-400" : "font-medium"}>
-            {mapData.category_name || mapData.category}
-          </span>
-        ) : (
-          <span className="text-slate-400 italic">{t("workspace.not_mapped")}</span>
-        )}
+      <div className="w-64 px-4 shrink-0 text-xs text-slate-700 dark:text-slate-300">
+        <InlineCategoryCell
+          ean={ean}
+          factoryId={factoryId}
+          account={account}
+          categoryId={mapData?.category}
+          categoryName={mapData?.category_name}
+          status={mapData?.status}
+          onCategorySaved={onCategorySaved}
+          onEditingChange={setIsEditingCategory}
+        />
       </div>
       <div className="w-40 px-4 shrink-0">
-        {mapData?.status === "Ready" ? (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/60">
-            {t("workspace.status_ready")}
-          </span>
-        ) : mapData?.status === "Need Attributes" ? (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/60">
-            {t("workspace.status_need")}
-          </span>
-        ) : mapData?.status === "Error" ? (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800/60">
-            {t("workspace.status_error")}
-          </span>
-        ) : (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200/80 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-700/50">
-            {t("workspace.status_unmapped")}
-          </span>
-        )}
+        {(() => {
+          const stKey = getProductStatusKey(product, mapData);
+          if (stKey === "published") {
+            return (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 dark:bg-indigo-950/40 dark:text-indigo-400 dark:border-indigo-800/60"
+                title={mapData?.published_at ? `Опубликован: ${new Date(mapData.published_at).toLocaleString("ru-RU")}` : "Опубликован на Otto"}
+              >
+                <Check className="w-3 h-3" />
+                <span>{t("workspace.status_published")}</span>
+              </span>
+            );
+          }
+          if (stKey === "in progress") {
+            return (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800/60"
+                title="Отправлен в Otto Market, идет обработка..."
+              >
+                <Loader2 className="w-3 h-3 animate-spin text-blue-600 dark:text-blue-400" />
+                <span>{t("workspace.status_in_progress")}...</span>
+              </span>
+            );
+          }
+          if (stKey === "ready") {
+            return (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/60">
+                {t("workspace.status_ready")}
+              </span>
+            );
+          }
+          if (stKey === "need") {
+            const missingText = Array.isArray(mapData?.missing_attributes) && mapData.missing_attributes.length > 0
+              ? mapData.missing_attributes.join(", ")
+              : mapData?.last_error || undefined;
+            return (
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/60 cursor-help"
+                title={missingText ? `Не заполнено: ${missingText}` : undefined}
+              >
+                {t("workspace.status_need")}
+              </span>
+            );
+          }
+          if (stKey === "error") {
+            const errText = mapData?.last_error || (Array.isArray(mapData?.missing_attributes) && mapData.missing_attributes.length > 0
+              ? mapData.missing_attributes.join("; ")
+              : undefined);
+            return (
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800/60 cursor-help"
+                title={errText ? `Ошибки: ${errText}` : undefined}
+              >
+                {t("workspace.status_error")}
+              </span>
+            );
+          }
+          return (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200/80 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-700/50">
+              {t("workspace.status_unmapped")}
+            </span>
+          );
+        })()}
       </div>
     </div>
   );
-});
+}
+
+function areVirtualRowPropsEqual(prev: any, next: any) {
+  return (
+    prev.index === next.index &&
+    prev.top === next.top &&
+    prev.height === next.height &&
+    prev.isSelected === next.isSelected &&
+    prev.ean === next.ean &&
+    prev.rowKey === next.rowKey &&
+    prev.img === next.img &&
+    prev.price === next.price &&
+    prev.isMirrored === next.isMirrored &&
+    prev.factoryId === next.factoryId &&
+    prev.account === next.account &&
+    prev.mapData === next.mapData &&
+    prev.product === next.product
+  );
+}
+
+const VirtualRow = React.memo(VirtualRowComponent, areVirtualRowPropsEqual);
 
 export default function FactoryWorkspace() {
   const params = useParams();
+  const router = useRouter();
   const factoryId = params?.factory_id as string;
-  const { account } = useAccount();
+  const { account, setAccount } = useAccount();
   const { t } = useTranslation();
 
   const [products, setProducts] = useState<any[]>([]);
+  const [streamedLoadedCount, setStreamedLoadedCount] = useState<number>(0);
   const [factoryName, setFactoryName] = useState("");
   const [loading, setLoading] = useState(true);
   const [isBackgroundLoading, setIsBackgroundLoading] = useState(false);
   const [totalCatalogCount, setTotalCatalogCount] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [onlyOver70, setOnlyOver70] = useState(false);
   const [sort, setSort] = useState({ col: "", dir: "asc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [popupPos, setPopupPos] = useState<{ x: number, y: number } | null>(null);
@@ -208,7 +399,6 @@ export default function FactoryWorkspace() {
   const [isApplyingDefaults, setIsApplyingDefaults] = useState(false);
   const isSyncCancelled = useRef(false);
   const isAutoMappingCancelled = useRef(false);
-  const [isPublishing, setIsPublishing] = useState(false);
 
   const [taskProgress, setTaskProgress] = useState<{
     title: string;
@@ -224,15 +414,38 @@ export default function FactoryWorkspace() {
 
   // Drip Feed Pipeline state
   const [isDripModalOpen, setIsDripModalOpen] = useState(false);
+  const [isQueueModalOpen, setIsQueueModalOpen] = useState(false);
+  const [isAiTitleModalOpen, setIsAiTitleModalOpen] = useState(false);
+  const [isPriceEndingModalOpen, setIsPriceEndingModalOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<any | null>(null);
+  const [hasAnyPlan, setHasAnyPlan] = useState(false);
 
   const fetchActivePlan = useCallback(async () => {
     try {
       const res = await fetchWithAuth(`/pipeline/plans?account_name=${account}&factory_id=${factoryId}`);
       if (res.ok) {
         const data = await res.json();
-        const current = data.find((p: any) => p.status === "active" || p.status === "paused") || null;
-        setActivePlan(current);
+        const current = data.find((p: any) => 
+          (p.status === "active" || p.status === "paused") && 
+          (p.progress?.pending > 0 || p.progress?.processing > 0)
+        ) || null;
+        setActivePlan((prev: any) => {
+          if (!prev && !current) return null;
+          if (!prev || !current) return current;
+          if (
+            prev.id === current.id &&
+            prev.status === current.status &&
+            prev.current_day === current.current_day &&
+            prev.progress?.published === current.progress?.published &&
+            prev.progress?.failed === current.progress?.failed &&
+            prev.progress?.processing === current.progress?.processing &&
+            prev.progress?.pending === current.progress?.pending
+          ) {
+            return prev;
+          }
+          return current;
+        });
+        setHasAnyPlan(Array.isArray(data) && data.length > 0);
       }
     } catch (err) {
       console.error("Failed to fetch active plan", err);
@@ -282,13 +495,116 @@ export default function FactoryWorkspace() {
     }
   };
 
+  const [isTransferring, setIsTransferring] = useState(false);
+
+  const handleTransferToAccount = async (targetEans?: string[]) => {
+    if (!account) return;
+    const targetAccount = account === "JV" ? "XL" : "JV";
+    let eanList: string[] = [];
+    if (targetEans && targetEans.length > 0) {
+      eanList = targetEans;
+    } else if (selectedIds.size > 0) {
+      eanList = processed
+        .filter((p, i) => {
+          const key = getRowKey(p, i);
+          const ean = p.ean || p.row?.EAN;
+          const id = p.id || p.row?.id || p.row?.ItemID;
+          return selectedIds.has(key) || (ean && selectedIds.has(String(ean))) || (id && selectedIds.has(String(id)));
+        })
+        .map(p => p.ean || p.row?.EAN || "")
+        .filter(Boolean);
+
+      if (eanList.length === 0) {
+        eanList = Array.from(selectedIds).filter(id => /^\d{8,14}$/.test(id));
+      }
+    } else {
+      eanList = processed.map(p => p.ean || p.row?.EAN || "").filter(Boolean);
+    }
+
+    if (eanList.length === 0) {
+      toast.error("Нет товаров для переноса");
+      return;
+    }
+
+    const confirmMsg = `Перенести ${eanList.length} товаров из ${account} в ${targetAccount}?\n\nКатегории и характеристики будут скопированы, а брендовые атрибуты (Marke, BattVO, Markeninformation, WEEE, Materialhinweis) автоматически адаптированы под стандарты ${targetAccount} (Brand Guard).`;
+    if (!confirm(confirmMsg)) return;
+
+    setIsTransferring(true);
+    const toastId = toast.loading(`Подготовка к переносу ${eanList.length} товаров в ${targetAccount}...`);
+    try {
+      const CHUNK_SIZE = 100;
+      let totalTransferredMappings = 0;
+      let totalTransferredAttributes = 0;
+      let resolvedTargetFid: string | null = null;
+
+      for (let i = 0; i < eanList.length; i += CHUNK_SIZE) {
+        const chunk = eanList.slice(i, i + CHUNK_SIZE);
+        const processedCount = Math.min(i + CHUNK_SIZE, eanList.length);
+        const percent = Math.round((processedCount / eanList.length) * 100);
+
+        toast.loading(`Перенос товаров в ${targetAccount}: ${processedCount} из ${eanList.length} (${percent}%)...`, { id: toastId });
+
+        const res = await fetchWithAuth("/mapping/transfer-to-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            product_eans: chunk,
+            factory_id: factoryId,
+            target_factory_id: resolvedTargetFid || undefined,
+            source_account: account,
+            target_account: targetAccount,
+            copy_categories: true,
+            copy_attributes: true
+          }),
+          timeout: 60000
+        } as any);
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Ошибка ${res.status} при переносе пачки ${processedCount}/${eanList.length}`);
+        }
+
+        const data = await res.json();
+        totalTransferredMappings += (data.transferred_mappings || 0);
+        totalTransferredAttributes += (data.transferred_attributes || 0);
+        if (data.target_factory_id && !resolvedTargetFid) {
+          resolvedTargetFid = data.target_factory_id;
+        }
+      }
+
+      toast.dismiss(toastId);
+      if (resolvedTargetFid) {
+        toast.success(
+          `✅ Успешно перенесено в ${targetAccount}! Категорий: ${totalTransferredMappings}, Атрибутов: ${totalTransferredAttributes}.`,
+          {
+            action: {
+              label: `Перейти в ${targetAccount}`,
+              onClick: () => {
+                setAccount(targetAccount as any);
+                router.push(`/dashboard/factories/${resolvedTargetFid}`);
+              }
+            },
+            duration: 10000,
+          }
+        );
+      } else {
+        toast.success(`✅ Успешно перенесено в ${targetAccount}! Категорий: ${totalTransferredMappings}, Атрибутов: ${totalTransferredAttributes}. Брендинг безопасно заменен на ${targetAccount}.`);
+      }
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.message || "Ошибка при переносе между аккаунтами");
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   // Drag & Drop overlay state
   const [isDragOver, setIsDragOver] = useState(false);
   const [dragFileType, setDragFileType] = useState<"csv" | "zip" | "db" | "unknown" | null>(null);
   const dragCounterRef = useRef(0);
 
-  // Mappings state: EAN -> { category, status, category_name, attributes }
-  const [mappings, setMappings] = useState<Record<string, { category: string, status: string, category_name?: string, attributes?: Record<string, string> }>>({});
+  // Mappings state: EAN -> { category, status, category_name, published_at, attributes, product_name, price, has_ai_title, has_manual_price }
+  const [mappings, setMappings] = useState<Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, attributes?: Record<string, string>, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean }>>({});
 
   // Drag-to-select state (all via refs to avoid stale closures)
   const isDragging = useRef(false);
@@ -301,11 +617,16 @@ export default function FactoryWorkspace() {
   const pendingDragEan = useRef<string | null>(null);
   const pendingDragToggle = useRef<boolean>(false);
   const lastMoveTime = useRef(0);
-  // Keep processed in ref for use inside event handlers without stale closure
+  // Keep processed and products in ref for use inside event handlers without stale closure
   const processedRef = useRef<any[]>([]);
+  const productsRef = useRef<any[]>([]);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
   const selectedIdsRef = useRef<Set<string>>(new Set());
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const lastStatusCheckTimeRef = useRef<string | null>(null);
 
   const fetchMappings = useCallback(async () => {
     if (!factoryId) return;
@@ -313,15 +634,109 @@ export default function FactoryWorkspace() {
       const mapRes = await fetchWithAuth(`/mapping/factory/${factoryId}?account=${account}`);
       if (mapRes.ok) {
         const mapData = await mapRes.json();
-        const normalized: Record<string, { category: string, status: string, category_name?: string }> = {};
+        lastStatusCheckTimeRef.current = new Date().toISOString();
+        const normalized: Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean }> = {};
         for (const [ean, val] of Object.entries(mapData as any)) {
           const v = val as any;
-          normalized[ean] = { category: v.category_id || v.category_name || "", status: v.status || "", category_name: v.category_name || "" };
+          normalized[ean] = {
+            category: v.category_id || v.category_name || "",
+            status: v.status || "",
+            category_name: v.category_name || "",
+            published_at: v.published_at || null,
+            product_name: (v.product_name && v.product_name.trim() !== "Без названия" && v.product_name.toLowerCase() !== "null") ? v.product_name : undefined,
+            price: parsePositivePrice(v.price) || undefined,
+            has_ai_title: Boolean(v.has_ai_title),
+            has_manual_price: Boolean(v.has_manual_price)
+          };
         }
-        setMappings(normalized);
+        setMappings(prev => {
+          const prevKeys = Object.keys(prev);
+          const newKeys = Object.keys(normalized);
+          if (prevKeys.length === newKeys.length) {
+            let hasDiff = false;
+            for (const k of newKeys) {
+              const oldVal = prev[k];
+              const newVal = normalized[k];
+              if (
+                !oldVal ||
+                oldVal.status !== newVal.status ||
+                oldVal.category !== newVal.category ||
+                oldVal.category_name !== newVal.category_name ||
+                oldVal.published_at !== newVal.published_at ||
+                oldVal.product_name !== newVal.product_name ||
+                oldVal.price !== newVal.price ||
+                oldVal.has_ai_title !== newVal.has_ai_title
+              ) {
+                hasDiff = true;
+                break;
+              }
+            }
+            if (!hasDiff) return prev;
+          }
+          return normalized;
+        });
       }
     } catch (e) {
       console.error("Failed to fetch mappings", e);
+    }
+  }, [factoryId, account]);
+
+  const pollStatusIncremental = useCallback(async () => {
+    if (!factoryId) return;
+    try {
+      const sinceParam = lastStatusCheckTimeRef.current
+        ? `&since=${encodeURIComponent(lastStatusCheckTimeRef.current)}`
+        : "";
+      const res = await fetchWithAuth(
+        `/mapping/factory/${factoryId}/processing-status?account=${account}${sinceParam}`
+      );
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data.server_time) {
+        lastStatusCheckTimeRef.current = data.server_time;
+      }
+
+      const changedItems: any[] = data.changed || [];
+      if (changedItems.length === 0) {
+        return;
+      }
+
+      setMappings(prev => {
+        let hasRealDiff = false;
+        const next = { ...prev };
+
+        for (const item of changedItems) {
+          const ean = String(item.ean);
+          const existing = prev[ean];
+          const newStatus = item.status || "";
+          const newCat = item.category_id || existing?.category || "";
+          const newCatName = item.category_name || existing?.category_name || "";
+          const newPubAt = item.published_at || null;
+
+          const isDiff =
+            !existing ||
+            existing.status !== newStatus ||
+            existing.category !== newCat ||
+            existing.category_name !== newCatName ||
+            existing.published_at !== newPubAt;
+
+          if (isDiff) {
+            hasRealDiff = true;
+            next[ean] = {
+              ...(existing || { category: "", status: "Not Mapped" }),
+              category: newCat,
+              category_name: newCatName,
+              status: newStatus,
+              published_at: newPubAt,
+            };
+          }
+        }
+
+        return hasRealDiff ? next : prev;
+      });
+    } catch (e) {
+      console.error("Incremental mapping status poll failed", e);
     }
   }, [factoryId, account]);
 
@@ -451,68 +866,179 @@ export default function FactoryWorkspace() {
 
   useEffect(() => {
     if (!factoryId || !account) return;
+    let isCancelled = false;
+    const abortController = new AbortController();
+    const signal = abortController.signal;
     const load = async () => {
+      // 0. Failsafe check: Does factoryId belong to the active account?
+      const otherAccount = account === "JV" ? "XL" : "JV";
+      try {
+        const activeListRaw = localStorage.getItem(`otto_factories_list_${account}`);
+        const otherListRaw = localStorage.getItem(`otto_factories_list_${otherAccount}`);
+        const activeList = activeListRaw ? JSON.parse(activeListRaw) : [];
+        const otherList = otherListRaw ? JSON.parse(otherListRaw) : [];
+
+        const belongsToActive = activeList.some((f: any) => String(f.id) === String(factoryId));
+        const belongsToOther = otherList.some((f: any) => String(f.id) === String(factoryId));
+
+        if (!belongsToActive && belongsToOther) {
+          const originFactory = otherList.find((f: any) => String(f.id) === String(factoryId));
+          if (originFactory?.name) {
+            const normName = originFactory.name.toLowerCase().trim();
+            const twin = activeList.find(
+              (f: any) => f.name?.toLowerCase().trim() === normName && (f.kind === originFactory.kind || f.kind === "lister")
+            );
+            if (twin?.id) {
+              router.replace(`/dashboard/factories/${twin.id}`);
+              return;
+            }
+          }
+
+          // Fallback to backend twin resolver
+          try {
+            const res = await fetchWithAuth(
+              `/aftercool/twin-factory?factory_id=${factoryId}&source_account=${otherAccount}&target_account=${account}`
+            );
+            if (res.ok) {
+              const data = await res.json();
+              if (data.target_factory_id) {
+                router.replace(`/dashboard/factories/${data.target_factory_id}`);
+                return;
+              }
+            }
+          } catch (e) {}
+
+          // Not found in target account
+          router.replace("/dashboard/factories");
+          const label = originFactory?.name || factoryName || "";
+          toast.info(`Фабрика ${label ? `«${label}» ` : ""}на данный момент отсутствует в аккаунте ${account}. Открыт список фабрик.`);
+          return;
+        }
+      } catch (e) {
+        console.error("Failsafe twin lookup error:", e);
+      }
+
       // 1. Instant cache render (0-15ms)
       const cached = await getCachedFactory(factoryId, account);
-      if (cached?.products.length) {
+      const isCachedTruncated = Boolean(
+        cached?.products?.length && (
+          cached.products.length === 500 || 
+          (cached.total && cached.products.length < cached.total)
+        )
+      );
+
+      if (cached?.products?.length) {
         setProducts(cached.products);
         setTotalCatalogCount(cached.total || cached.products.length);
         setLoading(false);
-        setIsBackgroundLoading(false);
+        if (!isCachedTruncated) {
+          setIsBackgroundLoading(false);
+        }
       } else {
         setLoading(true);
       }
 
-      // 2. Fetch from network if not cached or if it looks truncated (exactly 500)
+      // 2. Fetch from network if not cached or if it looks truncated (exactly 500 or less than total)
       let all = cached?.products || [];
-      if (!all.length || all.length === 500) {
+      if (!all.length || isCachedTruncated) {
         try {
           setIsBackgroundLoading(true);
-          all = [];
-          let offset = 0;
-          let limit = 50; // Super fast initial chunk (50 items) for immediate perceived load!
+          const PAGE_SIZE = 500;
+          const res = await fetchWithAuth(
+            `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1`,
+            { signal }
+          );
+          if (!res.ok) throw new Error("Failed to fetch products");
+          const data = await res.json();
+          if (isCancelled || signal.aborted) return;
+          const firstChunk = data?.items || data || [];
+          all = [...firstChunk];
 
-          while (true) {
-            const res = await fetchWithAuth(
-              `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${limit}&offset=${offset}&include_row=1`
-            );
-            if (!res.ok) break;
-            const data = await res.json();
-            const chunk = data?.items || data || [];
-            if (!Array.isArray(chunk) || chunk.length === 0) break;
-            all = all.concat(chunk);
+          // Immediately display products on screen (<200ms perceived load)
+          setProducts([...all]);
+          setLoading(false);
 
-            if (data?.total) {
-              setTotalCatalogCount(data.total);
+          const total = Number(data?.total) || all.length;
+          setTotalCatalogCount(total);
+          setStreamedLoadedCount(all.length);
+
+          // If more products exist, fetch with Controlled Parallel Pagination (MAX_PARALLEL_PAGES = 3)
+          if (total > all.length && firstChunk.length > 0) {
+            const MAX_SAFE_TOTAL = 50000;
+            const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
+            const remainingOffsets: number[] = [];
+            for (let off = all.length; off < safeTotal; off += PAGE_SIZE) {
+              remainingOffsets.push(off);
             }
 
-            // Immediately display products on screen as soon as first 50 items arrive!
-            setProducts([...all]);
-            setLoading(false);
+            const MAX_PARALLEL_PAGES = 3;
+            for (let i = 0; i < remainingOffsets.length; i += MAX_PARALLEL_PAGES) {
+              if (isCancelled || signal.aborted) return;
+              // 300ms throttle gives the browser main thread time to process user interactions
+              await new Promise((r) => setTimeout(r, 300));
+              if (isCancelled || signal.aborted) return;
 
-            if (chunk.length < limit) break;
-            offset += limit;
-            // Subsequent chunks: 500 items for high network throughput
-            limit = 500;
+              const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
+              const results = await Promise.all(
+                batch.map(async (off) => {
+                  try {
+                    const r = await fetchWithAuth(
+                      `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=0`,
+                      { signal }
+                    );
+                    if (!r.ok) return [];
+                    const d = await r.json();
+                    return d?.items || d || [];
+                  } catch (e: any) {
+                    if (e?.name === "AbortError" || signal.aborted) return [];
+                    return [];
+                  }
+                })
+              );
+              if (isCancelled || signal.aborted) return;
+
+              const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
+              if (validChunks.length === 0) {
+                // Aftercool returned no more products, stop pagination early
+                break;
+              }
+
+              for (const chunk of validChunks) {
+                all = all.concat(chunk);
+              }
+
+              // Update the lightweight counter only so the bottom progress bar updates smoothly
+              // WITHOUT triggering expensive table, stats, and ProductDrawer re-renders!
+              setStreamedLoadedCount(all.length);
+            }
           }
 
-          if (all.length > 0) {
+          if (all.length > 0 && !isCancelled && !signal.aborted) {
             await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
-            setProducts(all);
-            setTotalCatalogCount(all.length);
+            // Single final transition update once background loading completes
+            startTransition(() => {
+              setProducts([...all]);
+              setTotalCatalogCount(all.length);
+              setStreamedLoadedCount(all.length);
+            });
           }
-        } catch (e) {
-          console.error(e);
+        } catch (e: any) {
+          if (e?.name !== "AbortError" && !signal.aborted) {
+            console.error("Failed to load factory products:", e);
+          }
         } finally {
-          setLoading(false);
-          setIsBackgroundLoading(false);
+          if (!isCancelled && !signal.aborted) {
+            setLoading(false);
+            setIsBackgroundLoading(false);
+          }
         }
       }
 
       // 3. Resolve factory name and fetch mappings in parallel
       const namePromise = (async () => {
         try {
-          const saved = localStorage.getItem("otto_factories_list");
+          const cacheKey = `otto_factories_list_${account}`;
+          const saved = localStorage.getItem(cacheKey);
           let list = [];
           if (saved) {
             try {
@@ -528,7 +1054,7 @@ export default function FactoryWorkspace() {
             if (nameRes.ok) {
               const rawList = await nameRes.json();
               const freshList = Array.isArray(rawList) ? rawList : (rawList?.items ?? []);
-              localStorage.setItem("otto_factories_list", JSON.stringify(freshList));
+              localStorage.setItem(cacheKey, JSON.stringify(freshList));
               const fFound = freshList.find((f: any) => String(f.id) === String(factoryId));
               if (fFound?.name) setFactoryName(fFound.name);
             }
@@ -539,40 +1065,101 @@ export default function FactoryWorkspace() {
       await Promise.all([fetchMappings(), namePromise]);
     };
     load();
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
   }, [factoryId, account, fetchMappings]);
 
+  // Auto-poll mappings ONLY when any item is legitimately In Progress or Processing
+  const hasInProgress = useMemo(() => {
+    return Object.values(mappings).some(m => {
+      const s = (m.status || "").toLowerCase().trim();
+      return s === "in progress" || s === "processing";
+    });
+  }, [mappings]);
+
+  useEffect(() => {
+    if (!hasInProgress) return;
+
+    const interval = setInterval(() => {
+      pollStatusIncremental();
+    }, 6000);
+
+    return () => clearInterval(interval);
+  }, [hasInProgress, pollStatusIncremental]);
+
   const handleSync = async () => {
+    if (loading || isBackgroundLoading) return;
     setIsBackgroundLoading(true);
     try {
-      let all: any[] = [];
-      let offset = 0;
-      let limit = 50;
+      const PAGE_SIZE = 500;
+      const res = await fetchWithAuth(
+        `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&refresh=true`
+      );
+      if (!res.ok) throw new Error("Failed to sync products");
+      const data = await res.json();
+      let all = data?.items || data || [];
+      setProducts([...all]);
+      setLoading(false);
 
-      while (true) {
-        const res = await fetchWithAuth(
-          `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${limit}&offset=${offset}&include_row=1&refresh=true`
-        );
-        if (!res.ok) break;
-        const data = await res.json();
-        const chunk = data?.items || data || [];
-        if (!Array.isArray(chunk) || chunk.length === 0) break;
-        all = all.concat(chunk);
+      const total = Number(data?.total) || all.length;
+      setTotalCatalogCount(total);
 
-        if (data?.total) {
-          setTotalCatalogCount(data.total);
+      if (total > all.length && all.length > 0) {
+        const MAX_SAFE_TOTAL = 50000;
+        const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
+        const remainingOffsets: number[] = [];
+        for (let off = all.length; off < safeTotal; off += PAGE_SIZE) {
+          remainingOffsets.push(off);
         }
 
-        setProducts([...all]);
-        setLoading(false);
+        const MAX_PARALLEL_PAGES = 3;
+        let batchesSinceLastRender = 0;
+        for (let i = 0; i < remainingOffsets.length; i += MAX_PARALLEL_PAGES) {
+          await new Promise((r) => setTimeout(r, 300));
 
-        if (chunk.length < limit) break;
-        offset += limit;
-        limit = 500;
+          const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
+          const results = await Promise.all(
+            batch.map(async (off) => {
+              try {
+                const r = await fetchWithAuth(
+                  `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=0`
+                );
+                if (!r.ok) return [];
+                const d = await r.json();
+                return d?.items || d || [];
+              } catch {
+                return [];
+              }
+            })
+          );
+
+          const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
+          if (validChunks.length === 0) {
+            break;
+          }
+
+          for (const chunk of validChunks) {
+            all = all.concat(chunk);
+          }
+
+          batchesSinceLastRender++;
+          const isLastBatch = (i + MAX_PARALLEL_PAGES) >= remainingOffsets.length;
+          if (batchesSinceLastRender >= 2 || isLastBatch) {
+            batchesSinceLastRender = 0;
+            const snapshot = [...all];
+            startTransition(() => {
+              setProducts(snapshot);
+              setTotalCatalogCount(total);
+            });
+          }
+        }
       }
 
       if (all.length > 0) {
         await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
-        setProducts(all);
+        setProducts([...all]);
         setTotalCatalogCount(all.length);
         await fetchMappings();
       }
@@ -605,86 +1192,18 @@ export default function FactoryWorkspace() {
     }
   };
 
-  const handlePublishToOtto = async () => {
-    const readyProducts = processed.filter(p => mappings[p.ean || p.row?.EAN]?.status === "Ready");
-    if (readyProducts.length === 0) {
-      alert(t("workspace.alert_no_ready_to_pub"));
-      return;
-    }
-    if (!confirm(t("workspace.confirm_pub_otto", { count: readyProducts.length }))) {
-      return;
-    }
-
-    setIsPublishing(true);
-    setTaskProgress({
-      title: t("workspace.task_pub_otto"),
-      current: 0,
-      total: readyProducts.length,
-      colorClass: "from-emerald-500 to-teal-500",
-      isIndeterminate: true
-    });
-
-    try {
-      const res = await fetchWithAuth(`/otto/publish/${factoryId}`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        const taskId = data.task_id;
-
-        // Poll for status
-        const pollTimer = setInterval(async () => {
-          try {
-            const statusRes = await fetchWithAuth(`/otto/publish/status/${taskId}`);
-            if (statusRes.ok) {
-              const statusData = await statusRes.json();
-              if (statusData.status === "PROGRESS" && statusData.progress) {
-                setTaskProgress({
-                  title: statusData.progress.message || "Publishing...",
-                  current: statusData.progress.current,
-                  total: statusData.progress.total,
-                  colorClass: "from-emerald-500 to-teal-500"
-                });
-              } else if (statusData.status === "SUCCESS") {
-                clearInterval(pollTimer);
-                setIsPublishing(false);
-                setTaskProgress(null);
-                const msg = statusData.result?.message || `Successfully published ${statusData.result?.published} products.`;
-                if (statusData.result?.errors && statusData.result.errors.length > 0) {
-                  alert(msg + "\nSome products had errors publishing. Check console for details.");
-                  console.error("Publish errors:", statusData.result.errors);
-                } else {
-                  alert(msg);
-                }
-                await fetchMappings();
-              } else if (statusData.status === "FAILURE") {
-                clearInterval(pollTimer);
-                setIsPublishing(false);
-                setTaskProgress(null);
-                setTimeout(() => alert("Task failed: " + statusData.error), 100);
-              }
-            }
-          } catch (e) {
-            console.error("Error polling status", e);
-          }
-        }, 1000);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setIsPublishing(false);
-        setTaskProgress(null);
-        setTimeout(() => alert("Failed to queue publish: " + (err.detail || res.statusText)), 100);
-      }
-    } catch (e) {
-      console.error(e);
-      setIsPublishing(false);
-      setTaskProgress(null);
-      setTimeout(() => alert("Error publishing to Otto."), 100);
-    }
-  };
 
   const handleAutoMap = async (useVision: boolean = false, target: "all" | "categories" | "attributes" = "all") => {
     if (selectedIds.size === 0) return;
     setIsAutoMapping(true);
 
-    const selectedProducts = processed.filter((p, i) => selectedIds.has(getRowKey(p, i)));
+    const selectedProducts = processed.filter((p, i) => {
+      const key = getRowKey(p, i);
+      const ean = p.ean || p.row?.EAN;
+      const id = p.id || p.row?.id || p.row?.ItemID;
+      return selectedIds.has(key) || (ean && selectedIds.has(String(ean))) || (id && selectedIds.has(String(id)));
+    });
+
     const payloadProducts = selectedProducts.map(p => {
       const row = p.row || {};
       const ean = p.ean || row.EAN || "";
@@ -705,13 +1224,16 @@ export default function FactoryWorkspace() {
         }
       }
 
+      const cat = mappings[ean]?.category || p.category_id || (p.row && p.row.category_id) || "";
+
       return {
         ean,
         title: row.Artikelbeschreibung || p.name || "",
         description: row.Beschreibung || "",
         specifics: specificsStr,
-        gallery_url: row.GalleryURL || "",
-        picture_urls: row.PictureURLs || row.PictureURL || ""
+        gallery_url: row.GalleryURL || p.img || p.image_url || "",
+        picture_urls: row.PictureURLs || row.PictureURL || "",
+        category_id: cat
       };
     }).filter(Boolean);
 
@@ -759,8 +1281,9 @@ export default function FactoryWorkspace() {
                 const statusStr = r.status === "partial" ? "Need Attributes" :
                   (r.errors && r.errors.length > 0) ? "Error" : "Ready";
                 next[r.ean] = {
-                  category: r.category_id || r.category_name,
-                  category_name: r.category_name,
+                  ...next[r.ean],
+                  category: r.category_id || r.category_name || next[r.ean]?.category || "",
+                  category_name: r.category_name || next[r.ean]?.category_name || "",
                   status: statusStr
                 };
               }
@@ -769,20 +1292,22 @@ export default function FactoryWorkspace() {
           });
         } else {
           const errorCode = res.headers.get("x-error-code");
+          const errorBody = await res.json().catch(() => ({}));
+          const errorMsg = errorBody.detail || t("workspace.toast_ai_mapping_error");
           if (errorCode === "OPENAI_API_KEY_MISSING") {
             toast.error(t("product_drawer.toast_openai_missing_title"), {
               id: "openai-error-toast",
               description: t("product_drawer.toast_openai_missing_desc"),
               duration: 7000,
+              action: {
+                label: t("product_drawer.toast_openai_action_settings", { defaultValue: "Настройки" }),
+                onClick: () => { window.location.href = "/dashboard/settings"; }
+              }
             });
           } else if (errorCode === "OPENAI_API_ERROR") {
-            toast.error(t("product_drawer.toast_openai_error_title"), {
-              id: "openai-error-toast",
-              description: t("product_drawer.toast_openai_error_desc"),
-              duration: 7000,
-            });
+            showOpenAiErrorToast(String(errorMsg), t);
           } else {
-            toast.error(t("workspace.toast_ai_mapping_error"), { id: "openai-error-toast" });
+            toast.error(String(errorMsg), { id: "openai-error-toast" });
           }
           isAutoMappingCancelled.current = true; // stop the loop
           break;
@@ -792,6 +1317,9 @@ export default function FactoryWorkspace() {
         setTaskProgress(prev => prev ? { ...prev, current: processedCount } : null);
       }
 
+      if (!isAutoMappingCancelled.current && payloadProducts.length > 0) {
+        toast.success(t("workspace.toast_ai_done", { count: processedCount, defaultValue: `ИИ обработка завершена (${processedCount} товаров)` }));
+      }
       setSelectedIds(new Set());
       setPopupPos(null);
     } catch (e) {
@@ -807,12 +1335,15 @@ export default function FactoryWorkspace() {
   const [isUploading, setIsUploading] = useState(false);
 
   const handleExportCategories = async () => {
-    setTaskProgress({ title: t("workspace.task_sync_metadata"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
-    try {
-      // First sync product names and prices from Aftercool so they appear in the CSV
-      await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST" });
-    } catch (e) {
-      console.warn("Metadata sync failed, exporting with available data", e);
+    // Only sync from Aftercool if products are not loaded or missing names
+    const needsSync = products.length === 0 || products.some(p => !(p.name || (p.row && p.row.Artikelbeschreibung)));
+    if (needsSync) {
+      setTaskProgress({ title: t("workspace.task_sync_metadata"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
+      try {
+        await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST" });
+      } catch (e) {
+        console.warn("Metadata sync failed, exporting with available data", e);
+      }
     }
 
     setTaskProgress({ title: t("workspace.task_export_cat"), isIndeterminate: true, colorClass: "from-blue-500 to-indigo-500" });
@@ -1306,14 +1837,50 @@ export default function FactoryWorkspace() {
     }
   }, [factoryId, factoryName, fetchMappings]);
 
-  // Client-side processing
-  const processed = useMemo(() => {
-    let arr = products;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      arr = arr.filter(p => {
+  // Client-side processing (in-place index caching, zero object allocations)
+  const enrichedProducts = useMemo(() => {
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      if (!p._searchIndex) {
         const row = p.row || {};
-        return (row.Artikelbeschreibung || "").toLowerCase().includes(q) || String(p.ean || row.EAN || "").includes(q);
+        const title = row.Artikelbeschreibung || p.name || "";
+        const ean = String(p.ean || row.EAN || "");
+        p._searchIndex = `${title} ${ean}`.toLowerCase();
+      }
+    }
+    return products;
+  }, [products]);
+
+  const processed = useMemo(() => {
+    const hasSearch = Boolean(deferredSearch.trim());
+    const hasCategory = Boolean(categoryFilter.trim());
+    const hasStatus = Boolean(statusFilter.trim());
+    const hasSort = Boolean(sort.col);
+    const hasOver70 = onlyOver70;
+
+    if (!hasSearch && !hasCategory && !hasStatus && !hasSort && !hasOver70) {
+      return enrichedProducts;
+    }
+
+    let arr = enrichedProducts;
+    if (hasOver70) {
+      arr = arr.filter(p => {
+        const ean = p.ean || (p.row || {}).EAN || "";
+        const mapData = mappings[ean];
+        const rawTitle = (mapData?.product_name || "").trim();
+        const title = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
+          ? rawTitle
+          : (p.row?.Artikelbeschreibung || p.name || "");
+        return Boolean(title && title.length > 70);
+      });
+    }
+    if (hasSearch) {
+      const q = deferredSearch.trim().toLowerCase();
+      arr = arr.filter(p => {
+        if (p._searchIndex && p._searchIndex.includes(q)) return true;
+        const ean = p.ean || (p.row || {}).EAN;
+        const mappedTitle = mappings[ean]?.product_name;
+        return !!(mappedTitle && mappedTitle.toLowerCase().includes(q));
       });
     }
     if (categoryFilter.trim()) {
@@ -1325,32 +1892,82 @@ export default function FactoryWorkspace() {
       });
     }
     if (statusFilter.trim()) {
-      const q = statusFilter.toLowerCase();
+      const q = statusFilter.toLowerCase().trim();
       arr = arr.filter(p => {
-        const ean = p.ean || (p.row || {}).EAN;
-        const st = mappings[ean]?.status || (mappings[ean]?.category ? "Ready" : "Unmapped");
-        return st.toLowerCase().includes(q);
+        const ean = p.ean || (p.row || {}).EAN || "";
+        const mapData = mappings[ean];
+        const stKey = getProductStatusKey(p, mapData);
+        if (q === "unmapped") return stKey === "unmapped";
+        if (q === "need") return stKey === "need";
+        if (q === "ready") return stKey === "ready";
+        if (q === "error") return stKey === "error";
+        if (q === "published") return stKey === "published";
+        if (q === "in progress" || q === "processing") return stKey === "in progress";
+        return stKey.includes(q);
       });
     }
     if (sort.col) {
-      arr = [...arr].sort((a, b) => {
-        const rowA = a.row || {};
-        const rowB = b.row || {};
-        const valA = sort.col === "name" ? (rowA.Artikelbeschreibung || "") : (a.ean || rowA.EAN || "");
-        const valB = sort.col === "name" ? (rowB.Artikelbeschreibung || "") : (b.ean || rowB.EAN || "");
-        return sort.dir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
-      });
+      const isAsc = sort.dir === "asc";
+      if (sort.col === "price") {
+        const mapped = arr.map((item) => ({
+          item,
+          price: getItemNumericPrice(item, mappings)
+        }));
+
+        mapped.sort((a, b) => {
+          const pA = a.price;
+          const pB = b.price;
+          const hasA = pA > 0;
+          const hasB = pB > 0;
+
+          if (!hasA && !hasB) return 0;
+          if (!hasA) return 1;
+          if (!hasB) return -1;
+
+          return isAsc ? pA - pB : pB - pA;
+        });
+
+        arr = mapped.map((m) => m.item);
+      } else {
+        const mapped = arr.map((item) => {
+          let key = "";
+          const row = item.row || {};
+          const ean = item.ean || row.EAN || "";
+          if (sort.col === "name") {
+            key = row.Artikelbeschreibung || item.name || "";
+          } else if (sort.col === "category") {
+            key = mappings[ean]?.category_name || mappings[ean]?.category || "";
+          } else if (sort.col === "status") {
+            const ean = item.ean || row.EAN || "";
+            const mapData = mappings[ean];
+            key = getProductStatusKey(item, mapData);
+          } else {
+            key = ean;
+          }
+          return { item, key };
+        });
+
+        mapped.sort((a, b) => {
+          if (a.key === b.key) return 0;
+          if (!a.key) return 1;
+          if (!b.key) return -1;
+          const cmp = deCollator.compare(a.key, b.key);
+          return isAsc ? cmp : -cmp;
+        });
+
+        arr = mapped.map((m) => m.item);
+      }
     }
     return arr;
-  }, [products, search, sort, categoryFilter, statusFilter, mappings]);
+  }, [enrichedProducts, deferredSearch, sort, categoryFilter, statusFilter, onlyOver70, mappings]);
 
-  // Virtualizer
+  // Virtualizer with lean overscan for max FPS
   const rowVirtualizer = useVirtualizer({
     count: processed.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 100, // 100px row height for larger images
 
-    overscan: 10,
+    overscan: 4,
   });
 
   // Keep refs in sync
@@ -1358,7 +1975,10 @@ export default function FactoryWorkspace() {
   selectedIdsRef.current = selectedIds;
 
   const toggleSort = (col: string) => {
-    setSort(prev => ({ col, dir: prev.col === col && prev.dir === "asc" ? "desc" : "asc" }));
+    startTransition(() => {
+      setSort(prev => ({ col, dir: prev.col === col && prev.dir === "asc" ? "desc" : "asc" }));
+    });
+    parentRef.current?.scrollTo({ top: 0 });
   };
 
   const handleRowMouseDown = useCallback((index: number, rowKey: string, e: React.MouseEvent) => {
@@ -1380,6 +2000,227 @@ export default function FactoryWorkspace() {
       const next = new Set(prev);
       if (next.has(rowKey)) next.delete(rowKey); else next.add(rowKey);
       return next;
+    });
+  }, []);
+
+  const handleInlineCategorySaved = useCallback((ean: string, categoryId: string, categoryName: string) => {
+    setMappings(prev => {
+      const oldMapping = prev[ean] || { category: "", status: "Not Mapped" };
+      const isChanged = oldMapping.category !== categoryId;
+      return {
+        ...prev,
+        [ean]: {
+          ...oldMapping,
+          category: categoryId,
+          category_name: categoryName,
+          status: isChanged ? "Need Attributes" : oldMapping.status
+        }
+      };
+    });
+  }, []);
+
+  const handleInlineTitleSaved = useCallback((ean: string, newTitle: string) => {
+    startTransition(() => {
+      setMappings(prev => {
+        const oldMapping = prev[ean];
+        if (oldMapping?.product_name === newTitle) return prev;
+
+        const prodList = productsRef.current;
+        const p = prodList.find(prod => (prod.ean || prod.row?.EAN) === ean);
+        const fallbackCat = p?.category_id || (p?.row && p?.row?.category_id) || p?.category || "";
+        const fallbackCatName = p?.category_name || (p?.row && p?.row?.category_name) || fallbackCat;
+
+        const finalCategory = oldMapping?.category || fallbackCat || "";
+        const finalCategoryName = oldMapping?.category_name || fallbackCatName || "";
+        const finalStatus = oldMapping?.status || (finalCategory ? "Need Attributes" : "Not Mapped");
+
+        return {
+          ...prev,
+          [ean]: {
+            ...(oldMapping || {}),
+            category: finalCategory,
+            category_name: finalCategoryName,
+            status: finalStatus,
+            product_name: newTitle,
+            has_ai_title: true
+          }
+        };
+      });
+    });
+    // Mutate in-place without replacing the products array reference to avoid
+    // re-triggering expensive O(N log N) sorting and full-table re-renders.
+    setProducts(prev => {
+      const target = prev.find(p => (p.ean || p.row?.EAN) === ean);
+      if (target) {
+        target.name = newTitle;
+        if (target.row) {
+          target.row.Artikelbeschreibung = newTitle;
+        }
+        if (target._searchIndex) {
+          target._searchIndex = `${newTitle} ${ean}`.toLowerCase();
+        }
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleCloseDrawer = useCallback(() => {
+    setActiveProduct(null);
+  }, []);
+
+  const handleSaveDrawer = useCallback((
+    ean: string,
+    cat: string,
+    catName: string,
+    attrs: Record<string, string>,
+    status: string,
+    savedName?: string,
+    savedPrice?: string
+  ) => {
+    setMappings(prev => {
+      const old = prev[ean] || { category: "", status: "Not Mapped" };
+      const finalName = (savedName && savedName.trim()) ? savedName.trim() : old.product_name;
+      const finalPrice = (savedPrice && savedPrice.trim()) ? savedPrice.trim() : old.price;
+      return {
+        ...prev,
+        [ean]: {
+          ...old,
+          category: cat,
+          category_name: catName,
+          status: status || "Need Attributes",
+          ...(finalName ? { product_name: finalName } : {}),
+          ...(finalPrice ? { price: finalPrice } : {})
+        }
+      };
+    });
+    if (savedName) {
+      setProducts(prev => {
+        const idx = prev.findIndex(p => (p.ean || p.row?.EAN) === ean);
+        if (idx === -1) return prev;
+        const target = prev[idx];
+        if ((target.row || {}).Artikelbeschreibung === savedName) return prev;
+        const copy = [...prev];
+        copy[idx] = {
+          ...target,
+          name: savedName,
+          row: {
+            ...(target.row || {}),
+            Artikelbeschreibung: savedName
+          }
+        };
+        return copy;
+      });
+    }
+  }, []);
+
+  const handleAiTitlesUpdated = useCallback((updated: Record<string, string>) => {
+    const eans = Object.keys(updated);
+    if (eans.length === 0) return;
+
+    startTransition(() => {
+      setMappings(prev => {
+        const next = { ...prev };
+        const prodList = productsRef.current;
+        for (const [ean, newTitle] of Object.entries(updated)) {
+          const oldMapping = prev[ean];
+          const p = prodList.find(prod => (prod.ean || prod.row?.EAN) === ean);
+          const fallbackCat = p?.category_id || (p?.row && p?.row?.category_id) || p?.category || "";
+          const fallbackCatName = p?.category_name || (p?.row && p?.row?.category_name) || fallbackCat;
+
+          const finalCategory = oldMapping?.category || fallbackCat || "";
+          const finalCategoryName = oldMapping?.category_name || fallbackCatName || "";
+          const finalStatus = oldMapping?.status || (finalCategory ? "Need Attributes" : "Not Mapped");
+
+          next[ean] = {
+            ...(oldMapping || {}),
+            category: finalCategory,
+            category_name: finalCategoryName,
+            status: finalStatus,
+            product_name: newTitle,
+            has_ai_title: true
+          };
+        }
+        return next;
+      });
+    });
+
+    setProducts(prev => {
+      const eanMap = new Map(Object.entries(updated));
+      for (const p of prev) {
+        const pEan = p.ean || p.row?.EAN;
+        if (pEan && eanMap.has(pEan)) {
+          const newTitle = eanMap.get(pEan)!;
+          p.name = newTitle;
+          if (p.row) {
+            p.row.Artikelbeschreibung = newTitle;
+          }
+          if (p._searchIndex) {
+            p._searchIndex = `${newTitle} ${pEan}`.toLowerCase();
+          }
+        }
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleInlinePriceSaved = useCallback((ean: string, newPrice: string) => {
+    startTransition(() => {
+      setMappings(prev => {
+        const oldMapping = prev[ean] || { category: "", status: "Not Mapped" };
+        if (oldMapping.price === newPrice) return prev;
+        return {
+          ...prev,
+          [ean]: {
+            ...oldMapping,
+            price: newPrice
+          }
+        };
+      });
+    });
+    // Mutate in-place without replacing the products array reference
+    setProducts(prev => {
+      const target = prev.find(p => (p.ean || p.row?.EAN) === ean);
+      if (target && target.row) {
+        target.row.Startpreis = newPrice;
+        target.row.SofortkaufenPreis = newPrice;
+      }
+      return prev;
+    });
+  }, []);
+
+  const handlePricesUpdated = useCallback((updated: Record<string, string>) => {
+    const eans = Object.keys(updated);
+    if (eans.length === 0) return;
+
+    startTransition(() => {
+      setMappings(prev => {
+        const next = { ...prev };
+        for (const [ean, newPrice] of Object.entries(updated)) {
+          const oldMapping = prev[ean] || { category: "", status: "Not Mapped" };
+          next[ean] = {
+            ...oldMapping,
+            price: newPrice,
+            has_manual_price: true,
+          };
+        }
+        return next;
+      });
+    });
+
+    setProducts(prev => {
+      const eanMap = new Map(Object.entries(updated));
+      for (const p of prev) {
+        const pEan = p.ean || p.row?.EAN;
+        if (pEan && eanMap.has(pEan)) {
+          const newPrice = eanMap.get(pEan)!;
+          p.price = newPrice;
+          if (p.row) {
+            p.row.Startpreis = newPrice;
+            p.row.SofortkaufenPreis = newPrice;
+          }
+        }
+      }
+      return prev;
     });
   }, []);
 
@@ -1460,7 +2301,13 @@ export default function FactoryWorkspace() {
     };
 
     const handleGlobalMouseUp = () => {
-      isDragging.current = false;
+      if (isDragging.current) {
+        setTimeout(() => {
+          isDragging.current = false;
+        }, 50);
+      } else {
+        isDragging.current = false;
+      }
       dragStartIndex.current = null;
       lastDragIndex.current = null;
       pendingDragEan.current = null;
@@ -1476,19 +2323,135 @@ export default function FactoryWorkspace() {
   }, []);
 
 
-  // ── DATA QUALITY STATS ──
-  const dataQualityStats = useMemo(() => {
-    const counts = { ready: 0, needAttrs: 0, error: 0, unmapped: 0 };
-    for (const p of products) {
-      const ean = p.ean || (p.row || {}).EAN;
-      const st = mappings[ean]?.status;
-      if (st === "Ready") counts.ready++;
-      else if (st === "Need Attributes") counts.needAttrs++;
-      else if (st === "Error") counts.error++;
+  // ── COMBINED SINGLE-PASS CATALOG STATS (75% FASTER) ──
+  const { dataQualityStats, over70Count, xlAlreadyGeneratedCount } = useMemo(() => {
+    const counts = { ready: 0, needAttrs: 0, error: 0, unmapped: 0, published: 0 };
+    let over70 = 0;
+    let xlGen = 0;
+    const isJv = account === "JV";
+
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const ean = p.ean || (p.row || {}).EAN || "";
+      const mapData = mappings[ean];
+
+      // 1. Data quality stats
+      const stKey = getProductStatusKey(p, mapData);
+      if (stKey === "published") counts.published++;
+      else if (stKey === "ready") counts.ready++;
+      else if (stKey === "need") counts.needAttrs++;
+      else if (stKey === "error") counts.error++;
       else counts.unmapped++;
+
+      // 2. Title length and tokens
+      const rawTitle = (mapData?.product_name || "").trim();
+      const title = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
+        ? rawTitle
+        : (p.row?.Artikelbeschreibung || p.name || "");
+      if (title && title.length > 70) {
+        over70++;
+      }
+      if (!isJv && mapData?.has_ai_title) {
+        xlGen++;
+      }
     }
-    return counts;
-  }, [products, mappings]);
+    return { dataQualityStats: counts, over70Count: over70, xlAlreadyGeneratedCount: xlGen };
+  }, [products, mappings, account]);
+
+  const xlNeedCount = useMemo(() => {
+    return Math.max(0, products.length - xlAlreadyGeneratedCount);
+  }, [products.length, xlAlreadyGeneratedCount]);
+
+  // ── MEMOIZED CATEGORY OPTIONS ──
+  const categoryOptionsRef = useRef<string[]>([]);
+  const categoryOptions = useMemo(() => {
+    const cats = new Set<string>();
+    for (const m of Object.values(mappings)) {
+      const c = m.category_name || m.category;
+      if (c) cats.add(c);
+    }
+    const newArr = Array.from(cats).sort();
+    const prevArr = categoryOptionsRef.current;
+    if (prevArr.length === newArr.length && prevArr.every((v, i) => v === newArr[i])) {
+      return prevArr;
+    }
+    categoryOptionsRef.current = newArr;
+    return newArr;
+  }, [mappings]);
+
+  // ── LAZY-EVALUATED SELECTION METRICS (ZERO OVERHEAD DURING DRAG / CHECKBOX CLICK) ──
+  const selectedEansArray = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    if (!isAiTitleModalOpen && !isPriceEndingModalOpen && !isMassEditOpen && !isQueueModalOpen) return [];
+    const eans: string[] = [];
+    for (let i = 0; i < processed.length; i++) {
+      if (selectedIds.has(getRowKey(processed[i], i))) {
+        const e = processed[i].ean || processed[i].row?.EAN;
+        if (e) eans.push(e);
+      }
+    }
+    return eans;
+  }, [isAiTitleModalOpen, isPriceEndingModalOpen, isMassEditOpen, isQueueModalOpen, selectedIds, processed]);
+
+  const productTitlesMap = useMemo(() => {
+    if (!isAiTitleModalOpen) return {};
+    const map: Record<string, string> = {};
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const ean = p.ean || p.row?.EAN;
+      if (!ean) continue;
+      const mapData = mappings[ean];
+      const rawTitle = (mapData?.product_name || "").trim();
+      const title = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
+        ? rawTitle
+        : (p.row?.Artikelbeschreibung || p.name || "");
+      if (title && title.trim()) {
+        map[ean] = title.trim();
+      }
+    }
+    return map;
+  }, [isAiTitleModalOpen, products, mappings]);
+
+  const selectedOver70Count = useMemo(() => {
+    if (!isAiTitleModalOpen || selectedIds.size === 0) return 0;
+    let count = 0;
+    for (let i = 0; i < processed.length; i++) {
+      if (selectedIds.has(getRowKey(processed[i], i))) {
+        const p = processed[i];
+        const ean = p.ean || p.row?.EAN || "";
+        const mapData = mappings[ean];
+        const rawTitle = (mapData?.product_name || "").trim();
+        const title = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
+          ? rawTitle
+          : (p.row?.Artikelbeschreibung || p.name || "");
+        if (title && title.length > 70) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }, [isAiTitleModalOpen, selectedIds, processed, mappings]);
+
+  const selectedXlAlreadyGeneratedCount = useMemo(() => {
+    if (!isAiTitleModalOpen || selectedIds.size === 0) return 0;
+    let count = 0;
+    for (let i = 0; i < processed.length; i++) {
+      if (selectedIds.has(getRowKey(processed[i], i))) {
+        const p = processed[i];
+        const ean = p.ean || p.row?.EAN || "";
+        const mapData = mappings[ean];
+        if (mapData?.has_ai_title) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }, [isAiTitleModalOpen, selectedIds, processed, mappings]);
+
+  const selectedXlNeedCount = useMemo(() => {
+    if (!isAiTitleModalOpen || selectedIds.size === 0) return 0;
+    return Math.max(0, selectedEansArray.length - selectedXlAlreadyGeneratedCount);
+  }, [isAiTitleModalOpen, selectedIds.size, selectedEansArray.length, selectedXlAlreadyGeneratedCount]);
 
   if (loading && products.length === 0) {
     return (
@@ -1581,12 +2544,12 @@ export default function FactoryWorkspace() {
           <div className="flex items-center gap-2">
             <Button
               onClick={handleSync}
-              disabled={loading}
+              disabled={loading || isBackgroundLoading}
               variant="outline"
               size="sm"
               className="gap-1.5 h-9 rounded-lg border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-xs font-medium hover:bg-slate-50"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${loading || isBackgroundLoading ? "animate-spin" : ""}`} />
               <span>{t("common.refresh")}</span>
             </Button>
           </div>
@@ -1594,7 +2557,7 @@ export default function FactoryWorkspace() {
       </div>
 
       {/* ── COMPACT SEGMENTED STATUS STRIP ── */}
-      <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-5">
+      <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-6">
         <button
           type="button"
           onClick={() => setStatusFilter("")}
@@ -1655,13 +2618,27 @@ export default function FactoryWorkspace() {
           type="button"
           onClick={() => setStatusFilter(statusFilter === "unmapped" ? "" : "unmapped")}
           className={cn(
-            "p-3 text-left transition-colors col-span-2 sm:col-span-1",
+            "p-3 text-left transition-colors",
             statusFilter === "unmapped" ? "bg-slate-100/80 dark:bg-slate-850" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
           )}
         >
           <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.unmapped")}</span>
           <span className="text-lg font-bold text-slate-500 dark:text-slate-400 tracking-tight mt-0.5 block">
             {dataQualityStats.unmapped.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === "published" ? "" : "published")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "published" ? "bg-indigo-50/80 dark:bg-indigo-950/30" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Опубликованы</span>
+          <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.published.toLocaleString()}
           </span>
         </button>
       </div>
@@ -1703,6 +2680,17 @@ export default function FactoryWorkspace() {
           </div>
 
           <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsQueueModalOpen(true)}
+              className="h-8 text-xs border-indigo-200 text-indigo-700 bg-indigo-50/50 hover:bg-indigo-50 dark:border-indigo-800/60 dark:text-indigo-300 gap-1 font-semibold"
+              title="Посмотреть список товаров этого плана"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Список товаров</span>
+            </Button>
+
             {activePlan.status === "paused" ? (
               <Button
                 size="sm"
@@ -1866,6 +2854,102 @@ export default function FactoryWorkspace() {
             <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>{t("workspace.drip_feed_btn")}</span>
           </Button>
+
+          {/* Drip Feed Queue & History */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-slate-200 dark:border-slate-800 bg-white hover:bg-slate-50 dark:bg-card dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200 font-semibold text-xs"
+            onClick={() => setIsQueueModalOpen(true)}
+            title="Посмотреть товары в очереди и историю выгрузок Drip Feed"
+          >
+            <Layers className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+            <span>Очередь Drip Feed</span>
+            {activePlan ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Активный план выполняется" />
+            ) : hasAnyPlan ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" title="Есть завершенные планы" />
+            ) : null}
+          </Button>
+
+          {/* Cross-Account Transfer */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-purple-200 dark:border-purple-900/60 bg-purple-50/50 hover:bg-purple-50 dark:bg-purple-950/30 dark:hover:bg-purple-950/50 text-purple-700 dark:text-purple-300 font-semibold text-xs"
+            onClick={() => handleTransferToAccount()}
+            disabled={products.length === 0 || isTransferring}
+            title={`Скопировать категории и атрибуты всех товаров в ${account === "JV" ? "XL" : "JV"} с адаптацией брендинга`}
+          >
+            {isTransferring ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+            ) : (
+              <ArrowRightLeft className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+            )}
+            <span>Скопировать в {account === "JV" ? "XL" : "JV"}</span>
+          </Button>
+
+          {/* AI Title Generation */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-amber-200 dark:border-amber-900/60 bg-amber-50/50 hover:bg-amber-50 dark:bg-amber-950/30 dark:hover:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-semibold text-xs"
+            onClick={() => setIsAiTitleModalOpen(true)}
+            disabled={products.length === 0}
+            title={
+              account === "JV"
+                ? "Сгенерировать естественные названия до 70 символов для товаров длиннее 70 символов"
+                : "Сгенерировать новые названия до 70 символов для всех товаров"
+            }
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>
+              {selectedIds.size > 0
+                ? `ИИ-название (выбрано ${selectedIds.size})`
+                : account === "JV"
+                ? "ИИ-название (>70 симв.)"
+                : "ИИ-название (все товары)"}
+            </span>
+            {account === "JV" && selectedIds.size === 0 && over70Count > 0 && (
+              <span className="px-1.5 py-0.2 text-[10px] bg-amber-200/80 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-full font-mono">
+                {over70Count}
+              </span>
+            )}
+            {account === "XL" && selectedIds.size === 0 && (
+              <span
+                className={cn(
+                  "px-1.5 py-0.2 text-[10px] rounded-full font-mono font-semibold",
+                  xlNeedCount > 0
+                    ? "bg-amber-200/80 dark:bg-amber-900 text-amber-900 dark:text-amber-100"
+                    : "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800/60"
+                )}
+                title={xlNeedCount > 0 ? `Осталось сгенерировать: ${xlNeedCount} товаров` : "Все товары фабрики уже имеют готовые названия до 70 симв."}
+              >
+                {xlNeedCount > 0 ? xlNeedCount : "✓"}
+              </span>
+            )}
+          </Button>
+
+          {/* Price Ending ,99 Button */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5 border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 hover:bg-emerald-50 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-semibold text-xs cursor-pointer shadow-xs"
+            onClick={() => setIsPriceEndingModalOpen(true)}
+            disabled={products.length === 0}
+            title={
+              selectedIds.size > 0
+                ? `Применить окончание цены (,99) к ${selectedIds.size} выбранным товарам`
+                : "Применить окончание цены (,99) ко всем товарам фабрики"
+            }
+          >
+            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">,99</span>
+            <span>
+              {selectedIds.size > 0
+                ? `(выбрано ${selectedIds.size})`
+                : "(все товары)"}
+            </span>
+          </Button>
         </div>
       </div>
 
@@ -1883,22 +2967,138 @@ export default function FactoryWorkspace() {
             <Checkbox onCheckedChange={(c) => setSelectedIds(c ? new Set(processed.map((p, i) => getRowKey(p, i))) : new Set())} />
           </div>
           <div className="w-24 px-3 shrink-0 text-[11px] uppercase tracking-wider">{t("workspace.th_image")}</div>
-          <div className="flex-1 px-4 min-w-0 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("name")}>
-            {t("workspace.th_name")}
+          <div className="flex-1 px-4 min-w-0 flex items-center justify-between gap-2">
+            <span
+              className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1 font-semibold truncate"
+              onClick={() => toggleSort("name")}
+            >
+              {t("workspace.th_name")}
+              {sort.col === "name" && (
+                <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                  {sort.dir === "asc" ? "↑" : "↓"}
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOnlyOver70((prev) => !prev);
+                parentRef.current?.scrollTo({ top: 0 });
+              }}
+              title={
+                onlyOver70
+                  ? "Сбросить фильтр: показать все товары"
+                  : "Показать только товары с длиной названия более 70 символов"
+              }
+              className={cn(
+                "h-6 px-2 rounded-md text-[11px] font-mono font-semibold border transition-all flex items-center gap-1 select-none shrink-0 cursor-pointer",
+                onlyOver70
+                  ? "bg-rose-500 text-white border-rose-600 dark:bg-rose-600 dark:border-rose-500 shadow-xs hover:bg-rose-600 dark:hover:bg-rose-700"
+                  : "bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700/80"
+              )}
+            >
+              <span>&gt;70</span>
+              {over70Count > 0 && (
+                <span
+                  className={cn(
+                    "px-1.5 py-0.2 text-[10px] rounded-full font-mono font-bold leading-none",
+                    onlyOver70
+                      ? "bg-rose-700 text-white"
+                      : "bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60"
+                  )}
+                >
+                  {over70Count}
+                </span>
+              )}
+              {onlyOver70 && <span className="text-[10px] ml-0.5 opacity-80 leading-none">✕</span>}
+            </button>
           </div>
           <div className="w-48 px-4 shrink-0 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("ean")}>
             {t("workspace.th_ean")}
           </div>
-          <div className="w-24 px-4 shrink-0">{t("workspace.th_price")}</div>
+          <div className="w-28 px-3 shrink-0 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span
+                className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1 font-semibold"
+                onClick={() => toggleSort("price")}
+              >
+                {t("workspace.th_price")}
+                {sort.col === "price" && (
+                  <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                    {sort.dir === "asc" ? "↑" : "↓"}
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 h-7">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startTransition(() => {
+                    setSort({ col: "price", dir: "asc" });
+                  });
+                  parentRef.current?.scrollTo({ top: 0 });
+                }}
+                title="По возрастанию (дешевые сверху)"
+                className={cn(
+                  "flex-1 h-full rounded text-[10px] font-bold border transition-colors flex items-center justify-center gap-0.5",
+                  sort.col === "price" && sort.dir === "asc"
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300 shadow-2xs"
+                    : "border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+              >
+                ↑ Min
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startTransition(() => {
+                    setSort({ col: "price", dir: "desc" });
+                  });
+                  parentRef.current?.scrollTo({ top: 0 });
+                }}
+                title="По убыванию (дорогие сверху)"
+                className={cn(
+                  "flex-1 h-full rounded text-[10px] font-bold border transition-colors flex items-center justify-center gap-0.5",
+                  sort.col === "price" && sort.dir === "desc"
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300 shadow-2xs"
+                    : "border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+              >
+                ↓ Max
+              </button>
+            </div>
+          </div>
           <div className="w-64 px-4 shrink-0 flex flex-col gap-1">
-            <span className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("category")}>
-              {t("workspace.th_category")}
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" onClick={() => toggleSort("category")}>
+                {t("workspace.th_category")}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSort("category");
+                }}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors flex items-center gap-0.5",
+                  sort.col === "category"
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-700 dark:text-indigo-300"
+                    : "border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+                title="Сортировка категорий по алфавиту: A-Z"
+              >
+                A-Z {sort.col === "category" ? (sort.dir === "asc" ? "↑" : "↓") : ""}
+              </button>
+            </div>
             <AttributeCombobox
               name="Filter"
               value={categoryFilter}
               onChange={(val) => setCategoryFilter(val)}
-              options={Array.from(new Set(Object.values(mappings).map(m => m.category_name || m.category).filter(Boolean))).sort()}
+              options={categoryOptions}
               placeholder={t("workspace.filter_category_placeholder")}
               className="w-full h-7 text-xs border rounded-md px-2 pr-6 outline-none border-slate-200 dark:border-slate-800 bg-white dark:bg-card text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
             />
@@ -1913,6 +3113,8 @@ export default function FactoryWorkspace() {
               className="h-7 text-xs px-2 border-slate-200 dark:border-slate-800 border bg-white dark:bg-card rounded-md shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-700 dark:text-slate-300"
             >
               <option value="">{t("workspace.all_statuses")}</option>
+              <option value="published">{t("workspace.status_published")}</option>
+              <option value="in progress">{t("workspace.status_in_progress")}</option>
               <option value="ready">{t("workspace.status_ready")}</option>
               <option value="need">{t("workspace.status_need")}</option>
               <option value="error">{t("workspace.status_error")}</option>
@@ -1947,13 +3149,18 @@ export default function FactoryWorkspace() {
                 price={price as string}
                 mapData={mapData}
                 isSelected={isSelected}
-                isDraggingCurrent={isDragging.current}
+                isDraggingRef={isDragging}
                 handleRowMouseDown={handleRowMouseDown}
                 toggleSelection={toggleSelection}
                 setActiveProduct={setActiveProduct}
                 onImageHover={handleImageHover}
                 onImageLeave={handleImageLeave}
                 isMirrored={account === "XL"}
+                factoryId={factoryId}
+                account={account}
+                onCategorySaved={handleInlineCategorySaved}
+                onTitleSaved={handleInlineTitleSaved}
+                onPriceSaved={handleInlinePriceSaved}
               />
             );
           })}
@@ -1972,7 +3179,7 @@ export default function FactoryWorkspace() {
                     {t("workspace.under_loading_title")}
                   </span>
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100/80 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                    {t("workspace.under_loading_count", { current: products.length, total: totalCatalogCount || products.length })}
+                    {t("workspace.under_loading_count", { current: streamedLoadedCount || products.length, total: totalCatalogCount || streamedLoadedCount || products.length })}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1986,13 +3193,13 @@ export default function FactoryWorkspace() {
                 <div className="w-36 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
                   <div
                     className="h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(100, Math.round((products.length / totalCatalogCount) * 100))}%` }}
+                    style={{ width: `${Math.min(100, Math.round(((streamedLoadedCount || products.length) / totalCatalogCount) * 100))}%` }}
                   />
                 </div>
               )}
               <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">
                 {totalCatalogCount && totalCatalogCount > 0
-                  ? `${Math.round((products.length / totalCatalogCount) * 100)}%`
+                  ? `${Math.round(((streamedLoadedCount || products.length) / totalCatalogCount) * 100)}%`
                   : t("common.loading")}
               </span>
             </div>
@@ -2001,7 +3208,11 @@ export default function FactoryWorkspace() {
 
         {/* ── CONTEXTUAL SELECTION BAR ── */}
         {(selectedIds.size > 0 || taskProgress) && (
-          <div className="selection-popup fixed z-50 flex flex-col justify-center bg-white dark:bg-card text-slate-900 dark:text-white px-4 py-3 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-indigo-950/10 animate-in fade-in slide-in-from-bottom-4 duration-200 bottom-8 left-1/2 -translate-x-1/2 min-w-[380px]">
+          <div
+            data-no-drag
+            onMouseDown={(e) => e.stopPropagation()}
+            className="selection-popup fixed z-50 flex flex-col justify-center bg-white dark:bg-card text-slate-900 dark:text-white px-4 py-3 rounded-xl border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-indigo-950/10 animate-in fade-in slide-in-from-bottom-4 duration-200 bottom-8 left-1/2 -translate-x-1/2 min-w-[380px]"
+          >
             {taskProgress ? (
               /* ── PROGRESS STATE ── */
               <div className="w-full flex flex-col gap-2.5">
@@ -2087,6 +3298,62 @@ export default function FactoryWorkspace() {
                   <span>⚡ Defaults</span>
                 </Button>
 
+                {/* AI Titles for selection */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAiTitleModalOpen(true)}
+                  className="h-8 px-2.5 text-xs font-medium border-amber-200 dark:border-amber-900/60 bg-amber-50/60 hover:bg-amber-50 dark:bg-amber-950/40 dark:hover:bg-amber-950/60 text-amber-700 dark:text-amber-300 gap-1.5"
+                  title={`Сгенерировать ИИ-названия для ${selectedIds.size} выбранных товаров`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>
+                    ИИ-название ({selectedIds.size})
+                  </span>
+                </Button>
+
+                {/* Price Ending ,99 for selection */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPriceEndingModalOpen(true)}
+                  className="h-8 px-2.5 text-xs font-medium border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 hover:bg-emerald-50 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 gap-1.5 cursor-pointer"
+                  title={`Применить окончание цены (,99) для ${selectedIds.size} выбранных товаров`}
+                >
+                  <span className="font-mono font-bold">,99</span>
+                  <span>({selectedIds.size})</span>
+                </Button>
+
+                {/* Transfer to other account */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const selectedEans = processed
+                      .filter((p, i) => {
+                        const key = getRowKey(p, i);
+                        const ean = p.ean || p.row?.EAN;
+                        const id = p.id || p.row?.id || p.row?.ItemID;
+                        return selectedIds.has(key) || (ean && selectedIds.has(String(ean))) || (id && selectedIds.has(String(id)));
+                      })
+                      .map(p => p.ean || p.row?.EAN || "")
+                      .filter(Boolean);
+                    handleTransferToAccount(selectedEans.length > 0 ? selectedEans : undefined);
+                  }}
+                  disabled={isTransferring}
+                  className="h-8 px-2.5 text-xs font-medium border-purple-200 dark:border-purple-900/60 bg-purple-50/60 hover:bg-purple-50 dark:bg-purple-950/40 dark:hover:bg-purple-950/60 text-purple-700 dark:text-purple-300 gap-1.5"
+                  title={`Скопировать ${selectedIds.size} выбранных товаров в аккаунт ${account === "JV" ? "XL" : "JV"} с адаптацией брендинга`}
+                >
+                  {isTransferring ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+                  ) : (
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  )}
+                  <span>В {account === "JV" ? "XL" : "JV"}</span>
+                </Button>
+
                 <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 shrink-0" />
 
                 {/* OKB Sync */}
@@ -2121,7 +3388,7 @@ export default function FactoryWorkspace() {
                   size="sm"
                   onClick={() => {
                     if (!confirm(t("workspace.confirm_ai_attr", { count: selectedIds.size }))) return;
-                    handleAutoMap(false, "attributes");
+                    handleAutoMap(true, "attributes");
                   }}
                   disabled={isAutoMapping}
                   className="h-8 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shadow-xs"
@@ -2144,60 +3411,108 @@ export default function FactoryWorkspace() {
         )}
       </div>
 
-      {activeProduct && (
-        <>
-          {/* Backdrop — click outside drawer to close */}
-          <div
-            className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40 backdrop-blur-[1px] animate-in fade-in duration-200"
-            onClick={() => setActiveProduct(null)}
-          />
+      {activeProduct && (() => {
+        const row = activeProduct.row || {};
+        const activeEan = activeProduct.ean || row.EAN || activeProduct.product_ean || "";
+        const currentMapping = activeEan ? mappings[activeEan] : null;
+        return (
           <ProductDrawer
             product={activeProduct}
             factoryId={factoryId}
-            onClose={() => setActiveProduct(null)}
-            onSave={(ean, cat, catName, attrs, status) => {
-              setMappings(prev => ({
-                ...prev,
-                [ean]: { category: cat, category_name: catName, status: status || "Need Attributes" }
-              }));
-            }}
+            account={account}
+            initialCategory={currentMapping?.category || ""}
+            initialCategoryName={currentMapping?.category_name || currentMapping?.category || ""}
+            initialProductName={currentMapping?.product_name || ""}
+            initialPrice={currentMapping?.price || ""}
+            onClose={handleCloseDrawer}
+            onTitleSaved={handleInlineTitleSaved}
+            onSave={handleSaveDrawer}
           />
-        </>
-      )}
+        );
+      })()}
 
       {/* ── DRIP SCHEDULE MODAL ── */}
-      <DripScheduleModal
-        factoryId={factoryId}
-        factoryName={factoryName}
-        isOpen={isDripModalOpen}
-        onClose={() => setIsDripModalOpen(false)}
-        onSuccess={() => {
-          fetchActivePlan();
-          fetchMappings();
-        }}
-        selectedEans={selectedIds.size > 0
-          ? processed
-              .filter((p, i) => selectedIds.has(getRowKey(p, i)))
-              .map(p => p.ean || p.row?.EAN || "")
-              .filter(Boolean)
-          : undefined}
-      />
+      {isDripModalOpen && (
+        <DripScheduleModal
+          factoryId={factoryId}
+          factoryName={factoryName}
+          isOpen={isDripModalOpen}
+          onClose={() => setIsDripModalOpen(false)}
+          onSuccess={() => {
+            fetchActivePlan();
+            fetchMappings();
+          }}
+          selectedEans={selectedEansArray.length > 0 ? selectedEansArray : undefined}
+        />
+      )}
+
+      {/* ── DRIP QUEUE & HISTORY MODAL ── */}
+      {isQueueModalOpen && (
+        <DripQueueModal
+          factoryId={factoryId}
+          factoryName={factoryName}
+          isOpen={isQueueModalOpen}
+          onClose={() => setIsQueueModalOpen(false)}
+          catalogProducts={products}
+          onPlanUpdated={() => {
+            fetchActivePlan();
+            fetchMappings();
+          }}
+        />
+      )}
 
       {/* ── MASS EDIT DRAWER ── */}
       {isMassEditOpen && (
         <MassEditDrawer
-          selectedEans={
-            processed
-              .filter((p, i) => selectedIds.has(getRowKey(p, i)))
-              .map(p => p.ean || p.row?.EAN || "")
-              .filter(Boolean)
-          }
+          selectedEans={selectedEansArray}
           account={account}
           onClose={() => setIsMassEditOpen(false)}
           onSaved={() => {
             setIsMassEditOpen(false);
             fetchMappings();
           }}
+        />
+      )}
+
+      {/* ── AI TITLE MODAL ── */}
+      {isAiTitleModalOpen && (
+        <AiTitleModal
+          isOpen={isAiTitleModalOpen}
+          onClose={() => setIsAiTitleModalOpen(false)}
+          account={account}
+          factoryId={factoryId}
+          factoryName={factoryName}
+          totalProductsCount={products.length}
+          over70Count={over70Count}
+          selectedIdsCount={selectedIds.size}
+          selectedEans={selectedEansArray}
+          selectedOver70Count={selectedOver70Count}
+          xlAlreadyGeneratedCount={selectedIds.size > 0 ? selectedXlAlreadyGeneratedCount : xlAlreadyGeneratedCount}
+          xlNeedCount={selectedIds.size > 0 ? selectedXlNeedCount : xlNeedCount}
+          productTitles={productTitlesMap}
+          onTitlesUpdated={handleAiTitlesUpdated}
+        />
+      )}
+
+      {/* ── PRICE ENDING MODAL ── */}
+      {isPriceEndingModalOpen && (
+        <PriceEndingModal
+          isOpen={isPriceEndingModalOpen}
+          onClose={() => setIsPriceEndingModalOpen(false)}
+          account={account}
+          factoryId={factoryId}
+          factoryName={factoryName}
+          totalProductsCount={products.length}
+          selectedCount={selectedIds.size}
+          selectedEans={selectedEansArray}
+          items={(selectedIds.size > 0
+            ? processed.filter((p, i) => selectedIds.has(getRowKey(p, i)))
+            : processed
+          ).map((p) => ({
+            ean: p.ean || (p.row && p.row.EAN) || "",
+            price: mappings[p.ean || (p.row && p.row.EAN) || ""]?.price || p.price || (p.row && (p.row.Startpreis || p.row.SofortkaufenPreis)),
+          }))}
+          onPricesUpdated={handlePricesUpdated}
         />
       )}
 

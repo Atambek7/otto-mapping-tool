@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import json
+from services.otto_formatter import calculate_msrp
 
 router = APIRouter(
     prefix="/export",
@@ -36,29 +37,39 @@ async def get_export_preview(factory_id: str = None, account: str = None, db: Se
     if not eans:
         return {"ready_count": 0, "error_count": 0, "factory_id": factory_id}
         
-    db_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans)).all()
+    attr_query = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans))
+    if account:
+        attr_query = attr_query.filter(models.ProductAttribute.account_name == account)
+    db_attrs = attr_query.all()
+
     attr_by_ean = {}
     for a in db_attrs:
-        if a.product_ean not in attr_by_ean:
-            attr_by_ean[a.product_ean] = {}
-        attr_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+        acc = a.account_name or "JV"
+        if (a.product_ean, acc) not in attr_by_ean:
+            attr_by_ean[(a.product_ean, acc)] = {}
+        attr_by_ean[(a.product_ean, acc)][a.attribute_name] = a.attribute_value
         
     from services.validator import validate_product
+    from services.brand_guard import validate_brand_safety
     ready_count = 0
     error_count = 0
     
     for m in mappings:
         ean = m.product_ean
-        attr_map = attr_by_ean.get(ean, {})
+        m_acc = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name or account or "JV")
+        attr_map = attr_by_ean.get((ean, m_acc)) or attr_by_ean.get((ean, "JV"), {})
         errors = validate_product(ean, m.category_id, attr_map)
+        brand_errors = validate_brand_safety(m_acc, attr_map)
+        if brand_errors:
+            errors.extend(brand_errors)
         
         if errors:
             error_count += 1
-            if m.status == "Ready":
+            if m.status != "Published":
                 m.status = "Error"
         else:
             ready_count += 1
-            if m.status != "Ready":
+            if m.status != "Ready" and m.status != "Published":
                 m.status = "Ready"
                 
     db.commit()
@@ -85,22 +96,34 @@ async def download_export(factory_id: str, format: str = "json", account: str = 
     if not eans:
         return Response(content="[]", media_type="application/json")
         
-    attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans)).all()
+    target_acc = account or (mappings[0].account_name.value if hasattr(mappings[0].account_name, "value") else str(mappings[0].account_name)) if mappings else "JV"
+    attr_query = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans))
+    if account:
+        attr_query = attr_query.filter(models.ProductAttribute.account_name == account)
+    attrs = attr_query.all()
     
-    # Group attributes by EAN
+    # Group attributes by (EAN, account)
     attr_by_ean = {}
     for a in attrs:
-        if a.product_ean not in attr_by_ean:
-            attr_by_ean[a.product_ean] = {}
-        attr_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+        acc = a.account_name or "JV"
+        if (a.product_ean, acc) not in attr_by_ean:
+            attr_by_ean[(a.product_ean, acc)] = {}
+        attr_by_ean[(a.product_ean, acc)][a.attribute_name] = a.attribute_value
         
     from services.validator import validate_product
+    from services.brand_guard import sanitize_brand_attributes, validate_brand_safety
         
     result = []
     for m in mappings:
         ean = m.product_ean
-        attr_map = attr_by_ean.get(ean, {})
+        m_acc = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name or target_acc)
+        attr_map = attr_by_ean.get((ean, m_acc)) or attr_by_ean.get((ean, "JV"), {})
+        # Brand Guard sanitize and check
+        attr_map = sanitize_brand_attributes(m_acc, attr_map)
+        brand_errors = validate_brand_safety(m_acc, attr_map)
         errors = validate_product(ean, m.category_id, attr_map)
+        if brand_errors:
+            errors.extend(brand_errors)
         
         # Only export if it is TRULY valid
         if not errors:
@@ -109,10 +132,10 @@ async def download_export(factory_id: str, format: str = "json", account: str = 
                 "CategoryId": m.category_id,
                 "Attributes": attr_map
             })
-            if m.status != "Ready":
+            if m.status != "Ready" and m.status != "Published":
                 m.status = "Ready"
         else:
-            if m.status == "Ready":
+            if m.status != "Published":
                 m.status = "Error"
                 
     db.commit()
@@ -267,21 +290,29 @@ async def export_otto_json(factory_id: str, account: str = None, db: Session = D
         return Response(content="[]", media_type="application/json")
     # Bulk-fetch ALL attributes for all EANs in one query
     all_eans = [m.product_ean for m in mappings]
-    all_attrs = db.query(models.ProductAttribute).filter(
+    attr_q = db.query(models.ProductAttribute).filter(
         models.ProductAttribute.product_ean.in_(all_eans)
-    ).all()
+    )
+    if account:
+        attr_q = attr_q.filter(models.ProductAttribute.account_name == account)
+    all_attrs = attr_q.all()
     
-    # Group by EAN
+    # Group by (EAN, account)
     attr_by_ean = {}
     for a in all_attrs:
-        if a.product_ean not in attr_by_ean:
-            attr_by_ean[a.product_ean] = {}
-        attr_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+        acc = a.account_name or "JV"
+        if (a.product_ean, acc) not in attr_by_ean:
+            attr_by_ean[(a.product_ean, acc)] = {}
+        attr_by_ean[(a.product_ean, acc)][a.attribute_name] = a.attribute_value
     
+    from services.brand_guard import sanitize_brand_attributes
+
     result = []
     for m in mappings:
         ean = m.product_ean
-        attr_map = attr_by_ean.get(ean, {})
+        m_acc = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name or account or "JV")
+        attr_map = attr_by_ean.get((ean, m_acc), {})
+        attr_map = sanitize_brand_attributes(m_acc, attr_map)
         
         # Get category name
         cat = get_category_by_id(m.category_id) if m.category_id else None
@@ -303,11 +334,22 @@ async def export_otto_json(factory_id: str, account: str = None, db: Session = D
                 if url:
                     images.append({"url": url, "type": "IMAGE"})
         
-        # Format attributes: Otto expects { "AttrName": ["Value"] }
+        # Format attributes: Otto expects { "AttrName": ["Value"] } strictly matching category schema
+        from services.categories_repo import get_allowed_attribute_names
+        cat_for_allowed = m.category_id or cat_name
+        allowed_attrs = get_allowed_attribute_names(cat_for_allowed) if cat_for_allowed else set()
+        allowed_lookup = {str(a).strip().lower(): str(a).strip() for a in allowed_attrs} if allowed_attrs else {}
+
         formatted_attrs = {}
         for key, value in attr_map.items():
             if value is not None and str(value).strip():
-                formatted_attrs[key] = [str(value).strip()]
+                key_str = str(key).strip()
+                if allowed_lookup:
+                    canonical_key = allowed_lookup.get(key_str.lower())
+                    if not canonical_key:
+                        continue
+                    key_str = canonical_key
+                formatted_attrs[key_str] = [str(value).strip()]
         
         result.append({
             "sku": ean,
@@ -317,6 +359,10 @@ async def export_otto_json(factory_id: str, account: str = None, db: Session = D
             "pricing": {
                 "standardPrice": {
                     "amount": price,
+                    "currency": "EUR"
+                },
+                "msrp": {
+                    "amount": calculate_msrp(price),
                     "currency": "EUR"
                 }
             },

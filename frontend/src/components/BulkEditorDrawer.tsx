@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { CategoryAutocomplete } from "@/components/CategoryAutocomplete";
 import { fetchWithAuth } from "@/lib/api";
 import { toast } from "sonner";
+import { showOpenAiErrorToast } from "@/lib/openaiError";
 import { useTranslation } from "react-i18next";
+import { useAccount } from "@/lib/useAccount";
 
 interface BulkEditorDrawerProps {
   selectedEans: string[];
@@ -19,6 +21,7 @@ interface BulkEditorDrawerProps {
 
 export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClose, onSave }: BulkEditorDrawerProps) {
   const { t } = useTranslation();
+  const { account } = useAccount();
   const [category, setCategory] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [attributes, setAttributes] = useState<Record<string, string>>({});
@@ -94,18 +97,20 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
         }
       } else {
         const errorCode = res.headers.get("x-error-code");
+        const errorBody = await res.json().catch(() => ({}));
+        const errorMsg = errorBody.detail;
         if (errorCode === "OPENAI_API_KEY_MISSING") {
           toast.error(t("product_drawer.toast_openai_missing_title"), {
             id: "openai-error-toast",
             description: t("product_drawer.toast_openai_missing_desc"),
             duration: 7000,
+            action: {
+              label: t("product_drawer.toast_openai_action_settings", { defaultValue: "Настройки" }),
+              onClick: () => { window.location.href = "/dashboard/settings"; }
+            }
           });
         } else if (errorCode === "OPENAI_API_ERROR") {
-          toast.error(t("product_drawer.toast_openai_error_title"), {
-            id: "openai-error-toast",
-            description: t("product_drawer.toast_openai_error_desc"),
-            duration: 7000,
-          });
+          showOpenAiErrorToast(String(errorMsg || ""), t);
         } else {
           toast.error(t("product_drawer.toast_category_fail"), { id: "openai-error-toast" });
         }
@@ -118,13 +123,15 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
     }
   };
 
-  const handleExtractAttributes = async (useVision: boolean = false) => {
+  const handleExtractAttributes = async (useVision: boolean = true) => {
     if (!category) return;
     setIsExtractingAttributes(true);
     try {
+      const aiData = getAiProductData();
+      const hasImg = Boolean(aiData.gallery_url || aiData.picture_urls);
       const res = await fetchWithAuth("/mapping/extract-attributes", {
         method: "POST",
-        body: JSON.stringify({ ...getAiProductData(), category_id: category, use_vision: useVision })
+        body: JSON.stringify({ ...aiData, category_id: category, use_vision: useVision && hasImg })
       });
       if (res.ok) {
         const data = await res.json();
@@ -133,18 +140,20 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
         }
       } else {
         const errorCode = res.headers.get("x-error-code");
+        const errorBody = await res.json().catch(() => ({}));
+        const errorMsg = errorBody.detail;
         if (errorCode === "OPENAI_API_KEY_MISSING") {
           toast.error(t("product_drawer.toast_openai_missing_title"), {
             id: "openai-error-toast",
             description: t("product_drawer.toast_openai_missing_desc"),
             duration: 7000,
+            action: {
+              label: t("product_drawer.toast_openai_action_settings", { defaultValue: "Настройки" }),
+              onClick: () => { window.location.href = "/dashboard/settings"; }
+            }
           });
         } else if (errorCode === "OPENAI_API_ERROR") {
-          toast.error(t("product_drawer.toast_openai_error_title"), {
-            id: "openai-error-toast",
-            description: t("product_drawer.toast_openai_error_desc"),
-            duration: 7000,
-          });
+          showOpenAiErrorToast(String(errorMsg || ""), t);
         } else {
           toast.error(t("product_drawer.toast_attr_fail"), { id: "openai-error-toast" });
         }
@@ -164,7 +173,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       if (category) {
         await fetchWithAuth("/mapping/category/bulk", {
           method: "POST",
-          body: JSON.stringify({ product_eans: selectedEans, factory_id: factoryId, category_id: category }),
+          body: JSON.stringify({ product_eans: selectedEans, factory_id: factoryId, category_id: category, account }),
         });
       }
 
@@ -172,7 +181,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       if (Object.keys(attributes).length > 0) {
         await fetchWithAuth("/mapping/attributes/bulk", {
           method: "POST",
-          body: JSON.stringify({ product_eans: selectedEans, attributes }),
+          body: JSON.stringify({ product_eans: selectedEans, attributes, account }),
         });
       }
 
@@ -245,23 +254,13 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    onClick={() => handleExtractAttributes(false)} 
-                    disabled={isExtractingAttributes || !sampleProduct}
-                    className="h-7 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                  >
-                    <Wand2 className="w-3 h-3 mr-1" />
-                    {isExtractingAttributes ? t("bulk_editor.extracting") : t("bulk_editor.auto_ai")}
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
                     onClick={() => handleExtractAttributes(true)} 
                     disabled={isExtractingAttributes || !sampleProduct}
-                    className="h-7 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                    title={t("bulk_editor.vision_tooltip")}
+                    className="h-7 text-xs border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-900/50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
+                    title={t("product_drawer.ai_vision_hint")}
                   >
                     <Wand2 className="w-3 h-3 mr-1" />
-                    {t("bulk_editor.vision_ai")}
+                    {isExtractingAttributes ? t("common.loading") : t("product_drawer.ai_vision")}
                   </Button>
                 </>
               )}

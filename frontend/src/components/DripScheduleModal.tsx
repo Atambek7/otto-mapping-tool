@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAccount } from "@/lib/useAccount";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+
+import { fetchWithAuth } from "@/lib/api";
 
 interface DripScheduleModalProps {
   factoryId: string;
@@ -41,6 +43,8 @@ export default function DripScheduleModal({
   const [dailyTime, setDailyTime] = useState<string>("08:00");
   const [executorType, setExecutorType] = useState<string>("otto_api");
   const [excludePublished, setExcludePublished] = useState<boolean>(false);
+  const [antiCollisionEnabled, setAntiCollisionEnabled] = useState<boolean>(true);
+  const [staggerDays, setStaggerDays] = useState<number>(2);
 
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -48,22 +52,45 @@ export default function DripScheduleModal({
 
   const [previewData, setPreviewData] = useState<any | null>(null);
 
+  const previewAbortControllerRef = useRef<AbortController | null>(null);
+  const previewRequestIdRef = useRef<number>(0);
+
   useEffect(() => {
-    if (isOpen) {
-      fetchPreview(days, dailyTime);
-    } else {
+    if (!isOpen) {
+      if (previewAbortControllerRef.current) {
+        previewAbortControllerRef.current.abort();
+        previewAbortControllerRef.current = null;
+      }
       setPreviewData(null);
       setError(null);
+      return;
     }
-  }, [isOpen, days, dailyTime, account, excludePublished]);
 
-  const fetchPreview = async (d: number, t: string) => {
+    if (previewAbortControllerRef.current) {
+      previewAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    previewAbortControllerRef.current = controller;
+    const currentRequestId = ++previewRequestIdRef.current;
+
+    const timer = setTimeout(() => {
+      fetchPreview(days, dailyTime, controller.signal, currentRequestId);
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isOpen, days, dailyTime, account, excludePublished, antiCollisionEnabled, staggerDays]);
+
+  const fetchPreview = async (d: number, t: string, signal: AbortSignal, reqId: number) => {
     setLoadingPreview(true);
     setError(null);
     try {
-      const res = await fetch(`/api/pipeline/preview/${factoryId}`, {
+      const res = await fetchWithAuth(`/pipeline/preview/${factoryId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
           account_name: account,
           days: d,
@@ -71,8 +98,14 @@ export default function DripScheduleModal({
           timezone: "Europe/Berlin",
           product_eans: selectedEans && selectedEans.length > 0 ? selectedEans : null,
           exclude_published: excludePublished,
+          anti_collision_enabled: antiCollisionEnabled,
+          stagger_days: staggerDays,
         }),
       });
+
+      if (reqId !== previewRequestIdRef.current) {
+        return;
+      }
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
@@ -80,11 +113,20 @@ export default function DripScheduleModal({
       }
 
       const data = await res.json();
-      setPreviewData(data);
+      if (reqId === previewRequestIdRef.current) {
+        setPreviewData(data);
+      }
     } catch (err: any) {
-      setError(err.message || "Connection error while generating schedule preview");
+      if (err?.name === "AbortError" || signal.aborted) {
+        return;
+      }
+      if (reqId === previewRequestIdRef.current) {
+        setError(err.message || "Connection error while generating schedule preview");
+      }
     } finally {
-      setLoadingPreview(false);
+      if (reqId === previewRequestIdRef.current) {
+        setLoadingPreview(false);
+      }
     }
   };
 
@@ -92,7 +134,7 @@ export default function DripScheduleModal({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/pipeline/create/${factoryId}`, {
+      const res = await fetchWithAuth(`/pipeline/create/${factoryId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -103,6 +145,8 @@ export default function DripScheduleModal({
           executor_type: executorType,
           product_eans: selectedEans && selectedEans.length > 0 ? selectedEans : null,
           exclude_published: excludePublished,
+          anti_collision_enabled: antiCollisionEnabled,
+          stagger_days: staggerDays,
         }),
       });
 
@@ -262,6 +306,51 @@ export default function DripScheduleModal({
                 </span>
               )}
             </div>
+
+            {/* Anti-Collision Protection Setting */}
+            <div className="mt-3.5 p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-950 dark:text-amber-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={antiCollisionEnabled}
+                    onChange={(e) => setAntiCollisionEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-600 border-amber-300 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span>🛡️ {t("drip_modal.anti_collision_title", { oppAccount: account === "JV" ? "XL" : "JV" })}</span>
+                </label>
+                {previewData?.stagger_delayed_total > 0 && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100">
+                    {t("drip_modal.stagger_delayed_badge", { count: previewData.stagger_delayed_total })}
+                  </span>
+                )}
+              </div>
+
+              {antiCollisionEnabled && (
+                <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-300">
+                  <div className="text-[11px] leading-tight max-w-[65%]">
+                    {t("drip_modal.anti_collision_desc", { oppAccount: account === "JV" ? "XL" : "JV" })}:
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {[1, 2, 3, 5, 7].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setStaggerDays(d)}
+                        className={cn(
+                          "px-2 py-1 rounded text-xs font-semibold transition-colors",
+                          staggerDays === d
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "bg-white dark:bg-card border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-100"
+                        )}
+                      >
+                        {d}д
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Section 2: Distribution Preview */}
@@ -328,7 +417,13 @@ export default function DripScheduleModal({
                             {t("drip_modal.day_label", { day: row.day })}
                           </td>
                           <td className="py-2.5 px-3.5 font-semibold text-slate-900 dark:text-white">
-                            {t("drip_modal.items_count", { count: row.total_items })}
+                            <div>{t("drip_modal.items_count", { count: row.total_items })}</div>
+                            {row.stagger_delayed_count > 0 && (
+                              <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
+                                <span>🛡️</span>
+                                <span>{row.stagger_delayed_count} с задержкой</span>
+                              </div>
+                            )}
                           </td>
                           <td className="py-2.5 px-3.5">
                             <div className="flex flex-wrap gap-1.5">

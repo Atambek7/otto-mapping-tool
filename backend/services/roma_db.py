@@ -9,6 +9,7 @@ import models
 from services.categories_repo import get_categories, get_category_by_id
 from services.image_processor import mirror_image_for_xl, fetch_images_batch
 from services.constant_attributes import get_defaults_for_account, get_account_specific_defaults
+from services.brand_guard import is_forbidden_warranty_attribute
 
 CATEGORY_DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS products (
@@ -38,10 +39,14 @@ async def build_roma_sqlite_db(
     
     conn = sqlite3.connect(path)
     cur = conn.cursor()
+    cur.execute("PRAGMA synchronous = OFF")
+    cur.execute("PRAGMA journal_mode = MEMORY")
+    cur.execute("PRAGMA cache_size = 10000")
     cur.execute(CATEGORY_DB_SCHEMA)
 
     # 1. Mirror images for XL if needed
     mirrored_map = {}
+    mirrored_bytes_map: dict[str, bytes] = {}
     if (account or "").upper() == "XL":
         pic_urls = []
         for item in items:
@@ -50,27 +55,30 @@ async def build_roma_sqlite_db(
             pic_urls.append((raw_img, ean))
 
         if pic_urls:
-            sem = asyncio.Semaphore(25)
+            import httpx
+            sem = asyncio.Semaphore(30)
             mirrored_count = 0
             lock = asyncio.Lock()
+            limits = httpx.Limits(max_connections=60, max_keepalive_connections=30)
 
-            async def process_img(url: str, ean: str):
-                nonlocal mirrored_count
-                async with sem:
-                    m_url = await mirror_image_for_xl(url, ean, "XL")
-                    mirrored_map[ean] = m_url
-                    async with lock:
-                        mirrored_count += 1
-                        if progress_callback and (mirrored_count % 10 == 0 or mirrored_count == len(pic_urls)):
-                            progress_callback(
-                                mirrored_count, 
-                                len(pic_urls), 
-                                f"Зеркалирование изображений для XL: {mirrored_count}/{len(pic_urls)}"
-                            )
+            async with httpx.AsyncClient(timeout=10.0, limits=limits, follow_redirects=True) as http_client:
+                async def process_img(url: str, ean: str):
+                    nonlocal mirrored_count
+                    async with sem:
+                        m_url = await mirror_image_for_xl(url, ean, "XL", client=http_client, bytes_out=mirrored_bytes_map)
+                        mirrored_map[ean] = m_url
+                        async with lock:
+                            mirrored_count += 1
+                            if progress_callback and (mirrored_count % 10 == 0 or mirrored_count == len(pic_urls)):
+                                progress_callback(
+                                    mirrored_count, 
+                                    len(pic_urls), 
+                                    f"Зеркалирование изображений для XL: {mirrored_count}/{len(pic_urls)}"
+                                )
 
-            tasks = [process_img(u, e) for u, e in pic_urls if u]
-            if tasks:
-                await asyncio.gather(*tasks)
+                tasks = [process_img(u, e) for u, e in pic_urls if u]
+                if tasks:
+                    await asyncio.gather(*tasks)
 
     # 2. Concurrently fetch binary image data for all items
     urls_to_fetch = []
@@ -81,17 +89,18 @@ async def build_roma_sqlite_db(
         if target_img:
             urls_to_fetch.append(target_img)
 
-    def on_img_progress(cur, tot, msg):
+    def on_img_progress(cur_count, tot, msg):
         if progress_callback:
-            item_cur = min(len(items), int((cur / max(1, tot)) * len(items))) if tot > 0 else cur
+            item_cur = min(len(items), int((cur_count / max(1, tot)) * len(items))) if tot > 0 else cur_count
             progress_callback(item_cur, len(items), f"Загрузка картинок: {item_cur} из {len(items)}")
 
     img_bytes_map = await fetch_images_batch(
         urls_to_fetch, 
-        max_concurrency=30, 
+        max_concurrency=60, 
         timeout=8.0, 
         max_remote=99999,
-        progress_callback=on_img_progress if progress_callback else None
+        progress_callback=on_img_progress if progress_callback else None,
+        preloaded_bytes=mirrored_bytes_map
     )
     fetched_count = len([v for v in img_bytes_map.values() if v])
     logging.info(f"[roma_db] Image fetch: {fetched_count}/{len(urls_to_fetch)} URLs fetched successfully")
@@ -99,10 +108,11 @@ async def build_roma_sqlite_db(
         missing = [u for u in urls_to_fetch if not img_bytes_map.get(u)]
         logging.warning(f"[roma_db] Missing images ({len(missing)}): {missing[:5]}")
 
-    # 3. Insert rows in exact sequence: pic_main, ean, product, price, category, collection
+    # 3. Batch insert rows in exact sequence: pic_main, ean, product, price, category, collection
     if progress_callback:
         progress_callback(len(items), len(items), "Формирование файла SQLite базы данных...")
 
+    rows_to_insert = []
     for item in items:
         ean = str(item.get("ean") or item.get("old_prod_ref") or "").strip()
         if not ean:
@@ -137,13 +147,15 @@ async def build_roma_sqlite_db(
         raw_bytes = img_bytes_map.get(target_img)
         pic_blob = sqlite3.Binary(raw_bytes) if raw_bytes else None
 
-        cur.execute("""
-            INSERT INTO products (
-                pic_main, ean, product, price, category, collection
-            ) VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+        rows_to_insert.append((
             pic_blob, ean, title, price, cat_name, collection
         ))
+
+    cur.executemany("""
+        INSERT INTO products (
+            pic_main, ean, product, price, category, collection
+        ) VALUES (?, ?, ?, ?, ?, ?)
+    """, rows_to_insert)
 
     conn.commit()
     conn.close()
@@ -221,11 +233,28 @@ def import_roma_sqlite_db(
         if cat_id:
             matched_cats += 1
 
-        title = str(row_dict.get("product") or row_dict.get("new_title") or row_dict.get("title") or "").strip()
-        price_otto = str(row_dict.get("price") or row_dict.get("new_price") or row_dict.get("price_otto") or "").strip()
-        price_af = str(row_dict.get("price_af") or row_dict.get("startpreis") or "").strip()
-        if not price_otto and price_af:
-            price_otto = price_af
+        raw_title = str(row_dict.get("product") or row_dict.get("new_title") or row_dict.get("title") or "").strip()
+        title = "" if raw_title.lower() in ("без названия", "none", "null", "0", "undefined") else raw_title
+
+        raw_price_otto = str(row_dict.get("price") or row_dict.get("new_price") or row_dict.get("price_otto") or "").strip()
+        raw_price_af = str(row_dict.get("price_af") or row_dict.get("startpreis") or "").strip()
+
+        def _clean_price(val: Any) -> str:
+            if not val:
+                return ""
+            c = str(val).replace("€", "").replace("EUR", "").replace("eur", "").replace(" ", "").replace(",", ".").strip()
+            try:
+                f = float(c)
+                if f > 0.0001:
+                    return str(int(f)) if f.is_integer() else f"{f:.2f}"
+            except (ValueError, TypeError):
+                pass
+            return ""
+
+        clean_p_otto = _clean_price(raw_price_otto)
+        clean_p_af = _clean_price(raw_price_af)
+        final_price = clean_p_otto or clean_p_af or None
+        final_price_af = clean_p_af or None
             
         raw_pic = row_dict.get("pic_main")
         pic_main = str(raw_pic).strip() if isinstance(raw_pic, str) and raw_pic.startswith("http") else ""
@@ -233,17 +262,21 @@ def import_roma_sqlite_db(
 
         target_factory = factory_id or collection
 
-        # Upsert ProductMapping
-        mapping = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == ean).first()
+        # Upsert ProductMapping for the specified account
+        acc = account or "JV"
+        mapping = db.query(models.ProductMapping).filter(
+            models.ProductMapping.product_ean == ean,
+            models.ProductMapping.account_name == acc
+        ).first()
         if not mapping:
             mapping = models.ProductMapping(
                 product_ean=ean,
                 factory_id=target_factory,
-                account_name=account or "JV",
+                account_name=acc,
                 category_id=cat_id,
-                product_name=title,
-                price=price_otto,
-                price_af=price_af,
+                product_name=title or f"Product {ean}",
+                price=final_price,
+                price_af=final_price_af,
                 image_url=pic_main,
                 status="Need Attributes" if cat_id else "Not Mapped"
             )
@@ -255,23 +288,29 @@ def import_roma_sqlite_db(
                     mapping.status = "Need Attributes"
             if title:
                 mapping.product_name = title
-            if price_otto:
-                mapping.price = price_otto
-            if price_af:
-                mapping.price_af = price_af
+            if clean_p_otto:
+                mapping.price = clean_p_otto
+            elif clean_p_af and not _clean_price(mapping.price):
+                mapping.price = clean_p_af
+            if clean_p_af:
+                mapping.price_af = clean_p_af
             if pic_main:
                 mapping.image_url = pic_main
             if target_factory:
                 mapping.factory_id = target_factory
-            if account:
-                mapping.account_name = account
 
         # Auto-apply default constant attributes
-        existing_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean == ean).all()
+        acc = account or "JV"
+        existing_attrs = db.query(models.ProductAttribute).filter(
+            models.ProductAttribute.product_ean == ean,
+            models.ProductAttribute.account_name == acc
+        ).all()
         attr_map = {a.attribute_name: a for a in existing_attrs}
         for k, v in defaults.items():
+            if is_forbidden_warranty_attribute(k):
+                continue
             if k not in attr_map:
-                db.add(models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v))
+                db.add(models.ProductAttribute(product_ean=ean, account_name=acc, attribute_name=k, attribute_value=v))
             elif k in acc_specific:
                 # Sync account-specific attributes to match the selected account (JV vs XL)
                 attr_map[k].attribute_value = v

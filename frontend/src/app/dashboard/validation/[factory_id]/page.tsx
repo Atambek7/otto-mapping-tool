@@ -138,7 +138,10 @@ export default function FactoryValidationPage() {
     try {
       const res = await fetchWithAuth("/mapping/bulk/delete", {
         method: "POST",
-        body: JSON.stringify({ product_eans: Array.from(selectedIds) })
+        body: JSON.stringify({ 
+          product_eans: Array.from(selectedIds),
+          account: account || "JV"
+        })
       });
       if (res.ok) {
         setInvalidProducts(prev => prev.filter(p => !selectedIds.has(p.product_ean)));
@@ -393,7 +396,11 @@ export default function FactoryValidationPage() {
                           {p.product_name || p.product_ean}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex font-mono text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 shrink-0">
+                          <span
+                            className="inline-flex font-mono text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 shrink-0 select-text cursor-text"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
                             {p.product_ean}
                           </span>
                           {p.price && (
@@ -436,15 +443,13 @@ export default function FactoryValidationPage() {
       </div>
 
       {activeProduct && (
-        <>
-          <div className="fixed inset-0 z-40 bg-slate-900/20 dark:bg-black/40 backdrop-blur-xs animate-in fade-in duration-200" onClick={() => setActiveProduct(null)} />
-          <ProductDrawer
-            product={activeProduct}
-            factoryId={invalidProducts.find(p => p.product_ean === activeProduct.ean)?.factory_id || ""}
-            onClose={() => setActiveProduct(null)}
-            onSave={handleSave}
-          />
-        </>
+        <ProductDrawer
+          product={activeProduct}
+          factoryId={invalidProducts.find(p => p.product_ean === activeProduct.ean)?.factory_id || ""}
+          account={account}
+          onClose={() => setActiveProduct(null)}
+          onSave={handleSave}
+        />
       )}
 
       {/* ── CONTEXTUAL SELECTION BAR ── */}

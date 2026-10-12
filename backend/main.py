@@ -146,6 +146,9 @@ def apply_safe_migrations():
             conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS missing_attributes JSON;"))
             conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS last_error TEXT;"))
             conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS has_ai_title BOOLEAN DEFAULT FALSE;"))
+            conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS has_manual_price BOOLEAN DEFAULT FALSE;"))
+            conn.execute(text("ALTER TABLE product_mappings ADD COLUMN IF NOT EXISTS source_account VARCHAR;"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_product_mappings_source_account ON product_mappings(source_account);"))
             conn.execute(text("""
                 UPDATE product_mappings 
                 SET has_ai_title = TRUE 

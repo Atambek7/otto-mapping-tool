@@ -21,7 +21,7 @@ docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
 
 echo "=== 4. Running Database Migrations ==="
 sleep 5
-docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head || docker compose -f docker-compose.prod.yml exec -T backend alembic stamp head
+docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
 
 echo "=== 5. Verifying Service Health ==="
 SUCCESS=0

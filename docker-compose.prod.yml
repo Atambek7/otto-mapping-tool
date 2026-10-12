@@ -6,6 +6,7 @@ services:
     container_name: omt_backend
     restart: always
     volumes:
+      - ./backend:/app
       - omt_static_data:/app/static
     env_file:
       - ./backend/.env
@@ -31,6 +32,7 @@ services:
     restart: always
     command: ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=100"]
     volumes:
+      - ./backend:/app
       - omt_static_data:/app/static
     env_file:
       - ./backend/.env
@@ -56,6 +58,7 @@ services:
     restart: always
     command: ["celery", "-A", "worker.celery_app", "beat", "--loglevel=info"]
     volumes:
+      - ./backend:/app
       - omt_static_data:/app/static
     env_file:
       - ./backend/.env
@@ -92,9 +95,9 @@ services:
     container_name: omt_db
     restart: always
     environment:
-      POSTGRES_USER: otto_user
-      POSTGRES_PASSWORD: otto_pass
-      POSTGRES_DB: otto_db
+      POSTGRES_USER: ${POSTGRES_USER:-otto_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otto_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-otto_db}
     volumes:
       - omt_postgres_data:/var/lib/postgresql/data
     healthcheck:

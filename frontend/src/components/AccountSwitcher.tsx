@@ -1,16 +1,21 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useAccount, AccountType } from "@/lib/useAccount";
 import { Building, ChevronDown, Check } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { fetchWithAuth } from "@/lib/api";
+import { toast } from "sonner";
 
 export function AccountSwitcher() {
   const { account, setAccount } = useAccount();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -22,9 +27,72 @@ export function AccountSwitcher() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const selectAccount = (acc: AccountType) => {
-    setAccount(acc);
+  const selectAccount = async (newAcc: AccountType) => {
+    if (newAcc === account) {
+      setOpen(false);
+      return;
+    }
+
     setOpen(false);
+
+    // Check if user is currently inside a factory-scoped route
+    const match = (pathname || "").match(/^\/dashboard\/(factories|validation)\/([^/]+)/);
+    if (!match) {
+      // Standard switch for global pages
+      setAccount(newAcc);
+      return;
+    }
+
+    const routePrefix = match[1]; // "factories" or "validation"
+    const currentFid = match[2];
+
+    // 1. Try resolving twin factory from local cache (0ms instant)
+    let currentFactoryName = "";
+    try {
+      const currentListRaw = localStorage.getItem(`otto_factories_list_${account}`);
+      const targetListRaw = localStorage.getItem(`otto_factories_list_${newAcc}`);
+      const currentList = currentListRaw ? JSON.parse(currentListRaw) : [];
+      const targetList = targetListRaw ? JSON.parse(targetListRaw) : [];
+
+      const currentFactory = currentList.find((f: any) => String(f.id) === String(currentFid));
+      if (currentFactory?.name) {
+        currentFactoryName = currentFactory.name;
+        const normName = currentFactory.name.toLowerCase().trim();
+        const twin = targetList.find(
+          (f: any) => f.name?.toLowerCase().trim() === normName && (f.kind === currentFactory.kind || f.kind === "lister")
+        );
+        if (twin?.id) {
+          setAccount(newAcc);
+          router.replace(`/dashboard/${routePrefix}/${twin.id}`);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Local twin lookup error:", e);
+    }
+
+    // 2. Fallback to backend twin resolver
+    try {
+      const res = await fetchWithAuth(
+        `/aftercool/twin-factory?factory_id=${currentFid}&source_account=${account}&target_account=${newAcc}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.target_factory_id) {
+          setAccount(newAcc);
+          router.replace(`/dashboard/${routePrefix}/${data.target_factory_id}`);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Backend twin lookup error:", e);
+    }
+
+    // 3. Fallback when factory does not exist in target account
+    setAccount(newAcc);
+    router.replace("/dashboard/factories");
+    const nameLabel = currentFactoryName ? `«${currentFactoryName}» ` : "";
+    toast.info(`Фабрика ${nameLabel}на данный момент отсутствует в аккаунте ${newAcc}. Открыт список фабрик.`);
   };
 
   return (

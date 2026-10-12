@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 interface AttributeComboboxProps {
@@ -14,7 +14,16 @@ interface AttributeComboboxProps {
   className?: string;
 }
 
-export function AttributeCombobox({ name, value, options, placeholder, onChange, dimmed, isAiFilled, className }: AttributeComboboxProps) {
+export const AttributeCombobox = React.memo(function AttributeCombobox({
+  name,
+  value,
+  options,
+  placeholder,
+  onChange,
+  dimmed,
+  isAiFilled,
+  className
+}: AttributeComboboxProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Local draft — doesn't call onChange on every keystroke
@@ -40,7 +49,7 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
     return () => document.removeEventListener("mousedown", handler);
   }, [open, draft, value, onChange]);
 
-  const filtered = options
+  const filtered = open && options
     ? (draft.trim()
         ? options.filter(o => o.toLowerCase().includes(draft.toLowerCase()))
         : options
@@ -50,6 +59,9 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setDraft(v);
+    if (isAiFilled && v !== value) {
+      onChange(v);
+    }
     // Only open dropdown — do NOT call onChange yet
     if (options) setOpen(true);
   };
@@ -71,6 +83,8 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
     setOpen(false);
   };
 
+  const isFieldAiFilled = Boolean(isAiFilled && draft === value);
+
   return (
     <div ref={containerRef} className="relative">
       <div className="relative flex items-center">
@@ -83,20 +97,22 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
           placeholder={placeholder || t("product_drawer.enter_attribute", { name: name.toLowerCase() })}
           className={className || [
             "w-full h-8 text-sm border rounded-md px-2 pr-8 outline-none transition-all",
-            isAiFilled
-              ? "border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 text-slate-900 dark:text-amber-100"
-              : (!value && !dimmed)
-              ? "border-blue-400 dark:border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 text-slate-900 dark:text-slate-100 placeholder-blue-400/70 dark:placeholder-blue-400/50"
+            isFieldAiFilled
+              ? "border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/30 text-amber-950 dark:text-amber-100 focus:border-amber-400 dark:focus:border-amber-500 focus:ring-1 focus:ring-amber-400/30"
               : [
-                  "border-slate-200 dark:border-slate-700",
-                  "bg-white dark:bg-[#0B0F19]",
-                  value
-                    ? "border-indigo-300 dark:border-indigo-700 text-slate-900 dark:text-slate-100"
-                    : dimmed
-                    ? "text-slate-400 dark:text-slate-500"
-                    : "text-slate-900 dark:text-slate-200",
+                  (!value && !dimmed)
+                    ? "border-blue-400 dark:border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 text-slate-900 dark:text-slate-100 placeholder-blue-400/70 dark:placeholder-blue-400/50"
+                    : [
+                        "border-slate-200 dark:border-slate-700",
+                        "bg-white dark:bg-[#0B0F19]",
+                        value
+                          ? "border-indigo-300 dark:border-indigo-700 text-slate-900 dark:text-slate-100"
+                          : dimmed
+                          ? "text-slate-400 dark:text-slate-500"
+                          : "text-slate-900 dark:text-slate-200",
+                      ].join(" "),
+                  "focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-400/20",
                 ].join(" "),
-            "focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-1 focus:ring-indigo-400/20",
           ].flat().join(" ")}
         />
         <div className="absolute right-1.5 flex items-center gap-0.5 pointer-events-none">
@@ -143,4 +159,4 @@ export function AttributeCombobox({ name, value, options, placeholder, onChange,
       )}
     </div>
   );
-}
+});

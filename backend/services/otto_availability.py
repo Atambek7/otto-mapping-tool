@@ -208,18 +208,40 @@ def extract_unknown_skus(res: dict[str, Any], candidate_skus: list[str]) -> list
     """
     Analyzes OTTO Availability API response (quantities or delivery)
     and extracts SKUs that OTTO reports as unindexed / unknown.
+    Supports HTTP 207 Multi-Status, 400, 404, and 422.
     """
     status_code = res.get("status_code", 0)
-    if status_code not in (400, 422):
+    if status_code not in (207, 400, 404, 422):
         return []
 
     import json
     import re
+
+    # 1. Any SKU explicitly returned in successful 'results' is NOT unknown
+    successful_skus = set()
+    resp_obj = res.get("response")
+    if isinstance(resp_obj, dict):
+        for item in resp_obj.get("results", []):
+            if isinstance(item, dict) and "sku" in item:
+                successful_skus.add(str(item["sku"]))
+
+    # 2. Isolate error parts from response
+    error_parts = []
+    if isinstance(resp_obj, dict) and "errors" in resp_obj:
+        error_parts.append(resp_obj["errors"])
+    elif isinstance(resp_obj, list):
+        # Delivery 207 returns list of validation errors
+        error_parts.append(resp_obj)
+    elif res.get("error"):
+        error_parts.append(res["error"])
+    else:
+        error_parts.append(resp_obj)
+
     try:
-        raw_text = json.dumps(res.get("response") or res.get("error") or "")
+        raw_error_text = json.dumps(error_parts)
     except Exception:
-        raw_text = str(res)
-    text_lower = raw_text.lower()
+        raw_error_text = str(error_parts)
+    text_lower = raw_error_text.lower()
 
     # Markers of unindexed / unknown SKU in Otto
     is_unknown_err = any(k in text_lower for k in [
@@ -228,28 +250,28 @@ def extract_unknown_skus(res: dict[str, Any], candidate_skus: list[str]) -> list
         "unknown sku",
         "unknown for sku",
         "sku not found",
+        "error sku:",
     ])
     if not is_unknown_err:
         return []
 
     found = []
-    # 1. Direct match with candidates in response string
+    # 3. Match within error text only, ignoring successful results
     for sku in candidate_skus:
-        if str(sku) in raw_text or str(sku).lower() in text_lower:
-            found.append(str(sku))
+        sku_str = str(sku)
+        if sku_str not in successful_skus and (sku_str in raw_error_text or sku_str.lower() in text_lower):
+            found.append(sku_str)
 
-    # 2. Regex search for SKU tokens if direct match didn't find all
+    # 4. Regex search for SKU tokens in error text if direct match didn't find all
     if not found:
-        tokens = re.findall(r'(?:sku[:\s=]+|\b)([0-9]{8,14})\b', raw_text, re.IGNORECASE)
+        tokens = re.findall(r'(?:sku[:\s=]+|\b)([0-9]{8,14})\b', raw_error_text, re.IGNORECASE)
         for t in tokens:
-            if t in candidate_skus and t not in found:
+            if t in candidate_skus and t not in successful_skus and t not in found:
                 found.append(t)
 
-    # 3. If marker is definitely present, but no specific SKU was extracted:
-    # If candidate_skus has 1 item, it is definitely that item.
-    # If candidate_skus has multiple, all are affected.
+    # 5. If marker is definitely present, but no specific SKU was extracted from error text:
     if not found and is_unknown_err:
-        found = list(candidate_skus)
+        found = [s for s in candidate_skus if s not in successful_skus]
 
     return found
 
@@ -356,6 +378,31 @@ def apply_otto_availability(
             if status_code in (200, 204):
                 break
 
+            if status_code == 207:
+                # 1. Any SKU present in results was successfully updated
+                succeeded = [
+                    str(r["sku"])
+                    for r in (qty_res.get("response") or {}).get("results", [])
+                    if isinstance(r, dict) and "sku" in r
+                ]
+                # 2. Extract unknown SKUs
+                unknowns = extract_unknown_skus(qty_res, remaining_qty_skus)
+                if unknowns:
+                    qty_unknown_skus.extend([s for s in unknowns if s not in qty_unknown_skus])
+
+                # Succeeded items are done; unknown items will be retried
+                remaining_qty_skus = [
+                    s for s in remaining_qty_skus
+                    if s not in succeeded and s not in qty_unknown_skus
+                ]
+                if not remaining_qty_skus:
+                    # All items are accounted for (either succeeded or queued for retry)
+                    break
+                if not unknowns:
+                    qty_other_failed.extend(remaining_qty_skus)
+                    break
+                continue
+
             unknowns = extract_unknown_skus(qty_res, remaining_qty_skus)
             if unknowns:
                 qty_unknown_skus.extend(unknowns)
@@ -461,7 +508,7 @@ def apply_otto_availability(
             kurz = af_map.get(ean, {}).get("kurzbeschreibung", "")
             ean_attrs = origin_attrs_by_ean.get(ean, {})
 
-            is_china = is_chinese_product(
+            is_chinese = is_chinese_product(
                 factory_name=fact_name,
                 factory_id=fact_id,
                 image_urls=img_urls,
@@ -469,8 +516,8 @@ def apply_otto_availability(
                 kurzbeschreibung=kurz,
                 attributes=ean_attrs,
             )
-            profile_id = resolve_shipping_profile_id(account_name, is_china)
-            processing_time = 56 if is_china else 37
+            profile_id = resolve_shipping_profile_id(account_name, is_chinese)
+            processing_time = 56 if is_chinese else 37
             remaining_deliv_payload.append({
                 "sku": ean,
                 "shippingProfileId": profile_id,
@@ -492,6 +539,17 @@ def apply_otto_availability(
                 break
 
             unknowns = extract_unknown_skus(deliv_res, [p["sku"] for p in remaining_deliv_payload])
+            if status_code == 207:
+                if unknowns:
+                    deliv_unknown_skus.extend([s for s in unknowns if s not in deliv_unknown_skus])
+                    # In 207 Multi-Status, SKUs not in error list were accepted (202)
+                    remaining_deliv_payload = [p for p in remaining_deliv_payload if p["sku"] in unknowns]
+                    # Since these are unknown, they will be retried
+                    break
+                else:
+                    deliv_other_failed.extend([p["sku"] for p in remaining_deliv_payload])
+                    break
+
             if unknowns:
                 deliv_unknown_skus.extend(unknowns)
                 remaining_deliv_payload = [p for p in remaining_deliv_payload if p["sku"] not in deliv_unknown_skus]

@@ -29,6 +29,7 @@ celery_app.conf.update(
     ],
     task_routes={
         "tasks.apply_otto_availability_task": {"queue": "otto_availability"},
+        "tasks.recover_incomplete_availability": {"queue": "otto_availability"},
         "tasks_availability_sync.sync_published_availability": {"queue": "otto_availability"},
     },
     beat_schedule={
@@ -39,6 +40,10 @@ celery_app.conf.update(
         "poll-otto-processing-every-2-min": {
             "task": "tasks.poll_otto_processing_items",
             "schedule": 120.0,  # runs every 2 minutes
+        },
+        "recover-incomplete-availability-every-15-min": {
+            "task": "tasks.recover_incomplete_availability",
+            "schedule": 900.0,  # runs every 15 minutes
         },
         "sync-order-stats-daily": {
             "task": "tasks.sync_order_stats",

@@ -7,8 +7,102 @@ on:
   workflow_dispatch:
 
 jobs:
+  backend-pre-deploy-check:
+    name: Pre-Deploy: Backend Tests & Migrations
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: otto_user
+          POSTGRES_PASSWORD: otto_pass
+          POSTGRES_DB: otto_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+
+      - name: Verify Database Migrations
+        env:
+          DATABASE_URL: postgresql://otto_user:otto_pass@localhost:5432/otto_db
+          SECRET_KEY: ci-pre-deploy-test-secret-key-12345
+          PYTHONPATH: ./backend
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Run Backend Unit Tests
+        env:
+          DATABASE_URL: postgresql://otto_user:otto_pass@localhost:5432/otto_db
+          CELERY_BROKER_URL: redis://localhost:6379/0
+          SECRET_KEY: ci-pre-deploy-test-secret-key-12345
+          PYTHONPATH: ./backend
+        run: |
+          cd backend
+          python -m unittest discover tests
+          python test_furniture_rules.py
+          python test_category_rules.py
+
+  frontend-pre-deploy-check:
+    name: Pre-Deploy: Frontend Build & Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run TypeScript & Next.js Build Check
+        env:
+          NEXT_PUBLIC_API_URL: /api
+          API_URL: http://localhost:8001
+        run: |
+          cd frontend
+          npm run build
+
   deploy:
     name: Deploy to Production
+    needs: [backend-pre-deploy-check, frontend-pre-deploy-check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

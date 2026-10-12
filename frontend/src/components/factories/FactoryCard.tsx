@@ -9,7 +9,8 @@ import {
   Database,
   ArrowUpRight,
   ChevronRight,
-  Package
+  Package,
+  ArrowRightLeft
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,8 @@ export interface FactoryCardProps {
   variant?: "default" | "validation";
   onClick?: () => void;
   isCached?: boolean;
+  isTransferred?: boolean;
+  transferredFrom?: string;
 }
 
 const FactoryCardComponent = ({
@@ -46,6 +49,8 @@ const FactoryCardComponent = ({
   variant = "default",
   onClick,
   isCached,
+  isTransferred,
+  transferredFrom,
 }: FactoryCardProps) => {
   const router = useRouter();
   const { account } = useAccount();
@@ -115,6 +120,12 @@ const FactoryCardComponent = ({
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-900/40">
                 <Database className="w-2.5 h-2.5" />
                 {t("factories.cached")}
+              </span>
+            )}
+            {isTransferred && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 px-1.5 py-0.5 rounded border border-violet-100 dark:border-violet-900/40" title={`Перенесено из ${transferredFrom || "JV"}`}>
+                <ArrowRightLeft className="w-2.5 h-2.5" />
+                Из {transferredFrom || "JV"}
               </span>
             )}
             <button
@@ -236,6 +247,12 @@ const FactoryCardComponent = ({
                 {t("factories.cached")}
               </span>
             )}
+            {isTransferred && (
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 px-1.5 py-0.2 rounded border border-violet-100 dark:border-violet-900/40" title={`Перенесено из ${transferredFrom || "JV"}`}>
+                <ArrowRightLeft className="w-2.5 h-2.5" />
+                Из {transferredFrom || "JV"}
+              </span>
+            )}
           </div>
           <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
             ID: {id}
@@ -299,7 +316,9 @@ export const FactoryCard = React.memo(FactoryCardComponent, (prevProps, nextProp
     prevProps.viewMode === nextProps.viewMode &&
     prevProps.invalidCount === nextProps.invalidCount &&
     prevProps.totalProducts === nextProps.totalProducts &&
-    prevProps.isCached === nextProps.isCached
+    prevProps.isCached === nextProps.isCached &&
+    prevProps.isTransferred === nextProps.isTransferred &&
+    prevProps.transferredFrom === nextProps.transferredFrom
   );
 });
 

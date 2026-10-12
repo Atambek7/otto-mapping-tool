@@ -55,6 +55,7 @@ class ProductMapping(Base):
     product_ean = Column(String, index=True)
     factory_id = Column(String, index=True)
     account_name = Column(Enum(AccountType, name="accounttype", create_type=False, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
+    source_account = Column(String, nullable=True, index=True) # If source_account != account_name, indicates cross-account origin (e.g. JV factory cloned to XL)
     category_id = Column(String, index=True)
     status = Column(String, default="Not Mapped") # Not Mapped, Need Attributes, Ready, Error
     ai_attributes = Column(JSON, default=list, nullable=True)
@@ -64,6 +65,7 @@ class ProductMapping(Base):
     product_name = Column(String, nullable=True)
     has_ai_title = Column(Boolean, default=False, nullable=True)
     price = Column(String, nullable=True)
+    has_manual_price = Column(Boolean, default=False, nullable=True)
     price_af = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)

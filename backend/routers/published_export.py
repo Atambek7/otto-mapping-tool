@@ -65,6 +65,7 @@ async def verify_external_auth(
 
 async def fetch_aftercool_batch(
     missing_by_factory: Dict[tuple, List[models.ProductMapping]],
+    db: Optional[Session] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Fetches missing product details from Aftercool API in batches grouped by (factory_id, account).
@@ -88,17 +89,20 @@ async def fetch_aftercool_batch(
                 logger.warning(f"Error fetching from Aftercool {url}: {ex}")
                 return None
 
+        from services.aftercool_service import resolve_aftercool_account
+
         # 1. Batch fetch by factory
         for (fid, acc_str), mappings in missing_by_factory.items():
             if not fid:
                 continue
             eans_needed = {m.product_ean for m in mappings}
+            aftercool_acc = resolve_aftercool_account(str(fid).strip(), acc_str, db=db)
             offset = 0
             limit = 500
             while True:
                 params = {
                     "factory_id": str(fid).strip(),
-                    "account": acc_str,
+                    "account": aftercool_acc,
                     "dataset": "lister",
                     "include_row": 1,
                     "limit": limit,
@@ -140,11 +144,14 @@ async def fetch_aftercool_batch(
         all_eans = [m.product_ean for mappings in missing_by_factory.values() for m in mappings]
         missing_eans = [e for e in all_eans if e not in result]
         for m_ean in missing_eans:
-            acc_str = next((acc for (fid, acc), maps in missing_by_factory.items() if any(m.product_ean == m_ean for m in maps)), "JV")
+            m_map = next((m for maps in missing_by_factory.values() for m in maps if m.product_ean == m_ean), None)
+            m_fid = m_map.factory_id if m_map else None
+            m_acc_str = next((acc for (fid, acc), maps in missing_by_factory.items() if any(m.product_ean == m_ean for m in maps)), "JV")
+            m_aftercool_acc = (m_map.source_account if (m_map and m_map.source_account) else resolve_aftercool_account(m_fid, m_acc_str, db=db))
             try:
                 res_s = await safe_get(
                     f"{AFTERCOOL_BASE_URL}/api/products/by-ean",
-                    params={"account": acc_str, "ean": m_ean, "dataset": "lister", "limit": 1}
+                    params={"account": m_aftercool_acc, "ean": m_ean, "dataset": "lister", "limit": 1}
                 )
                 if res_s and res_s.status_code == 200:
                     s_data = res_s.json()
@@ -152,7 +159,7 @@ async def fetch_aftercool_batch(
                     if s_items:
                         p_s = s_items[0]
                         row_s = p_s.get("row", {})
-                        pic_urls_s = extract_images_from_aftercool_row(row_s, p_s, account=acc_str)
+                        pic_urls_s = extract_images_from_aftercool_row(row_s, p_s, account=m_acc_str)
                         desc_s = str(row_s.get("Artikelbeschreibung") or row_s.get("Beschreibung") or row_s.get("Description") or p_s.get("description") or "").strip()
                         cis_s = str(row_s.get("CustomItemSpecifics") or p_s.get("CustomItemSpecifics") or row_s.get("custom_item_specifics") or "").strip()
                         kurz_s = str(row_s.get("Kurzbeschreibung") or row_s.get("kurzbeschreibung") or row_s.get("ShortDescription") or row_s.get("short_description") or p_s.get("kurzbeschreibung") or "").strip()
@@ -267,7 +274,7 @@ async def build_published_products_response(
     af_data_map = {}
     if missing_mappings_by_factory:
         try:
-            af_data_map = await fetch_aftercool_batch(missing_mappings_by_factory)
+            af_data_map = await fetch_aftercool_batch(missing_mappings_by_factory, db=db)
         except Exception as e:
             logger.warning(f"Error fetching Aftercool details for export: {e}")
 

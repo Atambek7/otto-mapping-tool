@@ -295,9 +295,18 @@ export default function ProductsPage() {
                   </div>
 
                   {/* EAN */}
-                  <div className="w-48 px-3 shrink-0">
-                    <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50">
-                      <Barcode className="w-3 h-3 text-slate-400" />
+                  <div
+                    className="w-48 px-3 shrink-0"
+                    data-no-drag
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <span
+                      className="inline-flex items-center gap-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200/60 dark:border-slate-700/50 select-text cursor-text"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <Barcode className="w-3 h-3 text-slate-400 select-none pointer-events-none" />
                       {ean}
                     </span>
                   </div>
@@ -326,6 +335,7 @@ export default function ProductsPage() {
         <ProductDrawer
           product={activeProduct}
           factoryId={activeProduct.factory_id || activeProduct.row?.factory_id || ""}
+          account={account}
           onClose={() => setActiveProduct(null)}
           onSave={() => {}}
         />

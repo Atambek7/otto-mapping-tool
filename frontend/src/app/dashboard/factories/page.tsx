@@ -17,6 +17,8 @@ import { useDragSelection } from "@/hooks/useDragSelection";
 import { FactoryCard } from "@/components/factories/FactoryCard";
 import { BatchActionBar } from "@/components/factories/BatchActionBar";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { showOpenAiErrorToast } from "@/lib/openaiError";
 
 interface Factory {
   id: string;
@@ -26,6 +28,8 @@ interface Factory {
   status: string;
   updated: string | null;
   items_count: number;
+  is_transferred?: boolean;
+  transferred_from?: string;
 }
 
 export default function DashboardPage() {
@@ -43,9 +47,10 @@ export default function DashboardPage() {
   const [downloadProgress, setDownloadProgress] = useState<{current: number, total: number} | null>(null);
   const [isAutoMapping, setIsAutoMapping] = useState(false);
   const [autoMapProgress, setAutoMapProgress] = useState<{current: number, total: number} | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
   
   const [cachedIds, setCachedIds] = useState<Record<string, boolean>>({});
-  const { account } = useAccount();
+  const { account, setAccount } = useAccount();
   const { t } = useTranslation();
 
   // ── FILTERING & SORTING ──
@@ -74,47 +79,101 @@ export default function DashboardPage() {
     // Always load from cache first for instant display
     let cacheMap: Record<string, boolean> = {};
     try {
-      const keys = await getAllCachedFactoryIds();
+      const keys = await getAllCachedFactoryIds(account);
       keys.forEach(k => cacheMap[k] = true);
       setCachedIds(cacheMap);
     } catch (e) {
       console.error("Failed to load cache keys", e);
     }
 
-    const saved = localStorage.getItem("otto_factories_list");
-    if (saved && !forceRefresh) {
+    const normalizeAcc = (a?: string) => (a || "").toUpperCase().replace("ACCOUNTTYPE.", "").trim();
+
+    const sanitizeFactories = (arr: Factory[], currentAccount: string): Factory[] => {
+      const curAcc = normalizeAcc(currentAccount);
+      return arr.map(f => {
+        const fid = String(f.id || "").trim();
+        const fAcc = normalizeAcc(f.account);
+        // Native XL factories (48xxxx) under XL account are NEVER transferred from JV
+        if (curAcc === "XL" && fAcc === "XL" && fid.startsWith("48")) {
+          return { ...f, is_transferred: false, transferred_from: undefined };
+        }
+        // Native JV factories (50xxxx) under JV account are NEVER transferred from XL
+        if (curAcc === "JV" && fAcc === "JV" && fid.startsWith("50")) {
+          return { ...f, is_transferred: false, transferred_from: undefined };
+        }
+        return f;
+      });
+    };
+
+    const saveDualCache = (allFactories: Factory[]) => {
+      for (const acc of ["JV", "XL"]) {
+        const filtered = allFactories.filter(
+          (f) => normalizeAcc(f.account) === acc && f.kind === "lister"
+        );
+        const sanitized = sanitizeFactories(filtered, acc);
+        const compact = sanitized.map(f => ({
+          id: f.id,
+          name: f.name,
+          items_count: f.items_count,
+          account: acc,
+          kind: f.kind,
+          is_transferred: f.is_transferred,
+          transferred_from: f.transferred_from
+        }));
+        try {
+          localStorage.setItem(`otto_factories_list_${acc}_v2`, JSON.stringify(compact));
+        } catch (e) {
+          console.warn("LocalStorage quota reached:", e);
+        }
+      }
+    };
+
+    // Purge deprecated v1 cache keys that may contain false transferred flags
+    try {
+      localStorage.removeItem("otto_factories_list_JV");
+      localStorage.removeItem("otto_factories_list_XL");
+    } catch (e) {}
+
+    const cacheKey = `otto_factories_list_${account}_v2`;
+    if (forceRefresh) {
       try {
-        const parsed = JSON.parse(saved);
-        const parsedArray = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
-        setFactories(parsedArray);
-        setLoading(false);
-        // Silently refresh in background (no spinner)
-        fetchWithAuth("/aftercool/factories").then(async res => {
-          if (!res.ok) return;
-          const data = await res.json();
-          const all: Factory[] = Array.isArray(data) ? data : data?.items ?? [];
-          const f_data = all.filter((f) => f.account === account && f.kind === "lister" && (f.items_count > 0 || cacheMap[f.id]));
-          setFactories(f_data);
-          localStorage.setItem("otto_factories_list", JSON.stringify(f_data));
-        }).catch(() => {});
-        return;
+        localStorage.removeItem("otto_factories_list_JV_v2");
+        localStorage.removeItem("otto_factories_list_XL_v2");
       } catch (e) {}
+      setIsRefreshing(true);
+    } else {
+      const saved = localStorage.getItem(cacheKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const parsedArray = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
+          const cleanArray = sanitizeFactories(parsedArray, account);
+          setFactories(cleanArray);
+          setLoading(false);
+          // Silently refresh in background with fresh data from server
+          fetchWithAuth("/aftercool/factories?refresh=true").then(async res => {
+            if (!res.ok) return;
+            const data = await res.json();
+            const all: Factory[] = Array.isArray(data) ? data : data?.items ?? [];
+            saveDualCache(all);
+            const currentAccData = all.filter((f) => normalizeAcc(f.account) === normalizeAcc(account) && f.kind === "lister");
+            setFactories(sanitizeFactories(currentAccData, account));
+          }).catch(() => {});
+          return;
+        } catch (e) {}
+      }
+      setLoading(true);
     }
 
-    // No cache: show spinner and load
-    if (forceRefresh) setIsRefreshing(true); else setLoading(true);
     try {
-      const res = await fetchWithAuth("/aftercool/factories");
+      const url = forceRefresh ? "/aftercool/factories?refresh=true" : "/aftercool/factories";
+      const res = await fetchWithAuth(url);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       const all: Factory[] = Array.isArray(data) ? data : data?.items ?? [];
-      const f_data = all.filter((f) => f.account === account && f.kind === "lister" && (f.items_count > 0 || cacheMap[f.id]));
-      const compactList = f_data.map(f => ({ id: f.id, name: f.name, items_count: f.items_count, account: f.account, kind: f.kind }));
-      try {
-        localStorage.setItem("otto_factories_list", JSON.stringify(compactList));
-      } catch (e) {
-        console.warn("LocalStorage quota reached:", e);
-      }
+      saveDualCache(all);
+      const f_data = all.filter((f) => normalizeAcc(f.account) === normalizeAcc(account) && f.kind === "lister");
+      setFactories(sanitizeFactories(f_data, account));
       setError(false);
     } catch (e) {
       console.error(e);
@@ -144,7 +203,29 @@ export default function DashboardPage() {
             const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
             if (res.ok) {
               const data = await res.json();
-              const items = data?.items || data || [];
+              let items = data?.items || data || [];
+              const total = Number(data?.total) || items.length;
+              if (total > items.length && items.length > 0) {
+                const MAX_SAFE_TOTAL = 50000;
+                const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
+                for (let off = items.length; off < safeTotal; off += 500) {
+                  try {
+                    await new Promise(r => setTimeout(r, 100));
+                    const r = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&offset=${off}&include_row=1&sync_db=0`);
+                    if (r.ok) {
+                      const d = await r.json();
+                      const chunkItems = d?.items || d || [];
+                      if (!chunkItems.length) break;
+                      items = items.concat(chunkItems);
+                    } else {
+                      break;
+                    }
+                  } catch (e) {
+                    console.error("Batch download chunk error:", e);
+                    break;
+                  }
+                }
+              }
               await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
               setCachedIds(prev => ({ ...prev, [fid]: true }));
             }
@@ -221,13 +302,37 @@ export default function DashboardPage() {
       try {
         let items: any[] = [];
         const cached = await getCachedFactory(fid);
-        if (cached?.products?.length) {
+        const isTruncated = Boolean(cached && (cached.products.length === 500 || (cached.total && cached.products.length < cached.total)));
+        if (cached?.products?.length && !isTruncated) {
           items = cached.products;
         } else {
           const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
           if (res.ok) {
             const data = await res.json();
             items = data?.items || data || [];
+            const total = Number(data?.total) || items.length;
+            if (total > items.length && items.length > 0) {
+              const MAX_SAFE_TOTAL = 50000;
+              const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
+              for (let off = items.length; off < safeTotal; off += 500) {
+                try {
+                  await new Promise(r => setTimeout(r, 100));
+                  const r = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&offset=${off}&include_row=1&sync_db=0`);
+                  if (r.ok) {
+                    const d = await r.json();
+                    const chunkItems = d?.items || d || [];
+                    if (!chunkItems.length) break;
+                    items = items.concat(chunkItems);
+                  } else {
+                    break;
+                  }
+                } catch (e) {
+                  console.error("AutoMap fetch chunk error:", e);
+                  break;
+                }
+              }
+            }
+            await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
           }
         }
 
@@ -273,10 +378,34 @@ export default function DashboardPage() {
       for (let i = 0; i < payload.length; i += BATCH_SIZE) {
         const batch = payload.slice(i, i + BATCH_SIZE);
         try {
-          await fetchWithAuth("/mapping/auto-map", {
+          const res = await fetchWithAuth("/mapping/auto-map", {
             method: "POST",
             body: JSON.stringify({ factory_id: fid, account, products: batch, only_required: true, use_vision: useVision })
           });
+          if (!res.ok) {
+            const errorCode = res.headers.get("x-error-code");
+            const errorBody = await res.json().catch(() => ({}));
+            const errorMsg = errorBody.detail;
+            if (errorCode === "OPENAI_API_KEY_MISSING") {
+              toast.error(t("product_drawer.toast_openai_missing_title"), {
+                id: "openai-error-toast",
+                description: t("product_drawer.toast_openai_missing_desc"),
+                duration: 7000,
+                action: {
+                  label: t("product_drawer.toast_openai_action_settings", { defaultValue: "Настройки" }),
+                  onClick: () => { window.location.href = "/dashboard/settings"; }
+                }
+              });
+              setIsAutoMapping(false);
+              setAutoMapProgress(null);
+              return;
+            } else if (errorCode === "OPENAI_API_ERROR") {
+              showOpenAiErrorToast(String(errorMsg || ""), t);
+              setIsAutoMapping(false);
+              setAutoMapProgress(null);
+              return;
+            }
+          }
         } catch (e) { console.error(e); }
         processedCount += batch.length;
         setAutoMapProgress({ current: processedCount, total: totalProducts });
@@ -287,6 +416,80 @@ export default function DashboardPage() {
     setAutoMapProgress(null);
     setSelectedIds(new Set());
     setTimeout(() => alert(t("factories.auto_map_complete", { count: ids.length })), 100);
+  };
+
+  // ── TRANSFER TO XL HANDLER ──
+  const handleTransferToXL = async () => {
+    if (selectedIds.size === 0) return;
+
+    const selectedCount = selectedIds.size;
+    const selectedFids = Array.from(selectedIds);
+    const factoryNames = selectedFids
+      .map(id => factories.find(f => f.id === id)?.name || id)
+      .slice(0, 3)
+      .join(", ") + (selectedCount > 3 ? ` и ещё ${selectedCount - 3}` : "");
+
+    const confirmed = window.confirm(
+      `Перенести фабрику в XL?\n\n` +
+      `Выбрано (${selectedCount}): ${factoryNames}\n\n` +
+      `• Все товары фабрики будут скопированы в XL с брендом XLMOEBEL\n` +
+      `• Дефолтные атрибуты XL будут применены\n` +
+      `• JV-логотипы будут отфильтрованы из картинок\n` +
+      `• Категории и ручные цены будут сохранены\n\n` +
+      `Продолжить?`
+    );
+    if (!confirmed) return;
+
+    setIsTransferring(true);
+    const toastId = toast.loading(`Перенос фабрики в XL...`);
+
+    try {
+      const res = await fetchWithAuth("/aftercool/factories/transfer-to-xl", {
+        method: "POST",
+        body: JSON.stringify({
+          factory_ids: selectedFids,
+          source_account: account || "JV",
+          target_account: "XL",
+          copy_attributes: true,
+          copy_categories: true,
+          skip_existing: false,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.detail || "Ошибка при переносе фабрики", { id: toastId });
+        return;
+      }
+
+      const data = await res.json();
+      try {
+        localStorage.removeItem("otto_factories_list_JV");
+        localStorage.removeItem("otto_factories_list_XL");
+      } catch (e) {}
+
+      toast.success(
+        `Перенесено ${data.transferred_count} товаров в XL`,
+        {
+          id: toastId,
+          description: `Готово к публикации: ${data.ready_count}, требуют атрибутов: ${data.need_attributes_count}`,
+          duration: 10000,
+          action: {
+            label: "Перейти в XL",
+            onClick: () => {
+              setAccount("XL");
+            }
+          }
+        }
+      );
+
+      setSelectedIds(new Set());
+      await load(true);
+    } catch (err: any) {
+      toast.error(err?.message || "Сетевая ошибка при переносе", { id: toastId });
+    } finally {
+      setIsTransferring(false);
+    }
   };
 
   // ── UI HELPERS ──
@@ -497,6 +700,8 @@ export default function DashboardPage() {
                 router.push(`/dashboard/factories/${f.id}`);
               }}
               isCached={!!cachedIds[f.id]}
+              isTransferred={!!f.is_transferred}
+              transferredFrom={f.transferred_from}
             />
           ))}
         </div>
@@ -514,6 +719,9 @@ export default function DashboardPage() {
         handleBatchDeleteCache={handleBatchDeleteCache}
         handleBatchExport={handleBatchExport}
         handleBatchAutoMap={handleBatchAutoMap}
+        handleTransferToXL={handleTransferToXL}
+        isTransferring={isTransferring}
+        currentAccount={account}
         setSelectedIds={setSelectedIds}
       />
     </div>

@@ -29,6 +29,7 @@ router = APIRouter(
 from pydantic import BaseModel
 class ExportRequest(BaseModel):
     product_eans: List[str] = []
+    account: str = None
 
 
 # --- Helpers ---
@@ -45,20 +46,28 @@ def get_category_schema_attrs(category_id: str):
         if a.get("name") == "Marke":
             raw_rel = "HIGH"
         schema.append({"name": a.get("name"), "relevance": raw_rel})
+    for i in range(1, 6):
+        schema.append({"name": f"Bullet Point {i}", "relevance": "OPTIONAL"})
     return schema
 
 async def fetch_product_info_for_export(factory_id: str) -> dict:
     from database import SessionLocal
     _db = SessionLocal()
     try:
-        mappings = _db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == str(factory_id)).all()
+        mappings = _db.query(
+            models.ProductMapping.product_ean,
+            models.ProductMapping.product_name,
+            models.ProductMapping.price,
+            models.ProductMapping.price_af,
+            models.ProductMapping.image_url
+        ).filter(models.ProductMapping.factory_id == str(factory_id)).all()
         return {
-            m.product_ean: {
-                "name": m.product_name or "",
-                "price": m.price or "",
-                "startpreis": m.price_af or "",
-                "img": m.image_url or "",
-                "sku": m.product_ean
+            m[0]: {
+                "name": m[1] or "",
+                "price": m[2] or "",
+                "startpreis": m[3] or "",
+                "img": m[4] or "",
+                "sku": m[0]
             }
             for m in mappings
         }
@@ -99,12 +108,15 @@ async def export_categories(factory_id: str, req: ExportRequest = None, db: Sess
 
 @router.get("/export/attributes/{factory_id}")
 @router.post("/export/attributes/{factory_id}")
-async def export_attributes(factory_id: str, req: ExportRequest = None, db: Session = Depends(get_db)):
+async def export_attributes(factory_id: str, req: ExportRequest = None, account: str = None, db: Session = Depends(get_db)):
+    target_acc = (req.account if req and req.account else None) or account
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id == factory_id,
         models.ProductMapping.category_id != None,
         models.ProductMapping.category_id != ""
     )
+    if target_acc:
+        query = query.filter(models.ProductMapping.account_name == target_acc)
     if req and req.product_eans:
         query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
     mappings = query.all()
@@ -114,18 +126,33 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, db: Sess
     
     # Pre-fetch ALL attributes for all EANs in one query (fix N+1)
     all_eans = [m.product_ean for m in mappings]
-    all_db_attrs = db.query(models.ProductAttribute).filter(
+    attr_q = db.query(
+        models.ProductAttribute.product_ean,
+        models.ProductAttribute.attribute_name,
+        models.ProductAttribute.attribute_value
+    ).filter(
         models.ProductAttribute.product_ean.in_(all_eans)
-    ).all()
+    )
+    if target_acc:
+        attr_q = attr_q.filter(models.ProductAttribute.account_name == target_acc)
+    all_db_attrs = attr_q.all()
+    
+    from services.brand_guard import sanitize_brand_attributes
     attrs_by_ean: dict = {}
-    for a in all_db_attrs:
-        if a.product_ean not in attrs_by_ean:
-            attrs_by_ean[a.product_ean] = {}
-        attrs_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+    for p_ean, a_name, a_val in all_db_attrs:
+        acc = target_acc or "JV"
+        if (p_ean, acc) not in attrs_by_ean:
+            attrs_by_ean[(p_ean, acc)] = {}
+        attrs_by_ean[(p_ean, acc)][a_name] = a_val
+
+    for m in mappings:
+        m_acc = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name or target_acc or "JV")
+        m_attrs = attrs_by_ean.get((m.product_ean, m_acc)) or attrs_by_ean.get((m.product_ean, "JV"), {})
+        attrs_by_ean[(m.product_ean, m_acc)] = sanitize_brand_attributes(m_acc, m_attrs)
 
     from services.image_processor import fetch_images_batch
     all_img_urls = [m.image_url for m in mappings if m.image_url]
-    img_bytes_map = await fetch_images_batch(all_img_urls, max_concurrency=15)
+    img_bytes_map = await fetch_images_batch(all_img_urls, max_concurrency=60)
 
     by_category: dict = {}
     for m in mappings:
@@ -288,14 +315,15 @@ async def download_export_attributes_zip(task_id: str):
         media_type="application/zip"
     )
 
-def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str, db: Session) -> dict:
+def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str, db: Session, account: str = None) -> dict:
     updated_categories = 0
     updated_attributes = 0
     skipped_eans = 0
 
-    existing_mappings = db.query(models.ProductMapping).filter(
-        models.ProductMapping.factory_id == factory_id
-    ).all() if factory_id else []
+    query_m = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
+    if account:
+        query_m = query_m.filter(models.ProductMapping.account_name == account)
+    existing_mappings = query_m.all() if factory_id else []
     mappings_by_ean = {m.product_ean: m for m in existing_mappings}
     valid_eans = set(mappings_by_ean.keys())
 
@@ -303,7 +331,7 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
         try:
             from services.factory_scope import get_authoritative_factory_eans
             import asyncio
-            auth = asyncio.run(get_authoritative_factory_eans(factory_id))
+            auth = asyncio.run(get_authoritative_factory_eans(factory_id, account=account))
             if auth:
                 valid_eans = set(auth)
         except Exception:
@@ -341,7 +369,8 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
 
             db_mapping = mappings_by_ean.get(ean)
             if not db_mapping:
-                db_mapping = models.ProductMapping(product_ean=ean, factory_id=factory_id, status="Unmapped")
+                target_acc = account or "JV"
+                db_mapping = models.ProductMapping(product_ean=ean, factory_id=factory_id, account_name=target_acc, status="Unmapped")
                 new_mappings.append(db_mapping)
                 mappings_by_ean[ean] = db_mapping
 
@@ -360,6 +389,13 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
                     if cat:
                         new_cat_id = str(cat.get("categoryId"))
                         if db_mapping.category_id != new_cat_id:
+                            # Delete old attributes for the old category
+                            target_acc = account or (db_mapping.account_name.value if hasattr(db_mapping.account_name, "value") else str(db_mapping.account_name or "JV"))
+                            db.query(models.ProductAttribute).filter(
+                                models.ProductAttribute.product_ean == ean,
+                                models.ProductAttribute.account_name == target_acc
+                            ).delete(synchronize_session=False)
+                            db_mapping.ai_attributes = []
                             db_mapping.category_id = new_cat_id
                             db_mapping.status = "Need Attributes"
                             eans_to_revalidate.add(ean)
@@ -384,12 +420,19 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
                         attrs_to_save[clean_attr_name] = val
 
                 if attrs_to_save:
+                    target_acc = account or (db_mapping.account_name.value if hasattr(db_mapping.account_name, "value") else str(db_mapping.account_name or "JV"))
+                    from services.brand_guard import sanitize_brand_attributes
+                    attrs_to_save = sanitize_brand_attributes(target_acc, attrs_to_save)
                     db.query(models.ProductAttribute).filter(
                         models.ProductAttribute.product_ean == ean,
+                        models.ProductAttribute.account_name == target_acc,
                         models.ProductAttribute.attribute_name.in_(list(attrs_to_save.keys()))
                     ).delete(synchronize_session=False)
                     for k, v in attrs_to_save.items():
-                        new_attrs.append(models.ProductAttribute(product_ean=ean, attribute_name=k, attribute_value=v))
+                        new_attrs.append(models.ProductAttribute(product_ean=ean, account_name=target_acc, attribute_name=k, attribute_value=v))
+                    if db_mapping.ai_attributes:
+                        imported_keys = set(attrs_to_save.keys())
+                        db_mapping.ai_attributes = [a for a in db_mapping.ai_attributes if a not in imported_keys]
                     updated_attributes += 1
                     eans_to_revalidate.add(ean)
 
@@ -400,20 +443,25 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
     db.commit()
 
     if eans_to_revalidate:
-        all_attrs_q = db.query(models.ProductAttribute).filter(
+        attr_q = db.query(models.ProductAttribute).filter(
             models.ProductAttribute.product_ean.in_(eans_to_revalidate)
-        ).all()
+        )
+        if account:
+            attr_q = attr_q.filter(models.ProductAttribute.account_name == account)
+        all_attrs_q = attr_q.all()
         attrs_by_ean: dict = {}
         for a in all_attrs_q:
-            if a.product_ean not in attrs_by_ean:
-                attrs_by_ean[a.product_ean] = {}
-            attrs_by_ean[a.product_ean][a.attribute_name] = a.attribute_value
+            acc = a.account_name or "JV"
+            if (a.product_ean, acc) not in attrs_by_ean:
+                attrs_by_ean[(a.product_ean, acc)] = {}
+            attrs_by_ean[(a.product_ean, acc)][a.attribute_name] = a.attribute_value
 
         for ean in eans_to_revalidate:
             db_mapping = mappings_by_ean.get(ean)
             if not db_mapping or not db_mapping.category_id:
                 continue
-            attr_dict = attrs_by_ean.get(ean, {})
+            m_acc = db_mapping.account_name.value if hasattr(db_mapping.account_name, "value") else str(db_mapping.account_name or account or "JV")
+            attr_dict = attrs_by_ean.get((ean, m_acc)) or attrs_by_ean.get((ean, "JV"), {})
             errors = validate_product(ean, db_mapping.category_id, attr_dict)
             db_mapping.status = "Error" if errors else "Ready"
 
@@ -428,7 +476,7 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
         "matched_categories": updated_categories
     }
 
-def process_attribute_import_from_db(db_path: str, factory_id: str, db: Session) -> dict:
+def process_attribute_import_from_db(db_path: str, factory_id: str, db: Session, account: str = None) -> dict:
     sqlite_conn = sqlite3.connect(db_path)
     cur = sqlite_conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attributes'")
@@ -451,15 +499,18 @@ def process_attribute_import_from_db(db_path: str, factory_id: str, db: Session)
         if ean_col:
             first_eans = [str(x).strip() for x in df[ean_col].dropna().head(10)]
             for fean in first_eans:
-                m = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == fean).first()
+                m_q = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == fean)
+                if account:
+                    m_q = m_q.filter(models.ProductMapping.account_name == account)
+                m = m_q.first()
                 if m and m.factory_id:
                     factory_id = m.factory_id
                     break
 
-    return process_attribute_dataframes([df], factory_id=factory_id, db=db)
+    return process_attribute_dataframes([df], factory_id=factory_id, db=db, account=account)
 
 @router.post("/import/{factory_id}")
-async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_csv(factory_id: str, file: UploadFile = File(...), account: str = None, db: Session = Depends(get_db)):
     content = await file.read()
     
     dataframes = []
@@ -541,4 +592,4 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), db: Session 
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .csv, .db or .zip")
 
-    return process_attribute_dataframes(dataframes, factory_id=factory_id, db=db)
+    return process_attribute_dataframes(dataframes, factory_id=factory_id, db=db, account=account)

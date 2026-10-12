@@ -12,7 +12,8 @@ import {
   ChevronRight,
   Sparkles,
   Wand2,
-  Users
+  Users,
+  Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AttributeCombobox } from "@/components/AttributeCombobox";
@@ -27,6 +28,8 @@ interface SharedAttr {
   required: boolean;
   options: string[] | null;
   from_multiple_cats: boolean;
+  applicable_categories?: string[];
+  applicable_eans_count?: number;
 }
 
 interface CategoryInfo {
@@ -37,6 +40,7 @@ interface CategoryInfo {
 
 interface MassEditSchema {
   shared_attrs: SharedAttr[];
+  other_attrs?: SharedAttr[];
   current_values: Record<string, Record<string, string>>;
   categories: CategoryInfo[];
   unmapped_eans: string[];
@@ -66,9 +70,10 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
   const [saving, setSaving] = useState(false);
   const [attrs, setAttrs] = useState<Record<string, string>>({});
   const [showOptional, setShowOptional] = useState(false);
+  const [showOther, setShowOther] = useState(false);
+  const [otherSearchQuery, setOtherSearchQuery] = useState("");
   const [presets, setPresets] = useState<PresetsData | null>(null);
   const [selectedTargetGroup, setSelectedTargetGroup] = useState<string>("Erwachsene ; Jugendliche");
-  const [selectedDesign, setSelectedDesign] = useState<string>("Modern");
   const attrsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -77,7 +82,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
       .then((data: PresetsData) => {
         setPresets(data);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [account]);
 
   useEffect(() => {
@@ -87,7 +92,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
 
     fetchWithAuth("/mapping/mass-edit/schema", {
       method: "POST",
-      body: JSON.stringify({ product_eans: selectedEans }),
+      body: JSON.stringify({ product_eans: selectedEans, account: account || "JV" }),
     })
       .then((r) => r.json())
       .then((data: MassEditSchema) => {
@@ -95,7 +100,8 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
         setSchema(data);
         // Pre-fill attrs that are the same across ALL selected products
         const prefill: Record<string, string> = {};
-        for (const attr of data.shared_attrs) {
+        const allAttrs = [...data.shared_attrs, ...(data.other_attrs ?? [])];
+        for (const attr of allAttrs) {
           const vals = new Set(
             selectedEans
               .map((ean) => data.current_values[ean]?.[attr.name] ?? "")
@@ -112,7 +118,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [selectedEans]);
+  }, [selectedEans, account]);
 
   const handleAttrChange = useCallback((name: string, val: string) => {
     attrsRef.current = { ...attrsRef.current, [name]: val };
@@ -123,12 +129,12 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
     if (!presets || !schema) return;
     const defaults = { ...presets.merged_defaults };
     defaults["Zielgruppe"] = selectedTargetGroup;
-    if (selectedDesign) defaults["Design"] = selectedDesign;
 
     let filledCount = 0;
     const nextAttrs = { ...attrsRef.current };
+    const allAttrs = [...schema.shared_attrs, ...(schema.other_attrs ?? [])];
 
-    for (const attr of schema.shared_attrs) {
+    for (const attr of allAttrs) {
       const lowerName = attr.name.trim().toLowerCase();
       const foundEntry = Object.entries(defaults).find(
         ([k]) => k.trim().toLowerCase() === lowerName
@@ -148,26 +154,14 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
   const handleSelectTargetGroup = (group: string) => {
     setSelectedTargetGroup(group);
     if (!schema) return;
-    const targetAttr = schema.shared_attrs.find(
+    const allAttrs = [...schema.shared_attrs, ...(schema.other_attrs ?? [])];
+    const targetAttr = allAttrs.find(
       (a) => a.name.trim().toLowerCase() === "zielgruppe"
     );
     if (targetAttr) {
       handleAttrChange(targetAttr.name, group);
     } else {
       handleAttrChange("Zielgruppe", group);
-    }
-  };
-
-  const handleSelectDesign = (designVal: string) => {
-    setSelectedDesign(designVal);
-    if (!schema) return;
-    const designAttr = schema.shared_attrs.find(
-      (a) => a.name.trim().toLowerCase() === "design"
-    );
-    if (designAttr) {
-      handleAttrChange(designAttr.name, designVal);
-    } else {
-      handleAttrChange("Design", designVal);
     }
   };
 
@@ -179,12 +173,26 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
     () => schema?.shared_attrs.filter((a) => !a.required) ?? [],
     [schema]
   );
+  const otherAttrs = useMemo(
+    () => schema?.other_attrs ?? [],
+    [schema]
+  );
+  const filteredOtherAttrs = useMemo(() => {
+    if (!otherSearchQuery.trim()) return otherAttrs;
+    const q = otherSearchQuery.toLowerCase();
+    return otherAttrs.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.applicable_categories?.some((c) => c.toLowerCase().includes(q))
+    );
+  }, [otherAttrs, otherSearchQuery]);
 
   // Detect attrs where existing values differ across selected products
   const mixedAttrs = useMemo(() => {
     if (!schema) return new Set<string>();
     const mixed = new Set<string>();
-    for (const attr of schema.shared_attrs) {
+    const allAttrs = [...schema.shared_attrs, ...(schema.other_attrs ?? [])];
+    for (const attr of allAttrs) {
       const vals = new Set(
         selectedEans.map((ean) => schema.current_values[ean]?.[attr.name] ?? "")
       );
@@ -207,7 +215,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
       const eansList = selectedEans.filter((e) => !schema.unmapped_eans.includes(e));
       const res = await fetchWithAuth("/mapping/attributes/bulk", {
         method: "POST",
-        body: JSON.stringify({ product_eans: eansList, attributes: toSave }),
+        body: JSON.stringify({ product_eans: eansList, attributes: toSave, account: account || "JV" }),
       });
       if (res.ok) {
         toast.success(`Saved ${Object.keys(toSave).length} attribute(s) for ${eansList.length} products`);
@@ -223,6 +231,8 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
       setSaving(false);
     }
   };
+
+  const hasAnyAttrs = schema && (schema.shared_attrs.length > 0 || (schema.other_attrs && schema.other_attrs.length > 0));
 
   return (
     <>
@@ -255,19 +265,19 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-              <p className="text-sm text-slate-400">Loading shared attributes...</p>
+              <p className="text-sm text-slate-400">Loading attributes...</p>
             </div>
-          ) : !schema || schema.shared_attrs.length === 0 ? (
+          ) : !schema || !hasAnyAttrs ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4 px-8 text-center">
               <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 flex items-center justify-center border border-amber-200/80 dark:border-amber-800/60">
                 <AlertCircle className="w-7 h-7 text-amber-500" />
               </div>
               <div>
-                <p className="font-semibold text-slate-800 dark:text-white text-sm">No shared attributes found</p>
+                <p className="font-semibold text-slate-800 dark:text-white text-sm">No attributes found</p>
                 <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
                   {schema?.unmapped_eans?.length === selectedEans.length
                     ? "None of the selected products have a category mapping yet. Map them first."
-                    : "Selected products belong to categories with no overlapping attributes. Try selecting products from the same or similar category."}
+                    : "Selected products belong to categories with no attributes available for editing."}
                 </p>
               </div>
             </div>
@@ -291,10 +301,23 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
                   </p>
                 )}
                 <p className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-indigo-600 dark:text-indigo-400">{schema.shared_attrs.length}</span> shared attributes
-                  {schema.categories.length > 1 ? " across all categories" : ""}
+                  <span className="font-semibold text-indigo-600 dark:text-indigo-400">{schema.shared_attrs.length}</span> общих атрибутов
+                  {otherAttrs.length > 0 && (
+                    <span>, <span className="font-semibold text-indigo-600 dark:text-indigo-400">{otherAttrs.length}</span> остальных</span>
+                  )}
+                  {schema.categories.length > 1 ? " для выбранных категорий" : ""}
                 </p>
               </div>
+
+              {/* No shared attributes notice */}
+              {schema.shared_attrs.length === 0 && otherAttrs.length > 0 && (
+                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60">
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                    У выбранных категорий нет общих пересекающихся атрибутов. Вы можете заполнить атрибуты для отдельных категорий в блоке <strong>«Остальные атрибуты»</strong> ниже.
+                  </p>
+                </div>
+              )}
 
               {/* Quick Presets Panel */}
               <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-gradient-to-br from-indigo-50/50 via-white to-slate-50 dark:from-indigo-950/20 dark:via-[#0E131F] dark:to-slate-900/40 p-3.5 space-y-3 shadow-xs">
@@ -358,42 +381,6 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
                     </button>
                   </div>
                 </div>
-
-                {/* Design Selector */}
-                <div className="space-y-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1 font-medium">
-                      <Sparkles className="w-3 h-3 text-indigo-400" />
-                      Design (Стиль):
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectDesign("Modern")}
-                      className={cn(
-                        "h-7 px-2 text-[11px] font-medium rounded-lg border transition-all flex items-center justify-center gap-1",
-                        (attrs["Design"] === "Modern" || (!attrs["Design"] && selectedDesign === "Modern"))
-                          ? "bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-semibold"
-                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                      )}
-                    >
-                      <span>✨ Modern</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectDesign("Klassisch")}
-                      className={cn(
-                        "h-7 px-2 text-[11px] font-medium rounded-lg border transition-all flex items-center justify-center gap-1",
-                        attrs["Design"] === "Klassisch"
-                          ? "bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-semibold"
-                          : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                      )}
-                    >
-                      <span>🏛️ Klassisch</span>
-                    </button>
-                  </div>
-                </div>
               </div>
 
               {/* Mixed values notice */}
@@ -406,7 +393,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
                 </div>
               )}
 
-              {/* Required */}
+              {/* Required attributes */}
               {requiredAttrs.length > 0 && (
                 <div className="space-y-4">
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -424,10 +411,11 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
                 </div>
               )}
 
-              {/* Optional */}
+              {/* Optional attributes */}
               {optionalAttrs.length > 0 && (
                 <div className="space-y-3">
                   <button
+                    type="button"
                     onClick={() => setShowOptional((v) => !v)}
                     className="flex items-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider hover:text-slate-600 dark:hover:text-slate-300 transition-colors w-full"
                   >
@@ -451,12 +439,83 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
                   )}
                 </div>
               )}
+
+              {/* ── Остальные атрибуты (Non-shared / specific category attributes) ── */}
+              {otherAttrs.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowOther((v) => !v)}
+                    className={cn(
+                      "flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl border transition-all text-left",
+                      showOther
+                        ? "bg-slate-100/90 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 shadow-xs"
+                        : "bg-slate-50/70 dark:bg-slate-900/40 border-slate-200/80 dark:border-slate-800 hover:bg-slate-100/70 dark:hover:bg-slate-800/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Остальные атрибуты
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                        {otherAttrs.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-slate-400">
+                      <span className="text-[11px] font-medium">{showOther ? "Скрыть" : "Показать"}</span>
+                      {showOther ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    </div>
+                  </button>
+
+                  {showOther && (
+                    <div className="space-y-3.5 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-900/20">
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        Атрибуты, специфичные для отдельных категорий выбранных товаров. При сохранении применятся только к соответствующим товарам.
+                      </p>
+
+                      {otherAttrs.length > 5 && (
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Поиск по остальным атрибутам..."
+                            value={otherSearchQuery}
+                            onChange={(e) => setOtherSearchQuery(e.target.value)}
+                            className="w-full text-xs pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-4">
+                        {filteredOtherAttrs.map((attr) => (
+                          <AttrField
+                            key={attr.name}
+                            attr={attr}
+                            value={attrs[attr.name] ?? ""}
+                            isMixed={mixedAttrs.has(attr.name)}
+                            onChange={handleAttrChange}
+                            categoryBadge={
+                              attr.applicable_categories && attr.applicable_categories.length > 0
+                                ? `${attr.applicable_categories.join(", ")} (${attr.applicable_eans_count ?? "?"} тов.)`
+                                : undefined
+                            }
+                          />
+                        ))}
+                        {filteredOtherAttrs.length === 0 && (
+                          <p className="text-xs text-slate-400 text-center py-2">Ничего не найдено</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        {!loading && schema && schema.shared_attrs.length > 0 && (
+        {!loading && hasAnyAttrs && (
           <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-[#0E131F] shrink-0">
             <div className="flex items-center gap-2.5">
               <Button
@@ -491,26 +550,37 @@ function AttrField({
   isMixed,
   onChange,
   dimmed,
+  categoryBadge,
 }: {
   attr: SharedAttr;
   value: string;
   isMixed: boolean;
   onChange: (name: string, val: string) => void;
   dimmed?: boolean;
+  categoryBadge?: string;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className={cn(
-        "text-xs font-medium flex items-center gap-1.5",
-        dimmed ? "text-slate-500 dark:text-slate-400" : "text-slate-700 dark:text-slate-300"
-      )}>
-        <span>{attr.name}</span>
-        {attr.required && <span className="text-red-500 text-[10px]">★</span>}
-        {value && !isMixed && <CheckCircle2 className="w-3 h-3 text-emerald-500 ml-auto" />}
-        {isMixed && !value && (
-          <span className="ml-auto text-[10px] font-normal text-amber-500 italic">mixed</span>
-        )}
-      </label>
+      <div className="flex items-center justify-between gap-1.5">
+        <label className={cn(
+          "text-xs font-medium flex items-center gap-1.5 truncate",
+          dimmed ? "text-slate-500 dark:text-slate-400" : "text-slate-700 dark:text-slate-300"
+        )}>
+          <span className="truncate">{attr.name}</span>
+          {attr.required && <span className="text-red-500 text-[10px]" title="Required">★</span>}
+        </label>
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+          {categoryBadge && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700/60">
+              {categoryBadge}
+            </span>
+          )}
+          {value && !isMixed && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+          {isMixed && !value && (
+            <span className="text-[10px] font-normal text-amber-500 italic">mixed</span>
+          )}
+        </div>
+      </div>
       <AttributeCombobox
         name={attr.name}
         value={value}

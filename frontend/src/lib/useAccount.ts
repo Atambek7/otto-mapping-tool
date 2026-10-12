@@ -5,7 +5,17 @@ import { useState, useEffect, useCallback } from "react";
 export type AccountType = "JV" | "XL";
 
 export function useAccount() {
-  const [account, setAccountState] = useState<AccountType>("JV");
+  const [account, setAccountState] = useState<AccountType>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("current_account");
+        if (saved === "JV" || saved === "XL") {
+          return saved;
+        }
+      } catch (e) {}
+    }
+    return "JV";
+  });
 
   useEffect(() => {
     // Read initial state

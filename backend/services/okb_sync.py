@@ -8,7 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from services.categories_repo import CATEGORIES
+from services.categories_repo import (
+    CATEGORIES,
+    get_allowed_attribute_names,
+    get_numeric_attributes_for_category,
+)
 
 logger = logging.getLogger("okb_sync")
 
@@ -184,7 +188,38 @@ def _score_category(text: str, category: dict) -> Optional[CategoryMatch]:
     return None
 
 
-def find_best_category(text: str) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_soft_furniture_set(text: str, context_text: str = "") -> Optional[Tuple[str, str]]:
+    """
+    Handles Polstergarnitur, Couchgarnitur, Sofa-Set:
+    - If mixed with tables (Couchtisch, Beistelltisch, Tisch) -> 20110 (Wohnzimmer-Set)
+    - Otherwise -> 25785 (Polstergarnitur)
+    """
+    if not text:
+        return None
+    t = text.lower().strip()
+    combined = f"{text} {context_text}".lower()
+
+    set_triggers = [
+        "polstergarnitur", "couchgarnitur", "sofa-set", "sofa set",
+        "sofaset", "sofagarnitur"
+    ]
+    formula_match = bool(re.search(r"\b\d\s*\+\s*\d(?:\s*\+\s*\d)*\b", combined))
+
+    is_set = any(trigger in t for trigger in set_triggers) or (
+        formula_match and ("sofa" in combined or "couch" in combined or "polster" in combined)
+    )
+
+    if not is_set:
+        return None
+
+    # Check for tables (mix of soft and hard furniture)
+    table_match = bool(re.search(r"\b(couchtisch|beistelltisch|wohnzimmertisch|tisch|tische|coffee table)\b", combined))
+    if table_match:
+        return ("20110", "Wohnzimmer-Set")
+    return ("25785", "Polstergarnitur")
+
+
+def find_best_category(text: str, context_text: str = "") -> Tuple[Optional[str], Optional[str]]:
     """
     Resolve an Otto category from an ID, exact name, Produktart or title.
 
@@ -197,6 +232,11 @@ def find_best_category(text: str) -> Tuple[Optional[str], Optional[str]]:
     raw = str(text).strip()
     if not raw:
         return None, None
+
+    # Priority check for soft furniture sets (Polstergarnitur, Couchgarnitur, Sofa-Set)
+    soft_match = _resolve_soft_furniture_set(raw, context_text)
+    if soft_match:
+        return soft_match
 
     # 1. Exact ID.
     category = CATEGORIES_BY_ID.get(raw)
@@ -370,17 +410,314 @@ def parse_aftercool_specifics(xml_or_json_str: Any) -> Dict[str, str]:
 ATTR_SYNONYMS = {
     "Stil": "Wohnstil",
     "Zimmer": "Wohnraum",
-    "Besonderheiten": "Besondere Merkmale",
     "Pflegeanleitung": "Pflegehinweise",
     "Montage erforderlich": "Aufbauhinweise",
     "Anzahl Türen": "Anzahl der Türen",
     "Anzahl Schubladen": "Anzahl der Schubladen",
 }
 
+FORBIDDEN_EBAY_SPECIFICS = {
+    "maße sessel",
+    "herstellungsjahr",
+    "verpackung",
+    "zusätzlich benötigte teile",
+    "ean",
+    "personalisiert",
+    "herstellernummer",
+    "herstellergarantie",
+    "garantie",
+    "garantiedauer",
+    "besonderheiten",
+    "besondere merkmale",
+}
+
+DIMENSION_ATTR_NAMES = {
+    "Breite", "Höhe", "Tiefe", "Länge", "Sitzhöhe", "Sitztiefe",
+    "Durchmesser", "Gewicht", "Liegefläche", "Stärke", "Belastbarkeit",
+    "Belastbarkeit maximal", "Belastbarkeit pro Sitzplatz", "Sitzbreite",
+    "Rückenlehnenhöhe", "Armlehnenhöhe", "Höhe Füße", "Liegehöhe",
+    "Matratzenhöhe", "Spiegelhöhe", "Spiegelbreite", "Tischplattenstärke",
+    "Plattenstärke", "Einlegetiefe", "Kopfteilhöhe", "Fußteilhöhe",
+}
+
+
+def clean_dimension_value(value: Any) -> str:
+    """
+    Cleans a dimension or numeric value for Otto compatibility:
+    - Strips units and count suffixes: 'cm', 'cn', 'mm', 'm', 'kg', 'g', 'grad', '°', 'St.', 'Stück', '-tlg.', '-teilig'
+    - Converts mm to cm (/ 10) and m to cm (* 100) if unit was mm or m
+    - Extracts the primary dimension from composite sizes like '180 x 200 cm' -> '180'
+    - Replaces European comma with dot (e.g. '73,5' -> '73.5')
+    - Strips prefixes: 'ca.', 'ca ', '~', 'ab', 'approx.'
+    - Formats integer values cleanly (e.g. '73.0' -> '73')
+    """
+    if value is None:
+        return ""
+    val_str = str(value).strip()
+    if not val_str:
+        return ""
+
+    # Check for prefix like ca., ~, ab
+    val_str = re.sub(r'^(ca\.?|~|ab|approx\.?)\s*', '', val_str, flags=re.IGNORECASE).strip()
+
+    # If composite dimensions like "180 x 200 cm" or "180x200", extract the first dimension
+    m_comp = re.match(r'^([0-9]+(?:[.,][0-9]+)?)\s*(?:x|×|\*)\s*[0-9]+', val_str, flags=re.IGNORECASE)
+    if m_comp:
+        val_str = m_comp.group(1).strip()
+
+    # Detect numbers with units or count suffixes
+    m_unit = re.search(
+        r'^([0-9]+(?:[.,][0-9]+)?)\s*(cm|cn|mm|m|kg|g|grad|°|st\.?|stück|-tlg\.?|-teilig)?$',
+        val_str,
+        flags=re.IGNORECASE
+    )
+    if m_unit:
+        num_str = m_unit.group(1).replace(',', '.')
+        unit_str = (m_unit.group(2) or "").lower()
+        try:
+            num = float(num_str)
+            if unit_str == 'mm':
+                num = num / 10.0
+            elif unit_str == 'm':
+                num = num * 100.0
+            if num.is_integer():
+                return str(int(num))
+            return f"{num:.2f}".rstrip('0').rstrip('.')
+        except ValueError:
+            pass
+
+    # Generic strip of units, count suffixes, or rogue 'cn' typo
+    cleaned = re.sub(r'\s*(cm|cn|st\.?|stück|-tlg\.?|-teilig)\b', '', val_str, flags=re.IGNORECASE).strip()
+    if re.match(r'^[0-9]+,[0-9]+$', cleaned):
+        cleaned = cleaned.replace(',', '.')
+
+    try:
+        f = float(cleaned)
+        if f.is_integer():
+            return str(int(f))
+        return f"{f:.2f}".rstrip('0').rstrip('.')
+    except ValueError:
+        # If there's a leading integer/float in a dirty string, extract it
+        m_lead = re.match(r'^([0-9]+(?:[.,][0-9]+)?)', cleaned)
+        if m_lead:
+            try:
+                f2 = float(m_lead.group(1).replace(',', '.'))
+                if f2.is_integer():
+                    return str(int(f2))
+                return f"{f2:.2f}".rstrip('0').rstrip('.')
+            except ValueError:
+                pass
+        return cleaned
+
+
+def parse_composite_dimensions(dimensions_str: str) -> dict[str, str]:
+    """
+    Extracts Länge, Breite, Höhe from composite dimension strings like:
+    '80 x 73 x 95 cm' or 'ca. 200 x 90 x 45 cm' or '80x73x95'
+    """
+    if not dimensions_str:
+        return {}
+    m = re.search(
+        r'([0-9]+(?:[.,][0-9]+)?)\s*(?:x|×|\*)\s*([0-9]+(?:[.,][0-9]+)?)(?:\s*(?:x|×|\*)\s*([0-9]+(?:[.,][0-9]+)?))?',
+        str(dimensions_str)
+    )
+    if not m:
+        return {}
+    parts = [clean_dimension_value(g) for g in m.groups() if g]
+    res = {}
+    if len(parts) == 3:
+        res["Breite"] = parts[0]
+        res["Tiefe"] = parts[1]
+        res["Höhe"] = parts[2]
+    elif len(parts) == 2:
+        res["Breite"] = parts[0]
+        res["Höhe"] = parts[1]
+    return res
+
+
+def round_msrp_to_49_or_99(value: float, standard_price: float = 0.0) -> float:
+    """
+    Rounds MSRP (UVP) value according to the user rule:
+    Take the two digits before decimal point and determine whether they are closer to 49 or 99.
+    - Closer to 49 (<= 74) -> replaces last two digits with 49.00
+    - Closer to 99 (> 74) -> replaces last two digits with 99.00
+    Guarantees MSRP is never lower than standard_price.
+    """
+    if value <= 0:
+        return 0.0
+
+    int_val = int(value)
+    prefix = (int_val // 100) * 100
+    last_two = int_val % 100
+
+    dist_49 = abs(last_two - 49)
+    dist_99 = abs(last_two - 99)
+
+    if dist_49 <= dist_99:
+        rounded = float(prefix + 49)
+    else:
+        rounded = float(prefix + 99)
+
+    if standard_price > 0 and rounded < standard_price:
+        if prefix + 99 >= standard_price:
+            rounded = float(prefix + 99)
+        else:
+            rounded = float(prefix + 149)
+
+    return rounded
+
+
+def resolve_origin_and_delivery_info(
+    aftercool_row: Optional[dict] = None,
+    attributes: Optional[dict] = None,
+    product_title: str = "",
+) -> dict:
+    """
+    Detects product origin (Turkey vs China vs Europe) and delivery timeframe.
+    User rule:
+      China: 8-12 weeks, ~56 days processing time.
+      Non-China (Europe / Turkey): 4-8 weeks, ~37 days processing time.
+      Turkey identified by: INE, Inegöl, Bursa, TR, Türkei, Turkey.
+    Returns:
+      {
+        "origin_country": "Türkei" | "China" | "Deutschland" | "Polen" | ... | None,
+        "delivery_weeks": "4-8 Wochen" | "8-12 Wochen",
+        "delivery_days": 37 | 56,
+        "is_china": bool,
+      }
+    """
+    combined_text = []
+    if product_title:
+        combined_text.append(str(product_title))
+
+    if aftercool_row:
+        for fld in ("Artikelbeschreibung", "name", "kurzbeschreibung", "Ort", "City", "Standort", "Location"):
+            val = aftercool_row.get(fld)
+            if val:
+                combined_text.append(str(val))
+
+    if attributes:
+        for k, v in attributes.items():
+            combined_text.append(f"{k}: {v}")
+
+    full_text = " ".join(combined_text).lower()
+
+    # Priority 0: Explicit country attribute in attributes or aftercool_row
+    explicit_country = None
+    for src in (attributes, aftercool_row):
+        if not src or not isinstance(src, dict):
+            continue
+        for k in ("Herstellungsland", "herstellungsland", "Ursprungsland", "ursprungsland", "Herkunftsland", "herkunftsland", "Produktionsland", "produktionsland", "Herstellerland", "herstellerland"):
+            v = src.get(k)
+            if v and str(v).strip():
+                explicit_country = str(v).strip()
+                break
+        if explicit_country:
+            break
+
+    if explicit_country:
+        exp_lower = explicit_country.lower()
+        if any(m in exp_lower for m in ("china", "cn", "prc", "vr china")):
+            return {
+                "origin_country": "China",
+                "delivery_weeks": "8-12 Wochen",
+                "delivery_days": 56,
+                "is_china": True,
+            }
+        if any(m in exp_lower for m in ("türkei", "turkey", "inegöl", "inegol", "bursa")) or exp_lower == "tr":
+            normalized_c = "Türkei"
+        elif any(m in exp_lower for m in ("deutschland", "germany")) or exp_lower == "de":
+            normalized_c = "Deutschland"
+        elif any(m in exp_lower for m in ("polen", "poland")) or exp_lower == "pl":
+            normalized_c = "Polen"
+        elif any(m in exp_lower for m in ("italien", "italy")) or exp_lower == "it":
+            normalized_c = "Italien"
+        elif any(m in exp_lower for m in ("frankreich", "france")) or exp_lower == "fr":
+            normalized_c = "Frankreich"
+        elif any(m in exp_lower for m in ("spanien", "spain")) or exp_lower == "es":
+            normalized_c = "Spanien"
+        elif any(m in exp_lower for m in ("österreich", "austria")) or exp_lower == "at":
+            normalized_c = "Österreich"
+        elif any(m in exp_lower for m in ("niederlande", "netherlands", "holland")) or exp_lower == "nl":
+            normalized_c = "Niederlande"
+        elif "vietnam" in exp_lower or exp_lower == "vn":
+            normalized_c = "Vietnam"
+        elif any(m in exp_lower for m in ("indien", "india")):
+            normalized_c = "Indien"
+        else:
+            normalized_c = explicit_country
+
+        return {
+            "origin_country": normalized_c,
+            "delivery_weeks": "4-8 Wochen",
+            "delivery_days": 37,
+            "is_china": False,
+        }
+
+    # Priority 1: Turkey / Inegöl markers (INE, Inegöl, Bursa, TR, Türkei, Turkey)
+    turkey_markers = ["inegöl", "inegol", "bursa", "türkei", "turkey"]
+    is_turkey = any(m in full_text for m in turkey_markers)
+    if not is_turkey:
+        if re.search(r'\b(ine|tr)\b', full_text, flags=re.IGNORECASE):
+            is_turkey = True
+
+    # Priority 2: China markers
+    china_markers = ["china", "vr china", "volksrepublik china", "prc", "chinesisch"]
+    is_china = any(m in full_text for m in china_markers)
+    if not is_china and re.search(r'\bcn\b', full_text, flags=re.IGNORECASE):
+        is_china = True
+
+    if is_turkey:
+        return {
+            "origin_country": "Türkei",
+            "delivery_weeks": "4-8 Wochen",
+            "delivery_days": 37,
+            "is_china": False,
+        }
+    elif is_china:
+        return {
+            "origin_country": "China",
+            "delivery_weeks": "8-12 Wochen",
+            "delivery_days": 56,
+            "is_china": True,
+        }
+    else:
+        if "deutschland" in full_text or "germany" in full_text:
+            country = "Deutschland"
+        elif "polen" in full_text or "poland" in full_text:
+            country = "Polen"
+        elif "italien" in full_text or "italy" in full_text:
+            country = "Italien"
+        elif "frankreich" in full_text or "france" in full_text:
+            country = "Frankreich"
+        elif "spanien" in full_text or "spain" in full_text:
+            country = "Spanien"
+        elif "österreich" in full_text or "austria" in full_text:
+            country = "Österreich"
+        elif "niederlande" in full_text or "netherlands" in full_text or "holland" in full_text:
+            country = "Niederlande"
+        elif "vietnam" in full_text:
+            country = "Vietnam"
+        elif "indien" in full_text or "india" in full_text:
+            country = "Indien"
+        else:
+            country = None
+
+        return {
+            "origin_country": country,
+            "delivery_weeks": "4-8 Wochen",
+            "delivery_days": 37,
+            "is_china": False,
+        }
+
 
 def normalize_attributes(raw_attrs: Dict[str, str]) -> Dict[str, str]:
-    """Normalize known Aftercool attribute aliases into canonical Otto names."""
+    """
+    Normalize known Aftercool attribute aliases into canonical Otto names.
+    Also removes forbidden eBay garbage specifics and cleans dimension units (cm).
+    """
     normalized: Dict[str, str] = {}
+    composite_dims: Optional[str] = None
 
     for key, value in raw_attrs.items():
         key_clean = str(key).strip()
@@ -389,8 +726,29 @@ def normalize_attributes(raw_attrs: Dict[str, str]) -> Dict[str, str]:
         if not key_clean or not value_clean:
             continue
 
+        # Filter out forbidden eBay specifics
+        if key_clean.lower() in FORBIDDEN_EBAY_SPECIFICS:
+            continue
+
+        # Check for composite dimensions field, e.g. "Maße: 80 x 73 x 95 cm"
+        if key_clean.lower() in ("maße", "abmessungen", "dimensionen", "produktabmessungen"):
+            composite_dims = value_clean
+            continue
+
         target_key = ATTR_SYNONYMS.get(key_clean, key_clean)
+
+        # Clean dimension attributes (strip 'cm', 'mm' etc.)
+        if target_key in DIMENSION_ATTR_NAMES or any(d in target_key.lower() for d in ("breite", "höhe", "tiefe", "länge", "höhe")):
+            value_clean = clean_dimension_value(value_clean)
+
         _append_attribute(normalized, target_key, value_clean)
+
+    # If composite dimensions found and individual dims not set, populate them
+    if composite_dims:
+        extracted = parse_composite_dimensions(composite_dims)
+        for d_key, d_val in extracted.items():
+            if d_key not in normalized:
+                normalized[d_key] = d_val
 
     return normalized
 
@@ -593,13 +951,16 @@ def _extract_aftercool_data(
     attributes = parse_aftercool_specifics(raw_specifics)
 
     produktart = attributes.get("Produktart", "")
+    title = row.get("Artikelbeschreibung") or row.get("name") or ""
+    desc = row.get("Description") or ""
+    context_text = f"{title} {raw_specifics} {desc}"
+
     if produktart:
-        category_id, category_name = find_best_category(produktart)
+        category_id, category_name = find_best_category(produktart, context_text=context_text)
 
     if category_id is None:
-        title = row.get("Artikelbeschreibung") or row.get("name") or ""
         if title:
-            category_id, category_name = find_best_category(str(title))
+            category_id, category_name = find_best_category(str(title), context_text=context_text)
 
     return category_id, category_name, attributes
 
@@ -665,6 +1026,39 @@ async def sync_product_data(
         canonical_key = ATTR_SYNONYMS.get(str(key).strip(), str(key).strip())
         merged_attributes[canonical_key] = clean_value
 
+    # Category Schema Whitelisting and Numeric Cleaning
+    if final_category_id:
+        allowed = get_allowed_attribute_names(final_category_id)
+        numeric_specs = get_numeric_attributes_for_category(final_category_id)
+
+        filtered_attributes = {}
+        for k, v in merged_attributes.items():
+            k_clean = str(k).strip()
+            if k_clean in allowed:
+                # If numeric or dimension attribute, ensure 'cm' is stripped
+                if k_clean in numeric_specs or k_clean in DIMENSION_ATTR_NAMES:
+                    filtered_attributes[k_clean] = clean_dimension_value(v)
+                else:
+                    filtered_attributes[k_clean] = v
+
+        merged_attributes = filtered_attributes
+
+    # Resolve origin (Turkey vs China vs Europe) and delivery weeks/days
+    delivery_info = resolve_origin_and_delivery_info(
+        aftercool_row=aftercool_row,
+        attributes=merged_attributes,
+        product_title=str((aftercool_row or {}).get("Artikelbeschreibung") or "")
+    )
+
+    # If category allows Herkunftsland / Ursprungsland / Herstellungsland / Produktionsland, set it if missing and country detected
+    if final_category_id:
+        allowed = get_allowed_attribute_names(final_category_id)
+        origin_country = delivery_info.get("origin_country")
+        if origin_country:
+            for attr_k in ("Herkunftsland", "Ursprungsland", "Herstellungsland", "Produktionsland", "Herstellerland"):
+                if attr_k in allowed and attr_k not in merged_attributes:
+                    merged_attributes[attr_k] = origin_country
+
     source = (
         "okb+aftercool"
         if okb_found and aftercool_found
@@ -689,6 +1083,10 @@ async def sync_product_data(
         "category": final_category_name,
         "category_id": final_category_id,
         "attributes": merged_attributes,
+        "origin_country": delivery_info["origin_country"],
+        "delivery_weeks": delivery_info["delivery_weeks"],
+        "delivery_days": delivery_info["delivery_days"],
+        "is_china": delivery_info["is_china"],
         "source": source,
     }
 

@@ -1,6 +1,8 @@
 import logging
 import asyncio
 from typing import Dict, Optional, Tuple, Any, List
+import time
+import re
 import httpx
 
 from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
@@ -8,34 +10,47 @@ from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
 logger = logging.getLogger("aftercool_twin")
 
 _FACTORY_MAP_CACHE: Dict[str, Any] = {}
-_FACTORY_ITEMS_CACHE: Dict[str, Dict[str, str]] = {}
+_FACTORY_MAP_TIMESTAMP: float = 0.0
+FACTORY_MAP_TTL: float = 120.0  # 2 minutes cache TTL
+
+_FACTORY_ITEMS_CACHE: Dict[str, Tuple[float, Dict[str, str]]] = {}
+FACTORY_ITEMS_TTL: float = 180.0  # 3 minutes items cache TTL
+
+
+def _normalize_name(name: str) -> str:
+    if not name:
+        return ""
+    return re.sub(r"\s+", " ", name.strip().lower())
 
 
 def _normalize_title(title: str) -> str:
     if not title:
         return ""
-    import re
     # Lowercase, trim extra whitespace and common punctuation
     t = title.strip().lower()
     t = re.sub(r"\s+", " ", t)
     return t
 
 
-async def get_factory_pairs() -> Tuple[Dict[Tuple[str, str], str], Dict[str, Tuple[str, str, str]]]:
+async def get_factory_pairs(force_refresh: bool = False) -> Tuple[Dict[Any, str], Dict[str, Tuple[str, str, str]]]:
     """
     Returns:
-      pair_map: ((factory_name, kind, target_acc) -> target_fid)
+      pair_map: ((factory_name, kind, target_acc) -> target_fid) and normalized fallbacks
       fid_info: (fid -> (factory_name, kind, account))
     """
-    global _FACTORY_MAP_CACHE
-    if _FACTORY_MAP_CACHE.get("pair_map") and _FACTORY_MAP_CACHE.get("fid_info"):
-        return _FACTORY_MAP_CACHE["pair_map"], _FACTORY_MAP_CACHE["fid_info"]
+    global _FACTORY_MAP_CACHE, _FACTORY_MAP_TIMESTAMP
+    now = time.time()
+    if not force_refresh and (now - _FACTORY_MAP_TIMESTAMP < FACTORY_MAP_TTL):
+        if _FACTORY_MAP_CACHE.get("pair_map") and _FACTORY_MAP_CACHE.get("fid_info"):
+            return _FACTORY_MAP_CACHE["pair_map"], _FACTORY_MAP_CACHE["fid_info"]
 
-    session = await get_aftercool_session()
+    session = await get_aftercool_session(force_refresh=force_refresh)
     async with httpx.AsyncClient(cookies={"session": session}, timeout=20.0) as client:
         res = await client.get(f"{AFTERCOOL_BASE_URL}/api/factories")
         if res.status_code != 200:
             logger.error("Failed to load factories from Aftercool: HTTP %s", res.status_code)
+            if _FACTORY_MAP_CACHE.get("pair_map") and _FACTORY_MAP_CACHE.get("fid_info"):
+                return _FACTORY_MAP_CACHE["pair_map"], _FACTORY_MAP_CACHE["fid_info"]
             return {}, {}
 
         data = res.json()
@@ -47,48 +62,95 @@ async def get_factory_pairs() -> Tuple[Dict[Tuple[str, str], str], Dict[str, Tup
     for f in factories:
         fname = f.get("name")
         kind = f.get("kind")
-        acc = str(f.get("account") or "").upper()
+        acc = str(f.get("account") or "").upper().strip()
         fid = str(f.get("id") or "").strip()
         if not fname or not fid:
             continue
-        fid_info[fid] = (fname, kind, acc)
-        pair_map[(fname, kind, acc)] = fid
+        fname_str = str(fname).strip()
+        norm_name = _normalize_name(fname_str)
+        norm_kind = str(kind).strip().lower() if kind else None
+
+        fid_info[fid] = (fname_str, kind, acc)
+
+        # 1. Exact key: (original_name, original_kind, ACC)
+        pair_map[(fname_str, kind, acc)] = fid
+        # 2. Normalized key: (norm_name, norm_kind, ACC)
+        pair_map[(norm_name, norm_kind, acc)] = fid
+        # 3. Account + name fallback (prefer lister if multiple kinds exist)
+        fallback_key = (norm_name, acc)
+        if fallback_key not in pair_map or norm_kind == "lister":
+            pair_map[fallback_key] = fid
 
     _FACTORY_MAP_CACHE["pair_map"] = pair_map
     _FACTORY_MAP_CACHE["fid_info"] = fid_info
+    _FACTORY_MAP_TIMESTAMP = now
     return pair_map, fid_info
 
 
 async def resolve_target_factory_id(
     source_factory_id: str,
     source_account: str,
-    target_account: str
+    target_account: str,
+    force_refresh: bool = False
 ) -> Optional[str]:
     """
     Finds the twin factory ID in target_account with the same name and kind.
+    Automatically re-fetches from Aftercool if not found in current cache.
     """
-    pair_map, fid_info = await get_factory_pairs()
-    info = fid_info.get(str(source_factory_id).strip())
+    sfid = str(source_factory_id).strip()
+    tgt_acc = str(target_account).upper().strip()
+
+    pair_map, fid_info = await get_factory_pairs(force_refresh=force_refresh)
+    info = fid_info.get(sfid)
+
+    # Auto-refresh on cache miss if source factory unknown
+    if not info and not force_refresh:
+        logger.info(f"Source factory {sfid} not found in cache, refreshing from Aftercool...")
+        pair_map, fid_info = await get_factory_pairs(force_refresh=True)
+        info = fid_info.get(sfid)
+
     if not info:
+        logger.warning(f"Source factory {sfid} not found in Aftercool factories list")
         return None
 
     fname, kind, acc = info
-    tgt_acc = str(target_account).upper()
-    return pair_map.get((fname, kind, tgt_acc))
+    norm_name = _normalize_name(fname)
+    norm_kind = str(kind).strip().lower() if kind else None
+
+    # Priority 1: Exact match (fname, kind, tgt_acc)
+    tgt_fid = pair_map.get((fname, kind, tgt_acc))
+
+    # Priority 2: Normalized match (norm_name, norm_kind, tgt_acc)
+    if not tgt_fid:
+        tgt_fid = pair_map.get((norm_name, norm_kind, tgt_acc))
+
+    # Priority 3: Name match in target account (ignoring kind differences)
+    if not tgt_fid:
+        tgt_fid = pair_map.get((norm_name, tgt_acc))
+
+    # Auto-refresh on cache miss if target twin not found in cache
+    if not tgt_fid and not force_refresh:
+        logger.info(f"Target twin for {fname} ({sfid}) in {tgt_acc} not found in cache, refreshing from Aftercool...")
+        return await resolve_target_factory_id(source_factory_id, source_account, target_account, force_refresh=True)
+
+    return tgt_fid
 
 
-async def get_factory_product_map(factory_id: str, account: str) -> Dict[str, str]:
+async def get_factory_product_map(factory_id: str, account: str, force_refresh: bool = False) -> Dict[str, str]:
     """
     Returns mapping: normalized_name -> ean for all products in the given factory.
     """
     fid = str(factory_id).strip()
-    acc = str(account).upper()
+    acc = str(account).upper().strip()
     cache_key = f"{acc}:{fid}"
+    now = time.time()
 
-    if cache_key in _FACTORY_ITEMS_CACHE:
-        return _FACTORY_ITEMS_CACHE[cache_key]
+    if not force_refresh and cache_key in _FACTORY_ITEMS_CACHE:
+        cached_time, cached_data = _FACTORY_ITEMS_CACHE[cache_key]
+        if now - cached_time < FACTORY_ITEMS_TTL:
+            return cached_data
 
-    session = await get_aftercool_session()
+    session = await get_aftercool_session(force_refresh=force_refresh)
     name_to_ean = {}
     async with httpx.AsyncClient(cookies={"session": session}, timeout=30.0) as client:
         res = await client.get(
@@ -104,8 +166,10 @@ async def get_factory_product_map(factory_id: str, account: str) -> Dict[str, st
                 if pname and ean:
                     norm = _normalize_title(pname)
                     name_to_ean[norm] = str(ean).strip()
+        elif cache_key in _FACTORY_ITEMS_CACHE:
+            return _FACTORY_ITEMS_CACHE[cache_key][1]
 
-    _FACTORY_ITEMS_CACHE[cache_key] = name_to_ean
+    _FACTORY_ITEMS_CACHE[cache_key] = (now, name_to_ean)
     return name_to_ean
 
 
@@ -148,6 +212,10 @@ async def resolve_twin_product(
     if prod_name:
         norm_name = _normalize_title(prod_name)
         target_ean = target_name_map.get(norm_name)
+        if not target_ean:
+            # Force refresh target factory product map once in case newly added
+            target_name_map = await get_factory_product_map(target_fid, tgt_acc, force_refresh=True)
+            target_ean = target_name_map.get(norm_name)
         if target_ean:
             return target_fid, target_ean, prod_name
 

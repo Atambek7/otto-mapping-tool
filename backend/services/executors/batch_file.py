@@ -29,6 +29,12 @@ class BatchExportExecutor(BasePublishExecutor):
                 item.published_at = now_utc
                 item.error_message = None
                 published_count += 1
+                if m := db.query(models.ProductMapping).filter(
+                    models.ProductMapping.product_ean == item.product_ean,
+                    models.ProductMapping.account_name == item.account_name
+                ).first():
+                    m.status = "Published"
+                    m.published_at = now_utc
             except Exception as e:
                 item.status = models.QueueItemStatus.FAILED
                 item.error_message = str(e)

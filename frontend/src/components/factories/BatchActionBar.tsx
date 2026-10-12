@@ -11,7 +11,8 @@ import {
   Database,
   Sparkles,
   X,
-  Check
+  Check,
+  ArrowRightLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,9 @@ export interface BatchActionBarProps {
   handleBatchDeleteCache: () => void;
   handleBatchExport: (format: "json" | "csv" | "db") => void;
   handleBatchAutoMap: (extractAttributes: boolean) => void;
+  handleTransferToXL?: () => void;
+  isTransferring?: boolean;
+  currentAccount?: string;
   setSelectedIds: (ids: Set<string>) => void;
 }
 
@@ -42,6 +46,9 @@ export function BatchActionBar({
   handleBatchDeleteCache,
   handleBatchExport,
   handleBatchAutoMap,
+  handleTransferToXL,
+  isTransferring,
+  currentAccount,
   setSelectedIds,
 }: BatchActionBarProps) {
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -213,6 +220,26 @@ export function BatchActionBar({
         <Sparkles className="w-3.5 h-3.5" />
         <span>{t("batch.ai_attributes")}</span>
       </Button>
+
+      {/* Transfer to XL - only available when currently in JV account */}
+      {currentAccount === "JV" && handleTransferToXL && (
+        <>
+          <div className="w-px h-5 bg-slate-200 dark:bg-slate-800" />
+          <Button
+            onClick={handleTransferToXL}
+            disabled={isProcessing || isTransferring}
+            size="sm"
+            className="h-9 px-3 text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white gap-1.5 shadow-xs cursor-pointer"
+          >
+            {isTransferring ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+            )}
+            <span>{t("batch.transfer_to_xl", "Перенести в XL")}</span>
+          </Button>
+        </>
+      )}
 
       <div className="w-px h-5 bg-slate-200 dark:bg-slate-800" />
 

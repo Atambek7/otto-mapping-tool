@@ -1,39 +1,38 @@
 {
   "global": {
     "Art Herstellung": "Fertigung aus Europa",
-    "Art Polsterung": "Wellenunterfederung ; Polyätherschaum-Polsterung",
-    "Belastbarkeit pro Sitzplatz": "140 Kg",
-    "Geschlecht": "Unisex",
+    "Belastbarkeit maximal": "140 Kg",
+    "Geräteart laut ElektroG": "Produkt fällt nicht unter das ElektroG.",
     "Hinweis Maßangaben": "Alle Angaben sind ca. Maße",
     "Informationen zur Datennutzung (nach EU Data Act)": "Ihre personenbezogenen Daten werden nur zur Bearbeitung IhrerBestellungen, für Marketing (mit Zustimmung) und zur Kundenbetreuungverwendet. Sie haben jederzeit das Recht auf Auskunft, Berichtigungoder Löschung Ihrer Daten. Weitere Informationen finden Sie inunserer Datenschutzerklärung.",
     "Lieferzustand": "teilmontiert",
-    "Pflegehinweise": "keine aggressiven Reinigungsmittel verwenden",
     "Hinweis Lieferumfang": "Es wird alles geliefert, was in der Produktbeschreibung angegeben ist.",
     "Nicht im Lieferumfang enthalten": "Die Dekoration und Beimöbel sind nicht im Lieferumfang enthalten",
-    "Wissenswert": "Falls der Artikel nicht Ihrem Farbwunsch entspricht oder die Farbe unpassend ist, können Sie gerne bei uns eine Maßanfertigung oder Farbänderung anfragen.",
+    "Wissenswertes": "Falls der Artikel nicht Ihrem Farbwunsch entspricht oder die Farbe unpassend ist, können Sie gerne bei uns eine Maßanfertigung oder Farbänderung anfragen.",
     "Warnhinweise": "Wir liefern den Artikel kostenlos bis zur Bordsteinkante. Optional bietet die Spedition jedoch auch einen 2-Mann-Service sowie einen Montageservice an. Diesen Service können Sie direkt bei der Spedition bei der Anlieferung anfragen. Es besteht die Möglichkeit einer 2-Mann-Lieferung sowie der Montage des Artikels",
     "Farbhinweise": "Bitte beachten Sie, dass die Farben auf Ihrem Monitor von den Originalfarbtönen abweichen können.",
     "Zielgruppe": "Erwachsene ; Jugendliche",
     "Design": "Modern",
     "Lieferumfang": "Es wird alles laut Produktbeschreibung geliefert",
     "Material Korpus": "Holz",
-    "Material Türen": "Holz",
     "Montagehinweis": "Es wird eine zweite Person zum Aufbau empfohlen",
     "Montagehinweise": "Es wird eine zweite Person zum Aufbau empfohlen",
-    "Optik": "uni"
+    "Optik": "uni",
+    "Holzart": "Buche",
+    "Pflegehinweise": "keine aggressiven Reinigungsmittel verwenden"
   },
   "accounts": {
     "JV": {
       "Marke": "JVMOEBEL",
       "Marke laut BattVO": "JVMOEBEL",
-      "Markeninformation": "Jvmoebel® ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Nachhaltigkeit bietet die Marke maßgeschneiderte Lösungen für jedes Zuhause.",
+      "Markeninformationen": "Jvmoebel® ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Nachhaltigkeit bietet die Marke maßgeschneiderte Lösungen für jedes Zuhause.",
       "Materialhinweis": "JVmoebel® erfüllt alle relevanten CE-Normen und gewährleistet, dass unsere Möbel höchste Sicherheits- und Qualitätsstandards einhalten. Unsere Produkte entsprechen der Produktsicherheitsrichtlinie (2001/95/EG) sowie den spezifischen Sicherheitsanforderungen der EN 12520:2015, EN 1022:2005 und EN 14749:2016. Zudem werden alle Materialien gemäß der REACH-Verordnung und RoHS-Richtlinien auf Schadstoffe geprüft. Unsere Möbel bieten nicht nur hohe Qualität, sondern auch eine umweltfreundliche Produktion, die durch ISO 9001 und ISO 14001 unterstützt wird. Alle Möbel entsprechen auch den ergonomischen und stabilitätsrelevanten Anforderungen der EN 1335 und erfüllen gegebenenfalls die Brandschutzanforderungen der B1-Klasse.",
       "WEEE-Reg.-Nr. DE": "46974041"
     },
     "XL": {
       "Marke": "XLMOEBEL",
       "Marke laut BattVO": "XLMOEBEL",
-      "Markeninformation": "XLmoebel ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Nachhaltigkeit bietet die Marke maßgeschneiderte Lösungen für jedes Zuhause.",
+      "Markeninformationen": "XLmoebel ist seit Jahrzehnten bekannt für hochwertige, stilvolle Möbel. Mit einem Fokus auf Design, Qualität und Nachhaltigkeit bietet die Marke maßgeschneiderte Lösungen für jedes Zuhause.",
       "Materialhinweis": "XLmoebel erfüllt alle relevanten CE-Normen und gewährleistet, dass unsere Möbel höchste Sicherheits- und Qualitätsstandards einhalten. Unsere Produkte entsprechen der Produktsicherheitsrichtlinie (2001/95/EG) sowie den spezifischen Sicherheitsanforderungen der EN 12520:2015, EN 1022:2005 und EN 14749:2016. Zudem werden alle Materialien gemäß der REACH-Verordnung und RoHS-Richtlinien auf Schadstoffe geprüft. Unsere Möbel bieten nicht nur hohe Qualität, sondern auch eine umweltfreundliche Produktion, die durch ISO 9001 und ISO 14001 unterstützt wird. Alle Möbel entsprechen auch den ergonomischen und stabilitätsrelevanten Anforderungen der EN 1335 und erfüllen gegebenenfalls die Brandschutzanforderungen der B1-Klasse.",
       "WEEE-Reg.-Nr. DE": "80120806"
     }
@@ -41,5 +40,16 @@
   "design_options": [
     "Modern",
     "Klassisch"
-  ]
+  ],
+  "sofa_presets": {
+    "Art Rückenkissen": "Mit Schaumstofffüllung",
+    "Ausführung Rückenlehne": "Mit gepolsterten Rückenlehne",
+    "Art der Rollen": "Messing-Rollen",
+    "armrest_options": {
+      "padded": "Mit gepolsterten Armlehnen",
+      "wood": "Mit Holzarmlehnen",
+      "none": "Ohne Armlehnen"
+    },
+    "default_armrest": "Mit gepolsterten Armlehnen"
+  }
 }

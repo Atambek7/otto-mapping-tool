@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,6 +29,8 @@ class PipelinePreviewRequest(BaseModel):
     product_eans: Optional[List[str]] = None
     exclude_published: bool = False
     force_refresh: bool = False
+    anti_collision_enabled: bool = True
+    stagger_days: int = Field(default=2, ge=1, le=30)
 
 
 class PipelineCreateRequest(BaseModel):
@@ -38,6 +41,61 @@ class PipelineCreateRequest(BaseModel):
     executor_type: models.ExecutorType = models.ExecutorType.OTTO_API
     product_eans: Optional[List[str]] = None
     exclude_published: bool = False
+    anti_collision_enabled: bool = True
+    stagger_days: int = Field(default=2, ge=1, le=30)
+
+
+def compute_anti_collision_min_dates(
+    db: Session,
+    account_name: models.AccountType,
+    eans: List[str],
+    stagger_days: int,
+    tz_name: str
+) -> Dict[str, date]:
+    opp_account = models.AccountType.XL if account_name == models.AccountType.JV else models.AccountType.JV
+    tz = ZoneInfo(tz_name)
+    today = datetime.now(tz).date()
+    stagger_td = timedelta(days=stagger_days)
+    min_dates: Dict[str, date] = {}
+
+    # 1. Check opposite account published mappings
+    opp_mappings = (
+        db.query(models.ProductMapping)
+        .filter(
+            models.ProductMapping.product_ean.in_(eans),
+            models.ProductMapping.account_name == opp_account,
+            models.ProductMapping.status == "Published"
+        )
+        .all()
+    )
+    for om in opp_mappings:
+        dt = om.published_at or om.updated_at
+        pub_d = dt.astimezone(tz).date() if dt else today
+        min_d = pub_d + stagger_td
+        min_dates[om.product_ean] = max(min_dates.get(om.product_ean, min_d), min_d)
+
+    # 2. Check opposite account active queue items
+    opp_queue = (
+        db.query(models.PublishQueueItem)
+        .filter(
+            models.PublishQueueItem.product_ean.in_(eans),
+            models.PublishQueueItem.account_name == opp_account,
+            models.PublishQueueItem.status.in_([
+                models.QueueItemStatus.PENDING,
+                models.QueueItemStatus.PROCESSING,
+                models.QueueItemStatus.PUBLISHED
+            ])
+        )
+        .all()
+    )
+    for oq in opp_queue:
+        dt = oq.published_at or oq.scheduled_date
+        if dt:
+            q_d = dt.astimezone(tz).date()
+            min_d = q_d + stagger_td
+            min_dates[oq.product_ean] = max(min_dates.get(oq.product_ean, min_d), min_d)
+
+    return min_dates
 
 
 # ====== ENDPOINTS ======
@@ -52,25 +110,34 @@ async def preview_pipeline(
     Dry-run preview calculating daily breakdown and category distribution,
     strictly scoped against Aftercool authoritative inventory.
     """
-    # 1. Authoritative factory scoping
-    auth_eans = await get_authoritative_factory_eans(
-        factory_id=factory_id,
-        account=req.account_name.value if hasattr(req.account_name, "value") else str(req.account_name),
-        force_refresh=req.force_refresh
-    )
-
+    # 1. Scoping
+    auth_eans = None
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.account_name == req.account_name
     )
 
-    if auth_eans:
-        query = query.filter(models.ProductMapping.product_ean.in_(auth_eans))
-    else:
-        logger.warning(f"Authoritative EANs empty for factory {factory_id}, falling back to DB factory_id filter.")
-        query = query.filter(models.ProductMapping.factory_id == factory_id)
-
     if req.product_eans:
+        # User selected specific products -> scope directly without external network call
         query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
+    else:
+        # Full factory preview -> check cache or authoritative scope
+        auth_res = await get_authoritative_factory_eans(
+            factory_id=factory_id,
+            account=req.account_name.value if hasattr(req.account_name, "value") else str(req.account_name),
+            force_refresh=req.force_refresh
+        )
+        if auth_res.status == "error":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Ошибка Aftercool API ({auth_res.error_message or 'не удалось получить каталог'}). Операция остановлена."
+            )
+        elif auth_res.status == "empty":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"В каталоге Aftercool не найдено товаров для фабрики '{factory_id}' и аккаунта '{req.account_name.value}'."
+            )
+        else:
+            query = query.filter(models.ProductMapping.product_ean.in_(auth_res.eans))
 
     raw_mappings = query.all()
     if not raw_mappings:
@@ -79,29 +146,24 @@ async def preview_pipeline(
             detail=f"No products found for factory '{factory_id}' and account '{req.account_name.value}'."
         )
 
-    # Auto-heal factory_id on matched records if needed
-    auto_healed = 0
-    for m in raw_mappings:
-        if m.factory_id != factory_id:
-            m.factory_id = factory_id
-            auto_healed += 1
-    if auto_healed > 0:
-        db.commit()
-
     # Calculate metrics
     already_published = sum(1 for m in raw_mappings if m.status == "Published")
-    ready_products = sum(1 for m in raw_mappings if m.category_id and m.category_id != "Uncategorized")
+    ready_products = sum(1 for m in raw_mappings if m.status == "Ready")
     incomplete_mappings = len(raw_mappings) - ready_products
 
+    # Drip Feed distributes Ready products and Error products with category
+    eligible_mappings = [m for m in raw_mappings if m.status in ("Ready", "Error") and bool(m.category_id)]
+    error_products = sum(1 for m in eligible_mappings if m.status == "Error")
+    
     if req.exclude_published:
-        mappings = [m for m in raw_mappings if m.status != "Published"]
+        mappings = [m for m in eligible_mappings if m.status != "Published"]
     else:
-        mappings = raw_mappings
+        mappings = eligible_mappings
 
     if not mappings:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"All {len(raw_mappings)} products for factory '{factory_id}' are already marked as Published."
+            detail=f"Нет товаров со статусом 'Готов' или 'Ошибка' (с категорией) для фабрики '{factory_id}'."
         )
 
     # Get category names for preview readability
@@ -131,27 +193,45 @@ async def preview_pipeline(
         for m in mappings
     ]
 
+    min_dates = {}
+    if req.anti_collision_enabled:
+        eans = [m.product_ean for m in mappings]
+        min_dates = compute_anti_collision_min_dates(
+            db=db,
+            account_name=req.account_name,
+            eans=eans,
+            stagger_days=req.stagger_days,
+            tz_name=req.timezone
+        )
+
     distribution = distribute_products_round_robin(
         items=items,
         days=req.days,
         daily_time=req.daily_time,
-        tz_name=req.timezone
+        tz_name=req.timezone,
+        min_dates=min_dates
     )
 
     # Format days summary for the UI
     days_summary = []
+    stagger_delayed_total = 0
     for day_num, day_items in distribution["schedule"].items():
         scheduled_dt = day_items[0]["scheduled_date"].isoformat() if day_items else None
         cat_counts = {}
+        day_stagger_count = 0
         for it in day_items:
             cname = it.get("category_name") or it.get("category_id")
             cat_counts[cname] = cat_counts.get(cname, 0) + 1
+            if it.get("stagger_delayed"):
+                day_stagger_count += 1
+                stagger_delayed_total += 1
 
         days_summary.append({
             "day": day_num,
             "scheduled_date": scheduled_dt,
             "total_items": len(day_items),
-            "categories": cat_counts
+            "categories": cat_counts,
+            "stagger_delayed_count": day_stagger_count
         })
 
     return {
@@ -161,10 +241,14 @@ async def preview_pipeline(
         "total_products": len(items),
         "already_published": already_published,
         "ready_products": ready_products,
+        "error_products": error_products,
         "incomplete_mappings": incomplete_mappings,
-        "days": req.days,
+        "days": distribution["days"],
         "daily_time": req.daily_time,
         "timezone": req.timezone,
+        "anti_collision_enabled": req.anti_collision_enabled,
+        "stagger_days": req.stagger_days,
+        "stagger_delayed_total": stagger_delayed_total,
         "start_date": distribution["start_date"],
         "days_summary": days_summary,
         "category_breakdown": distribution["category_summary"]
@@ -197,23 +281,31 @@ async def create_pipeline_plan(
             detail=f"An active publish plan (ID {existing_active.id}) already exists for factory '{factory_id}' and account '{req.account_name.value}'."
         )
 
-    # 2. Authoritative factory scoping
-    auth_eans = await get_authoritative_factory_eans(
-        factory_id=factory_id,
-        account=req.account_name.value if hasattr(req.account_name, "value") else str(req.account_name)
-    )
-
+    # 2. Scoping
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.account_name == req.account_name
     )
 
-    if auth_eans:
-        query = query.filter(models.ProductMapping.product_ean.in_(auth_eans))
-    else:
-        query = query.filter(models.ProductMapping.factory_id == factory_id)
-
     if req.product_eans:
+        # User selected specific products -> scope directly without external network call
         query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
+    else:
+        auth_res = await get_authoritative_factory_eans(
+            factory_id=factory_id,
+            account=req.account_name.value if hasattr(req.account_name, "value") else str(req.account_name)
+        )
+        if auth_res.status == "error":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Ошибка Aftercool API ({auth_res.error_message or 'не удалось получить каталог'}). Создание плана остановлено."
+            )
+        elif auth_res.status == "empty":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"В каталоге Aftercool не найдено товаров для фабрики '{factory_id}' и аккаунта '{req.account_name.value}'."
+            )
+        else:
+            query = query.filter(models.ProductMapping.product_ean.in_(auth_res.eans))
 
     if req.exclude_published:
         query = query.filter(models.ProductMapping.status != "Published")
@@ -225,26 +317,61 @@ async def create_pipeline_plan(
             detail=f"No products found for factory '{factory_id}' and account '{req.account_name.value}'."
         )
 
-    # Auto-heal factory_id on matched records if needed
+    # Filter strictly eligible products (Ready or Error with category)
+    eligible_mappings = [m for m in mappings if m.status in ("Ready", "Error") and bool(m.category_id)]
+    if not eligible_mappings:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ни один из выбранных товаров не готов к публикации на Otto (статус должен быть 'Готов' или 'Ошибка' с выбранной категорией)."
+        )
+    mappings = eligible_mappings
+
+    # Auto-heal factory_id on matched records in-memory (committed atomically later with plan)
     for m in mappings:
         if m.factory_id != factory_id:
             m.factory_id = factory_id
-    db.commit()
 
-    items = [
-        {
+    from services.validator import get_missing_required_attributes
+    all_eans = [m.product_ean for m in mappings]
+    all_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(all_eans),
+        models.ProductAttribute.account_name == req.account_name
+    ).all()
+    attrs_by_ean = {}
+    for a in all_attrs:
+        attrs_by_ean.setdefault(a.product_ean, {})[a.attribute_name] = a.attribute_value
+
+    items = []
+    for m in mappings:
+        m_attrs = attrs_by_ean.get(m.product_ean, {})
+        missing = get_missing_required_attributes(m.category_id, m_attrs)
+        # Update missing_attributes on the mapping while we are here
+        m.missing_attributes = missing
+        
+        items.append({
             "product_ean": m.product_ean,
             "category_id": m.category_id or "Uncategorized",
-        }
-        for m in mappings
-    ]
+            "missing_attributes": missing
+        })
+
+    min_dates = {}
+    if req.anti_collision_enabled:
+        eans = [m.product_ean for m in mappings]
+        min_dates = compute_anti_collision_min_dates(
+            db=db,
+            account_name=req.account_name,
+            eans=eans,
+            stagger_days=req.stagger_days,
+            tz_name=req.timezone
+        )
 
     # 3. Calculate distribution
     distribution = distribute_products_round_robin(
         items=items,
         days=req.days,
         daily_time=req.daily_time,
-        tz_name=req.timezone
+        tz_name=req.timezone,
+        min_dates=min_dates
     )
 
     # 4. Create PublishPlan record
@@ -253,7 +380,7 @@ async def create_pipeline_plan(
         factory_name=factory_id,  # factory_id is the canonical name; product_name would be a product title
         account_name=req.account_name,
         total_products=len(items),
-        total_days=req.days,
+        total_days=distribution["days"],
         current_day=1,
         daily_time=req.daily_time,
         status=models.PlanStatus.ACTIVE,
@@ -273,13 +400,28 @@ async def create_pipeline_plan(
                 category_id=itm["category_id"],
                 scheduled_day=itm["scheduled_day"],
                 scheduled_date=itm["scheduled_date"],
-                status=models.QueueItemStatus.PENDING
+                status=models.QueueItemStatus.PENDING,
+                missing_attributes=itm["missing_attributes"]
             )
             queue_items.append(q_item)
 
     db.add_all(queue_items)
     db.commit()
     db.refresh(plan)
+
+    # Immediately trigger publish tick if Day 1 is due right now
+    now_utc = datetime.now(timezone.utc)
+    has_due_items = any(
+        itm.status == models.QueueItemStatus.PENDING and itm.scheduled_date <= now_utc
+        for itm in queue_items
+    )
+    if has_due_items:
+        try:
+            from tasks import process_scheduled_publish_tick
+            process_scheduled_publish_tick.apply_async()
+            logger.info(f"Triggered immediate publish tick for plan {plan.id} (Day 1 is due)")
+        except Exception as e:
+            logger.warning(f"Could not trigger immediate tick for plan {plan.id}: {e}")
 
     return {
         "success": True,
@@ -323,6 +465,9 @@ def list_pipeline_plans(
                 case((models.PublishQueueItem.status == models.QueueItemStatus.PUBLISHED, 1), else_=0)
             ).label("published"),
             func.sum(
+                case((models.PublishQueueItem.status == models.QueueItemStatus.PROCESSING, 1), else_=0)
+            ).label("processing"),
+            func.sum(
                 case((models.PublishQueueItem.status == models.QueueItemStatus.FAILED, 1), else_=0)
             ).label("failed"),
             func.sum(
@@ -334,14 +479,20 @@ def list_pipeline_plans(
         .all()
     )
     stats_by_plan: Dict[int, Dict[str, int]] = {
-        row.plan_id: {"published": int(row.published), "failed": int(row.failed), "pending": int(row.pending)}
+        row.plan_id: {
+            "published": int(row.published),
+            "processing": int(row.processing),
+            "failed": int(row.failed),
+            "pending": int(row.pending)
+        }
         for row in stats_rows
     }
 
     result = []
     for p in plans:
-        s = stats_by_plan.get(p.id, {"published": 0, "failed": 0, "pending": 0})
+        s = stats_by_plan.get(p.id, {"published": 0, "processing": 0, "failed": 0, "pending": 0})
         published_cnt = s["published"]
+        processing_cnt = s["processing"]
         failed_cnt = s["failed"]
         pending_cnt = s["pending"]
 
@@ -359,6 +510,7 @@ def list_pipeline_plans(
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "progress": {
                 "published": published_cnt,
+                "processing": processing_cnt,
                 "failed": failed_cnt,
                 "pending": pending_cnt,
                 "percentage": round((published_cnt / p.total_products * 100), 1) if p.total_products else 0
@@ -419,6 +571,106 @@ def get_plan_details(
     }
 
 
+@router.get("/plan/{plan_id}/items")
+def get_plan_items(
+    plan_id: int,
+    status: Optional[str] = Query(None, description="Filter by status: pending, published, failed"),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns full list of items/products in a publish plan, enriched with product details.
+    """
+    plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found.")
+
+    query = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.plan_id == plan_id)
+    if status:
+        query = query.filter(models.PublishQueueItem.status == status)
+
+    queue_items = query.order_by(models.PublishQueueItem.scheduled_day.asc(), models.PublishQueueItem.id.asc()).all()
+
+    eans = [it.product_ean for it in queue_items]
+    mappings = {}
+    if eans:
+        mapping_rows = db.query(models.ProductMapping).filter(
+            models.ProductMapping.product_ean.in_(eans),
+            models.ProductMapping.account_name == plan.account_name
+        ).all()
+        mappings = {m.product_ean: m for m in mapping_rows}
+
+    # Resolve category names
+    cat_ids = {it.category_id for it in queue_items if it.category_id}
+    from services.categories_service import resolve_category_names
+    cat_names = resolve_category_names(cat_ids, db)
+
+    items_result = []
+    for it in queue_items:
+        m = mappings.get(it.product_ean)
+        cat_display = cat_names.get(it.category_id, it.category_id)
+        prod_title = m.product_name if (m and m.product_name and m.product_name.strip() not in ("Без названия", "None", "null")) else None
+        prod_price = (m.price or m.price_af) if m else None
+        items_result.append({
+            "id": it.id,
+            "product_ean": it.product_ean,
+            "product_name": prod_title or "Без названия",
+            "image_url": m.image_url if m else None,
+            "price": prod_price,
+            "category_id": it.category_id,
+            "category_name": cat_display,
+            "scheduled_day": it.scheduled_day,
+            "scheduled_date": it.scheduled_date.isoformat() if it.scheduled_date else None,
+            "status": it.status.value if hasattr(it.status, "value") else str(it.status),
+            "attempts": it.attempts,
+            "error_message": it.error_message,
+            "missing_attributes": it.missing_attributes or [],
+            "published_at": it.published_at.isoformat() if it.published_at else None,
+        })
+
+    return {
+        "plan_id": plan.id,
+        "factory_id": plan.factory_id,
+        "factory_name": plan.factory_name,
+        "account_name": plan.account_name,
+        "total_items": len(items_result),
+        "items": items_result
+    }
+
+
+@router.post("/plan/{plan_id}/retry-failed")
+def retry_failed_items(plan_id: int, db: Session = Depends(get_db)):
+    """
+    Resets failed items back to pending and reactivates the plan if needed.
+    """
+    plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found.")
+
+    failed_items = (
+        db.query(models.PublishQueueItem)
+        .filter(
+            models.PublishQueueItem.plan_id == plan_id,
+            models.PublishQueueItem.status == models.QueueItemStatus.FAILED
+        )
+        .all()
+    )
+    if not failed_items:
+        return {"success": True, "message": "No failed items to retry.", "retried_count": 0}
+
+    now_utc = datetime.now(timezone.utc)
+    for it in failed_items:
+        it.status = models.QueueItemStatus.PENDING
+        it.error_message = None
+        if it.scheduled_date <= now_utc:
+            it.scheduled_date = now_utc
+
+    if plan.status in (models.PlanStatus.COMPLETED, models.PlanStatus.PAUSED):
+        plan.status = models.PlanStatus.ACTIVE
+
+    db.commit()
+    return {"success": True, "retried_count": len(failed_items)}
+
+
 @router.post("/plan/{plan_id}/pause")
 def pause_plan(plan_id: int, db: Session = Depends(get_db)):
     plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == plan_id).first()
@@ -460,16 +712,15 @@ def cancel_plan(plan_id: int, db: Session = Depends(get_db)):
 def trigger_plan_now(plan_id: int, db: Session = Depends(get_db)):
     """
     Immediately runs publish dispatch for pending items up to today without waiting for beat tick.
-    Uses .apply() so the task runs synchronously but within the Celery task context
-    (enables proper error logging, state tracking).
+    Dispatches asynchronously via Celery worker so the UI never blocks.
     """
     plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found.")
 
     from tasks import process_scheduled_publish_tick
-    result = process_scheduled_publish_tick.apply()
-    return {"success": True, "task_id": result.id, "result": result.get(timeout=30)}
+    task = process_scheduled_publish_tick.apply_async(kwargs={"target_plan_id": plan_id})
+    return {"success": True, "task_id": task.id, "status": "queued"}
 
 
 @router.post("/reconcile/{factory_id}")
@@ -488,4 +739,91 @@ async def reconcile_all_factories_endpoint():
     """
     res = await reconcile_all_factories()
     return res
+
+
+class RetryAvailabilityRequest(BaseModel):
+    eans: Optional[List[str]] = None
+    plan_id: Optional[int] = None
+    account_name: Optional[models.AccountType] = None
+
+
+@router.post("/retry-availability")
+def retry_availability_endpoint(
+    req: RetryAvailabilityRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Manual recovery endpoint to trigger Availability (Stock=20 and Shipping Profile)
+    sync for a given plan_id or list of EANs.
+    Batches items into chunks of 100 and triggers Celery tasks immediately (countdown=0).
+    """
+    from tasks import dispatch_otto_availability_batches
+
+    if not req.plan_id and not req.eans:
+        raise HTTPException(status_code=400, detail="Either plan_id or eans must be provided.")
+
+    if req.plan_id:
+        plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == req.plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail=f"Plan {req.plan_id} not found.")
+
+        query = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.plan_id == req.plan_id)
+        if req.account_name:
+            query = query.filter(models.PublishQueueItem.account_name == req.account_name)
+        items = query.all()
+        if not items:
+            raise HTTPException(status_code=404, detail=f"No items found for plan {req.plan_id}.")
+
+        acc_str = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+        dispatched = dispatch_otto_availability_batches(
+            item_ids=[it.id for it in items],
+            account_name=acc_str,
+            plan_id=plan.id,
+            base_countdown=0,
+            jitter_step=2,
+            force=True,
+        )
+        return {
+            "success": True,
+            "message": f"Dispatched {dispatched} availability batch(es) for plan {req.plan_id}.",
+            "dispatched_batches": dispatched,
+            "total_items": len(items),
+            "account_name": acc_str,
+        }
+
+    # eans branch
+    query = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.product_ean.in_(req.eans))
+    if req.account_name:
+        query = query.filter(models.PublishQueueItem.account_name == req.account_name)
+    items = query.all()
+    if not items:
+        raise HTTPException(
+            status_code=404,
+            detail="No publish queue items found matching the provided EANs."
+        )
+
+    # Group by account
+    from collections import defaultdict
+    items_by_acc = defaultdict(list)
+    for it in items:
+        acc_str = it.account_name.value if hasattr(it.account_name, "value") else str(it.account_name)
+        items_by_acc[acc_str].append(it)
+
+    total_dispatched = 0
+    for acc_str, acc_items in items_by_acc.items():
+        total_dispatched += dispatch_otto_availability_batches(
+            item_ids=[it.id for it in acc_items],
+            account_name=acc_str,
+            plan_id=acc_items[0].plan_id if acc_items else None,
+            base_countdown=0,
+            jitter_step=2,
+            force=True,
+        )
+
+    return {
+        "success": True,
+        "message": f"Dispatched {total_dispatched} availability batch(es) for {len(items)} items.",
+        "dispatched_batches": total_dispatched,
+        "total_items": len(items),
+    }
 
