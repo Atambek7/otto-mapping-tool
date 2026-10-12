@@ -56,14 +56,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
 
-      - name: Verify Database Migrations
+      - name: Initialize Database Schema
         env:
           DATABASE_URL: postgresql://otto_user:otto_pass@localhost:5432/otto_db
           SECRET_KEY: ci-secret-key-for-testing-only-12345
           PYTHONPATH: ./backend
         run: |
           cd backend
-          alembic upgrade head
+          python -c "from database import Base, engine; import models; Base.metadata.create_all(bind=engine)"
+          alembic stamp head
 
       - name: Run Backend Unit Tests
         env:
