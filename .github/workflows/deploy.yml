@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend-pre-deploy-check:
-    name: Pre-Deploy: Backend Tests & Migrations
+    name: "Pre-Deploy: Backend Tests & Migrations"
     runs-on: ubuntu-latest
 
     services:
@@ -74,7 +74,7 @@ jobs:
           python test_category_rules.py
 
   frontend-pre-deploy-check:
-    name: Pre-Deploy: Frontend Build & Typecheck
+    name: "Pre-Deploy: Frontend Build & Typecheck"
     runs-on: ubuntu-latest
 
     steps:
