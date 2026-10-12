@@ -58,20 +58,20 @@ jobs:
 
       - name: Initialize Database Schema
         env:
-          DATABASE_URL: postgresql://otto_user:otto_pass@localhost:5432/otto_db
+          DATABASE_URL: postgresql+psycopg2://otto_user:otto_pass@localhost:5432/otto_db
           SECRET_KEY: ci-secret-key-for-testing-only-12345
-          PYTHONPATH: ./backend
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           cd backend
-          python -c "from database import Base, engine; import models; Base.metadata.create_all(bind=engine)"
+          python scripts/ci_init_db.py
           alembic stamp head
 
       - name: Run Backend Unit Tests
         env:
-          DATABASE_URL: postgresql://otto_user:otto_pass@localhost:5432/otto_db
+          DATABASE_URL: postgresql+psycopg2://otto_user:otto_pass@localhost:5432/otto_db
           CELERY_BROKER_URL: redis://localhost:6379/0
           SECRET_KEY: ci-secret-key-for-testing-only-12345
-          PYTHONPATH: ./backend
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           cd backend
           python -m unittest discover tests
