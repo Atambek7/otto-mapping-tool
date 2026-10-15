@@ -3,6 +3,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
 from fastapi.responses import StreamingResponse, Response, FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 from database import get_db
@@ -28,6 +29,7 @@ from services.ai_title_generator import (
     is_valid_source_title,
     validate_title_type_consistency,
 )
+from services.queue_reconciliation import load_observations
 
 def is_same_category(cat1, cat2):
     if not cat1 or not cat2:
@@ -1109,11 +1111,43 @@ async def get_product_mapping(product_ean: str, account: str = None, db: Session
 
 @router.get("/factory/{factory_id}")
 async def get_factory_mappings(factory_id: str, account: str = None, db: Session = Depends(get_db)):
+    actual_account = account.upper() if account else None
     query = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
-    if account:
-        query = query.filter(models.ProductMapping.account_name == account.upper())
+    if actual_account:
+        query = query.filter(models.ProductMapping.account_name == actual_account)
     mappings = query.all()
     result = {}
+
+    # Project a confirmed remote product record separately from the original
+    # submission error. Check only the latest failed queue item per EAN for this
+    # account and factory, and never make a live OTTO request from this endpoint.
+    observations_by_ean = {}
+    mapping_eans = [m.product_ean for m in mappings if m.product_ean]
+    if actual_account and mapping_eans:
+        latest_failed_ids = (
+            db.query(func.max(models.PublishQueueItem.id).label("item_id"))
+            .join(models.PublishPlan, models.PublishQueueItem.plan_id == models.PublishPlan.id)
+            .filter(
+                models.PublishPlan.factory_id == factory_id,
+                models.PublishPlan.account_name == actual_account,
+                models.PublishQueueItem.account_name == actual_account,
+                models.PublishQueueItem.product_ean.in_(mapping_eans),
+                models.PublishQueueItem.status == models.QueueItemStatus.FAILED,
+            )
+            .group_by(models.PublishQueueItem.product_ean)
+            .subquery()
+        )
+        latest_failed_items = (
+            db.query(models.PublishQueueItem)
+            .join(latest_failed_ids, models.PublishQueueItem.id == latest_failed_ids.c.item_id)
+            .all()
+        )
+        observations = load_observations(actual_account, latest_failed_items)
+        observations_by_ean = {
+            item.product_ean: observations[item.id]
+            for item in latest_failed_items
+            if item.id in observations
+        }
     
     def _clean_price_val(v):
         if not v:
@@ -1150,7 +1184,9 @@ async def get_factory_mappings(factory_id: str, account: str = None, db: Session
             "price_af": clean_p_af,
             "missing_attributes": m.missing_attributes or [],
             "last_error": m.last_error,
-            "has_ai_title": has_ai
+            "has_ai_title": has_ai,
+            "otto_product_exists": m.product_ean in observations_by_ean,
+            "otto_checked_at": observations_by_ean.get(m.product_ean, {}).get("checked_at")
         }
     return result
 

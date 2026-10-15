@@ -489,12 +489,39 @@ def list_pipeline_plans(
         for row in stats_rows
     }
 
+    # The stored queue status remains the result of the submission attempt. For
+    # the live progress projection, subtract only failed items whose exact
+    # attempt has a matching, account-scoped read-only OTTO existence check.
+    active_plan_ids = [
+        p.id for p in plans
+        if p.status in (models.PlanStatus.ACTIVE, models.PlanStatus.PAUSED)
+    ]
+    existing_by_plan: Dict[int, int] = {}
+    if active_plan_ids:
+        failed_items = (
+            db.query(models.PublishQueueItem)
+            .filter(
+                models.PublishQueueItem.plan_id.in_(active_plan_ids),
+                models.PublishQueueItem.account_name == account_name,
+                models.PublishQueueItem.status == models.QueueItemStatus.FAILED,
+            )
+            .order_by(models.PublishQueueItem.id.asc())
+            .all()
+        )
+        account_value = account_name.value if hasattr(account_name, "value") else str(account_name)
+        observations = load_observations(account_value, failed_items)
+        for item in failed_items:
+            if item.id in observations:
+                existing_by_plan[item.plan_id] = existing_by_plan.get(item.plan_id, 0) + 1
+
     result = []
     for p in plans:
         s = stats_by_plan.get(p.id, {"published": 0, "processing": 0, "failed": 0, "pending": 0})
         published_cnt = s["published"]
         processing_cnt = s["processing"]
-        failed_cnt = s["failed"]
+        submission_failed_cnt = s["failed"]
+        existing_cnt = existing_by_plan.get(p.id, 0)
+        failed_cnt = max(0, submission_failed_cnt - existing_cnt)
         pending_cnt = s["pending"]
 
         result.append({
@@ -513,6 +540,8 @@ def list_pipeline_plans(
                 "published": published_cnt,
                 "processing": processing_cnt,
                 "failed": failed_cnt,
+                "submission_failed": submission_failed_cnt,
+                "existing": existing_cnt,
                 "pending": pending_cnt,
                 "percentage": round((published_cnt / p.total_products * 100), 1) if p.total_products else 0
             }
