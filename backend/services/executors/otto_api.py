@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 import models
 from .base import BasePublishExecutor
 from ..otto_client import OttoMarketClient
+from ..aftercool_service import parse_aftercool_product, parse_price, apply_aftercool_prices
 from ..otto_formatter import format_otto_product
 
 def parse_otto_error_payload(resp_data: Any) -> tuple[str, list[str]]:
@@ -337,7 +338,10 @@ class OttoApiExecutor(BasePublishExecutor):
                                 or p.get("kurzbeschreibung")
                                 or ""
                             )
+                            parsed = parse_aftercool_product(p, default_factory_id=str(plan.factory_id))
                             aftercool_product_map[ean] = {
+                                "price": str(parsed.price) if parsed and parsed.price is not None else None,
+                                "price_af": str(parsed.price_af) if parsed and parsed.price_af is not None else None,
                                 "images": pic_urls,
                                 "description": str(desc).strip(),
                                 "custom_item_specifics": str(cis).strip(),
@@ -413,7 +417,10 @@ class OttoApiExecutor(BasePublishExecutor):
                                     or p_s.get("kurzbeschreibung")
                                     or ""
                                 )
+                                parsed = parse_aftercool_product(p_s, default_factory_id=m_fid)
                                 aftercool_product_map[m_ean] = {
+                                    "price": str(parsed.price) if parsed and parsed.price is not None else None,
+                                    "price_af": str(parsed.price_af) if parsed and parsed.price_af is not None else None,
                                     "images": pic_urls_s,
                                     "description": str(desc_s).strip(),
                                     "custom_item_specifics": str(cis_s).strip(),
@@ -564,21 +571,18 @@ class OttoApiExecutor(BasePublishExecutor):
                 failed_count += 1
                 continue
 
-            # Resolve valid non-zero price (check both price and price_af)
-            prod_price = ""
-            for p_val in (m.price, m.price_af):
-                if not p_val:
-                    continue
-                clean_p = str(p_val).replace(",", ".").strip()
-                try:
-                    if float(clean_p) > 0:
-                        prod_price = clean_p
-                        break
-                except ValueError:
-                    pass
+            # Refresh from the already fetched Aftercool row before checking local data.
+            # A manually entered price always wins over automatic Aftercool values.
+            af_data = aftercool_product_map.get(item.product_ean, {})
+            # The user may have edited the price while external enrichment ran.
+            db.refresh(m, attribute_names=["price", "price_af", "has_manual_price"])
+            apply_aftercool_prices(m, af_data.get("price"), af_data.get("price_af"))
+            price = parse_price(m.price)
+            if price is None and not getattr(m, "has_manual_price", False):
+                price = parse_price(m.price_af)
+            prod_price = str(price) if price is not None else ""
 
             raw_attrs = attrs_by_ean.get(item.product_ean, {}).copy()
-            af_data = aftercool_product_map.get(item.product_ean, {})
 
             # 1. Product Description: resolve real description, not just product_name
             full_desc = (

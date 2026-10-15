@@ -207,7 +207,11 @@ def run_availability_sync(
 
                 # Check if price changed
                 price_changed = False
-                if new_price and old_price and str(new_price).replace(",", ".") != str(old_price).replace(",", "."):
+                if (
+                    new_price
+                    and not getattr(m, "has_manual_price", False)
+                    and str(new_price).replace(",", ".") != str(old_price).replace(",", ".")
+                ):
                     price_changed = True
                     m.price = new_price
                     summary["price_updated"] += 1

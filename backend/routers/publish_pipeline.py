@@ -12,6 +12,7 @@ import models
 from services.distribution import distribute_products_round_robin
 from services.categories_repo import get_category_by_id
 from services.factory_scope import get_authoritative_factory_eans
+from services.queue_reconciliation import load_observations
 from scripts.reconcile_factories import reconcile_all_factories
 
 logger = logging.getLogger("publish_pipeline")
@@ -604,6 +605,8 @@ def get_plan_items(
     from services.categories_service import resolve_category_names
     cat_names = resolve_category_names(cat_ids, db)
 
+    account = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+    observations = load_observations(account, queue_items)
     items_result = []
     for it in queue_items:
         m = mappings.get(it.product_ean)
@@ -622,6 +625,8 @@ def get_plan_items(
             "scheduled_date": it.scheduled_date.isoformat() if it.scheduled_date else None,
             "status": it.status.value if hasattr(it.status, "value") else str(it.status),
             "attempts": it.attempts,
+            "otto_product_exists": True if it.id in observations else None,
+            "otto_checked_at": observations.get(it.id, {}).get("checked_at"),
             "error_message": it.error_message,
             "missing_attributes": it.missing_attributes or [],
             "published_at": it.published_at.isoformat() if it.published_at else None,
@@ -654,8 +659,15 @@ def retry_failed_items(plan_id: int, db: Session = Depends(get_db)):
         )
         .all()
     )
+    account = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+    try:
+        observations = load_observations(account, failed_items, strict=True)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Не удалось проверить сохранённую сверку OTTO. Повторная отправка остановлена.")
+    # Existing cards must not be resent by a blanket retry of historical failures.
+    failed_items = [item for item in failed_items if item.id not in observations]
     if not failed_items:
-        return {"success": True, "message": "No failed items to retry.", "retried_count": 0}
+        return {"success": True, "message": "Нет ошибок для повторной отправки; найденные карточки OTTO пропущены.", "retried_count": 0}
 
     now_utc = datetime.now(timezone.utc)
     for it in failed_items:

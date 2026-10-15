@@ -46,6 +46,14 @@ class AftercoolProduct:
     raw_item: Dict[str, Any]
 
 
+def apply_aftercool_prices(mapping: Any, price: Optional[Decimal], price_af: Optional[Decimal]) -> None:
+    """Refresh automatic prices while preserving the user's explicit override."""
+    if not getattr(mapping, "has_manual_price", False) and price is not None:
+        mapping.price = str(price)
+    if price_af is not None:
+        mapping.price_af = str(price_af)
+
+
 def parse_price(val: Any) -> Optional[Decimal]:
     """
     Robust price parser supporting formats:
@@ -500,13 +508,7 @@ def sync_products_to_db(
 
                     # PRICE POLICY:
                     # Aftercool is authoritative source of truth, UNLESS user set a manual price
-                    if not getattr(m, "has_manual_price", False):
-                        if p.price is not None:
-                            m.price = str(p.price)
-                    
-                    # Original Afterbuy/Aftercool start price is always authoritative
-                    if p.price_af is not None:
-                        m.price_af = str(p.price_af)
+                    apply_aftercool_prices(m, p.price, p.price_af)
 
                     if p.image_url:
                         m.image_url = p.image_url

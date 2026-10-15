@@ -983,7 +983,7 @@ export default function FactoryWorkspace() {
                 batch.map(async (off) => {
                   try {
                     const r = await fetchWithAuth(
-                      `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=0`,
+                      `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=1`,
                       { signal }
                     );
                     if (!r.ok) return [];
@@ -1124,7 +1124,7 @@ export default function FactoryWorkspace() {
             batch.map(async (off) => {
               try {
                 const r = await fetchWithAuth(
-                  `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=0`
+                  `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=1`
                 );
                 if (!r.ok) return [];
                 const d = await r.json();
