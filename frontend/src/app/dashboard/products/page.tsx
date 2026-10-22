@@ -21,6 +21,8 @@ import { useAccount } from "@/lib/useAccount";
 import { useTranslation } from "react-i18next";
 import { ImageHoverPreview, HoverImagePreviewState } from "@/components/ImageHoverPreview";
 
+import { getAftercoolPrice } from "@/lib/prices";
+
 export default function ProductsPage() {
   const { account } = useAccount();
   const { t } = useTranslation();
@@ -56,16 +58,8 @@ export default function ProductsPage() {
 
   const getProductPrice = (row: any) => {
     if (!row) return "";
-    const parseVal = (val: any) => {
-      if (!val) return 0;
-      const clean = String(val).replace(",", ".");
-      const num = parseFloat(clean);
-      return isNaN(num) ? 0 : num;
-    };
-    const sofort = parseVal(row.SofortkaufenPreis);
-    const start = parseVal(row.Startpreis);
-    const finalPrice = sofort > 0 ? sofort : start;
-    return finalPrice > 0 ? `€${finalPrice.toFixed(2)}` : "";
+    const price = getAftercoolPrice(row);
+    return price ? `€${Number(price).toFixed(2)}` : "";
   };
 
   const handleSearch = async (e?: React.FormEvent) => {

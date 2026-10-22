@@ -4,6 +4,7 @@ import time
 import asyncio
 import logging
 import datetime
+import re
 from decimal import Decimal
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator, Union
@@ -48,6 +49,7 @@ class AftercoolProduct:
 
 def apply_aftercool_prices(mapping: Any, price: Optional[Decimal], price_af: Optional[Decimal]) -> None:
     """Refresh automatic prices while preserving the user's explicit override."""
+    price, price_af = parse_price(price), parse_price(price_af)
     if not getattr(mapping, "has_manual_price", False) and price is not None:
         mapping.price = str(price)
     if price_af is not None:
@@ -60,28 +62,33 @@ def parse_price(val: Any) -> Optional[Decimal]:
       '1.299,99 €', '1299,99', '1299.99', '1299', Decimal, float, int.
     Returns Decimal > 0 or None.
     """
-    if val is None:
+    if val is None or isinstance(val, bool):
         return None
     if isinstance(val, (int, float, Decimal)):
         try:
             d = Decimal(str(val))
-            return d if d > Decimal("0.0001") else None
+            return d if d.is_finite() and d > Decimal("0.0001") else None
         except Exception:
             return None
 
-    s = str(val).replace("€", "").replace("EUR", "").replace("eur", "").strip()
+    s = re.sub(r"\s+", "", re.sub(r"EUR|€", "", str(val), flags=re.IGNORECASE))
     if not s:
         return None
 
     # Handle standard German thousand separator '1.299,99' -> '1299.99'
     if "." in s and "," in s:
-        s = s.replace(".", "").replace(",", ".")
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
     elif "," in s:
         s = s.replace(",", ".")
 
+    if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", s):
+        return None
     try:
         clean = Decimal(s)
-        return clean if clean > Decimal("0.0001") else None
+        return clean if clean.is_finite() and clean > Decimal("0.0001") else None
     except Exception:
         return None
 
@@ -109,15 +116,16 @@ def parse_aftercool_product(item: Dict[str, Any], default_factory_id: str = "") 
     if not isinstance(item, dict):
         return None
 
-    row = item.get("row") or {}
+    row = item.get("row") if isinstance(item.get("row"), dict) else {}
     ean = str(item.get("ean") or row.get("EAN") or "").strip()
     if not ean or ean in ("—", "0", "-", "None"):
+        return None
+    if row.get("EAN") and str(row["EAN"]).strip() != ean:
         return None
 
     name = str(row.get("Artikelbeschreibung") or item.get("name") or "").strip()
     price_af = parse_price(row.get("Startpreis"))
-    sofort = parse_price(row.get("SofortkaufenPreis"))
-    price_otto = sofort if sofort is not None else price_af
+    # Startpreis is the only automatic selling-price source.
 
     image_url = normalize_image_url(row.get("PictureURLs") or row.get("PictureURL") or row.get("GalleryURL"))
     item_fid = str(item.get("factory_id") or default_factory_id or "").strip()
@@ -125,7 +133,7 @@ def parse_aftercool_product(item: Dict[str, Any], default_factory_id: str = "") 
     return AftercoolProduct(
         ean=ean,
         name=name,
-        price=price_otto,
+        price=price_af,
         price_af=price_af,
         image_url=image_url,
         factory_id=item_fid,
@@ -332,12 +340,14 @@ async def iter_products(
     dataset: str = "lister",
     page_size: int = 500,
     max_pages: int = 100,
-    dedup: bool = False
+    dedup: bool = False,
+    timeout: float = 45.0,
 ) -> AsyncGenerator[List[AftercoolProduct], None]:
     """
     Deterministic async generator that yields parsed AftercoolProduct batches page by page.
     Guarantees global deduplication across pages if dedup=True.
     """
+    page_size = min(max(1, page_size), 500)
     offset = 0
     seen_eans = set()
     pages_count = 0
@@ -351,15 +361,20 @@ async def iter_products(
             "limit": page_size,
             "offset": offset
         }
-        res = await request_aftercool("GET", "/api/products", params=params, timeout=45.0)
+        res = await request_aftercool("GET", "/api/products", params=params, timeout=timeout)
         if res.status_code != 200:
-            logger.error("iter_products failed on offset %s with HTTP %s: %s", offset, res.status_code, res.text[:200])
-            break
+            raise RuntimeError(f"Aftercool page at offset {offset}: HTTP {res.status_code}")
 
         data = res.json()
-        raw_items = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(raw_items, list) or len(raw_items) == 0:
-            break
+        raw_items = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(raw_items, list):
+            raise ValueError(f"Invalid Aftercool products page at offset {offset}")
+        total = data.get("total") if isinstance(data, dict) else None
+        total = int(total) if total is not None else None
+        if not raw_items:
+            if total is not None and offset < total:
+                raise RuntimeError(f"Incomplete Aftercool catalog: {offset} of {total} rows")
+            return
 
         batch: List[AftercoolProduct] = []
         for raw in raw_items:
@@ -375,11 +390,42 @@ async def iter_products(
         if batch:
             yield batch
 
-        if len(raw_items) < page_size:
-            break
-
-        offset += page_size
+        offset += len(raw_items)
         pages_count += 1
+        if total is not None:
+            if offset >= total:
+                return
+        elif len(raw_items) < page_size:
+            return
+
+    raise RuntimeError(f"Aftercool pagination limit reached at offset {offset}")
+
+
+async def fetch_aftercool_product(ean: str, factory_id: str, account: str) -> Optional[AftercoolProduct]:
+    """Fresh exact-EAN lookup, scoped to the factory's Aftercool source account."""
+    source = await asyncio.to_thread(resolve_aftercool_account, factory_id, account)
+    res = await request_aftercool("GET", "/api/products", params={
+        "factory_id": factory_id, "account": source, "dataset": "lister",
+        "q": str(ean).strip(), "limit": 500, "include_row": 1,
+    })
+    if res.status_code != 200:
+        raise RuntimeError(f"Aftercool product lookup: HTTP {res.status_code}")
+    data = res.json()
+    items = data.get("items") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("Invalid Aftercool product lookup response")
+    if isinstance(data, dict) and data.get("total") is not None and int(data["total"]) > len(items):
+        raise ValueError("Incomplete Aftercool product lookup; cannot establish a unique price")
+    matches = []
+    for item in items:
+        product = parse_aftercool_product(item, default_factory_id=factory_id)
+        if product and product.ean == str(ean).strip() and product.factory_id == str(factory_id).strip():
+            matches.append(product)
+    if len({(p.price, p.price_af) for p in matches}) > 1:
+        raise ValueError(f"Conflicting Aftercool prices for EAN {ean}; synchronization skipped")
+    if matches:
+        return matches[0]
+    return None
 
 
 # ==========================================
@@ -433,7 +479,8 @@ def sync_products_to_db(
     account: str,
     data: Union[dict, list, List[AftercoolProduct]],
     chunk_size: int = 500,
-    source_account: Optional[str] = None
+    source_account: Optional[str] = None,
+    excluded_price_eans: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Synchronizes product metadata from Aftercool to PostgreSQL with:
@@ -444,6 +491,8 @@ def sync_products_to_db(
       - Chunked batch processing preventing memory bloat
       - Structured logging instead of print
     """
+    from services.brand_guard import sanitize_brand_text, filter_brand_images_sync
+
     target_fid = str(factory_id or "").strip()
     acc_name = str(account or "JV").upper().strip()
 
@@ -467,6 +516,15 @@ def sync_products_to_db(
     if not parsed_products:
         return {"synced": 0, "created": 0, "updated": 0}
 
+    # Never choose a price by row order when an EAN has conflicting source rows.
+    price_signatures = {}
+    conflicts = set(excluded_price_eans or ())
+    for product in parsed_products:
+        signature = (product.price, product.price_af)
+        if product.ean in price_signatures and price_signatures[product.ean] != signature:
+            conflicts.add(product.ean)
+        price_signatures[product.ean] = signature
+
     db: Session = SessionLocal()
     now = datetime.datetime.utcnow()
     total_created = 0
@@ -483,13 +541,16 @@ def sync_products_to_db(
                 models.ProductMapping.product_ean.in_(chunk_eans),
                 models.ProductMapping.account_name == acc_name
             )
-            existing_map = {m.product_ean: m for m in query.all()}
+            existing_map = {m.product_ean: m for m in query.with_for_update().all()}
 
             new_mappings = []
             seen_chunk_eans = set()
 
             for p in chunk:
                 item_fid = p.factory_id or target_fid
+                clean_name = sanitize_brand_text(acc_name, p.name) if source_account else p.name
+                safe_images = filter_brand_images_sync(acc_name, [p.image_url]) if p.image_url else []
+                image_url = safe_images[0] if safe_images else None
                 m = existing_map.get(p.ean)
 
                 if m:
@@ -503,15 +564,16 @@ def sync_products_to_db(
                         m.source_account = source_account
 
                     # Base metadata update
-                    if p.name and p.name not in ("", "Без названия"):
-                        m.product_name = p.name
+                    if p.name and p.name not in ("", "Без названия") and not m.has_ai_title:
+                        m.product_name = clean_name
 
                     # PRICE POLICY:
                     # Aftercool is authoritative source of truth, UNLESS user set a manual price
-                    apply_aftercool_prices(m, p.price, p.price_af)
+                    if p.ean not in conflicts:
+                        apply_aftercool_prices(m, p.price, p.price_af)
 
-                    if p.image_url:
-                        m.image_url = p.image_url
+                    if image_url:
+                        m.image_url = image_url
 
                     m.last_synced_at = now
                     total_updated += 1
@@ -522,11 +584,11 @@ def sync_products_to_db(
                             factory_id=item_fid,
                             account_name=acc_name,
                             source_account=source_account,
-                            product_name=p.name or f"Product {p.ean}",
-                            price=str(p.price) if p.price is not None else None,
+                            product_name=clean_name or f"Product {p.ean}",
+                            price=str(p.price) if p.price is not None and p.ean not in conflicts else None,
                             has_manual_price=False,
-                            price_af=str(p.price_af) if p.price_af is not None else None,
-                            image_url=p.image_url,
+                            price_af=str(p.price_af) if p.price_af is not None and p.ean not in conflicts else None,
+                            image_url=image_url,
                             last_synced_at=now
                         )
                         new_mappings.append(new_m)
@@ -538,7 +600,8 @@ def sync_products_to_db(
 
             db.commit()
 
-        return {"synced": total_created + total_updated, "created": total_created, "updated": total_updated}
+        return {"synced": total_created + total_updated, "created": total_created, "updated": total_updated,
+                "price_conflicts": sorted(conflicts)}
 
     except Exception as exc:
         logger.exception("Failed to sync Aftercool products to DB for factory %s (%s): %s", target_fid, acc_name, exc)
@@ -573,9 +636,22 @@ async def force_sync_factory_metadata(
             fid_clean, src_account, acc_clean, aftercool_account
         )
 
+    conflicts = set()
+    signatures = {}
     try:
+        # Preflight price signatures across all pages before changing any prices.
+        # Store only EAN/Decimal pairs, never the full raw catalog in memory.
+        async for page in iter_products(factory_id=fid_clean, account=aftercool_account, dataset=dataset, page_size=500):
+            for product in page:
+                signature = (product.price, product.price_af)
+                if product.ean in signatures and signatures[product.ean] != signature:
+                    conflicts.add(product.ean)
+                signatures[product.ean] = signature
         async for product_page in iter_products(factory_id=fid_clean, account=aftercool_account, dataset=dataset, page_size=500):
             total_loaded += len(product_page)
+            for product in product_page:
+                if signatures.get(product.ean) != (product.price, product.price_af):
+                    conflicts.add(product.ean)
             # Run DB sync in thread pool to prevent blocking the async loop
             res = await asyncio.to_thread(
                 sync_products_to_db,
@@ -583,7 +659,8 @@ async def force_sync_factory_metadata(
                 acc_clean,
                 product_page,
                 500,
-                src_account
+                src_account,
+                conflicts,
             )
             total_synced += (res.get("created", 0) + res.get("updated", 0))
 
@@ -594,10 +671,15 @@ async def force_sync_factory_metadata(
         last_error = str(exc)
         logger.exception("Error in force_sync_factory_metadata for factory %s: %s", fid_clean, exc)
 
+    catalog_complete = last_error is None
+    if conflicts and not last_error:
+        last_error = f"Conflicting Aftercool prices for {len(conflicts)} EAN(s); their prices were not changed"
     status = "partial_error" if last_error else "ok"
     return {
         "status": status,
         "synced": total_synced,
         "total_loaded": total_loaded,
-        "error": last_error
+        "error": last_error,
+        "price_conflicts": sorted(conflicts),
+        "catalog_complete": catalog_complete,
     }

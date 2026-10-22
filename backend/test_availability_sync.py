@@ -134,13 +134,15 @@ class TestAvailabilitySync(unittest.TestCase):
             "4071489000001": {
                 "row": {
                     "Menge": "8",
-                    "SofortkaufenPreis": "129.99",
+                    "Startpreis": "129.99",
+                    "SofortkaufenPreis": "9999.99",
                 }
             },
             "4071489000002": {
                 "row": {
                     "Menge": "0",  # Out of stock
-                    "SofortkaufenPreis": "200.00",
+                    "Startpreis": "200.00",
+                    "SofortkaufenPreis": "8888.88",
                 }
             },
         }

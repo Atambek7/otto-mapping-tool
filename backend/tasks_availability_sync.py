@@ -1,8 +1,7 @@
-import os
 import time
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 from celery import shared_task
 from sqlalchemy.orm import Session
 
@@ -14,67 +13,34 @@ from services.otto_availability import DEFAULT_STOCK_QUANTITY, extract_stock_fro
 logger = logging.getLogger("tasks_availability_sync")
 
 
-def _is_pos(v: Any) -> bool:
-    try:
-        clean = str(v).replace("€", "").replace("EUR", "").replace(",", ".").strip()
-        return float(clean) > 0.0001
-    except (ValueError, TypeError):
-        return False
-
-
 async def fetch_aftercool_products_for_factory(
     factory_id: str,
     account: str,
-    limit: int = 5000,
+    limit: int = 500,
     timeout: float = 40.0,
+    target_eans: Optional[set[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """
-    Fetches raw products from Aftercool for a given factory and account.
-    Returns a dict mapping cleaned EAN -> product dict (including 'row').
-    """
-    import httpx
-    from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
-    from services.aftercool_service import resolve_aftercool_account
+    """Read all necessary pages; never return a partial result after a failed page."""
+    from services.aftercool_service import iter_products, resolve_aftercool_account
 
     if not factory_id:
         return {}
-
-    aftercool_acc = resolve_aftercool_account(str(factory_id).strip(), account)
-
-    session = await get_aftercool_session()
-    async with httpx.AsyncClient(cookies={"session": session}, timeout=timeout) as client:
-        params = {
-            "account": aftercool_acc,
-            "factory_id": str(factory_id).strip(),
-            "include_row": 1,
-            "limit": limit,
-            "offset": 0,
-        }
-        res = await client.get(f"{AFTERCOOL_BASE_URL}/api/products", params=params)
-        if res.status_code in (401, 403):
-            session = await get_aftercool_session(force_refresh=True)
-            res = await client.get(
-                f"{AFTERCOOL_BASE_URL}/api/products",
-                params=params,
-                cookies={"session": session},
-            )
-
-        if res.status_code != 200:
-            logger.warning(
-                f"[tasks_availability_sync] Aftercool API error {res.status_code} "
-                f"for factory {factory_id} ({account}): {res.text[:200]}"
-            )
-            return {}
-
-        data = res.json()
-        items = data.get("items", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        products_by_ean: Dict[str, Dict[str, Any]] = {}
-        for it in items:
-            row = it.get("row") if isinstance(it.get("row"), dict) else {}
-            ean = str(it.get("ean") or row.get("EAN") or "").strip()
-            if ean and ean not in ("—", "0", ""):
-                products_by_ean[ean] = it
-        return products_by_ean
+    source = await asyncio.to_thread(resolve_aftercool_account, factory_id, account)
+    result = {}
+    conflicts = set()
+    signatures = {}
+    async for page in iter_products(factory_id, account=source, dataset="lister",
+                                    page_size=min(limit, 500), timeout=timeout):
+        for product in page:
+            if target_eans is None or product.ean in target_eans:
+                signature = (product.price, product.price_af)
+                if product.ean in signatures and signatures[product.ean] != signature:
+                    conflicts.add(product.ean)
+                signatures[product.ean] = signature
+                result[product.ean] = product.raw_item
+    for ean in conflicts:
+        result[ean] = {"ean": ean, "price_conflict": True}
+    return result
 
 
 def run_availability_sync(
@@ -85,230 +51,148 @@ def run_availability_sync(
     filter_factory_id: Optional[str] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
+    """Sync OTTO quantities and LOCAL Aftercool prices for Published mappings.
+
+    Does not submit OTTO prices. Dry run performs no DB writes or OTTO calls.
+    Missing/failed Aftercool reads never produce fallback inventory updates.
     """
-    Core sync logic:
-    1. Finds all Published products grouped by (account_name, factory_id).
-    2. Fetches real stock and price from Aftercool.
-    3. Pushes updated quantities to OTTO Availability API.
-    4. Updates DB price if changed in Aftercool.
-    5. Logs every action in AvailabilitySyncLog.
-    """
-    should_close_db = False
-    if db is None:
+    from services.aftercool_service import apply_aftercool_prices, parse_aftercool_product, parse_price
+
+    own_db = db is None
+    if own_db:
         db = SessionLocal()
-        should_close_db = True
+    summary = {"dry_run": dry_run, "would_sync": 0, "total_published": 0, "factories_processed": 0, "synced_ok": 0,
+               "synced_failed": 0, "skipped": 0, "price_updated": 0,
+               "price_changes_detected": 0, "out_of_stock_detected": 0, "errors": [], "error_count": 0}
+    def record_error(message):
+        summary["error_count"] += 1
+        if len(summary["errors"]) < 100:
+            summary["errors"].append(message)
 
-    summary = {
-        "total_published": 0,
-        "factories_processed": 0,
-        "synced_ok": 0,
-        "synced_failed": 0,
-        "price_updated": 0,
-        "out_of_stock_detected": 0,
-        "errors": [],
-    }
-
+    max_items_per_call = min(max(1, max_items_per_call), 100)
     try:
-        # 1. Query published mappings
         query = db.query(models.ProductMapping).filter(models.ProductMapping.status == "Published")
         if filter_account:
-            acc_enum = getattr(models.AccountType, filter_account.upper(), filter_account)
-            query = query.filter(models.ProductMapping.account_name == acc_enum)
+            account = filter_account.strip().upper()
+            if account not in ("JV", "XL"):
+                raise ValueError("Account must be JV or XL")
+            query = query.filter(models.ProductMapping.account_name == account)
         if filter_factory_id:
             query = query.filter(models.ProductMapping.factory_id == str(filter_factory_id).strip())
-
-        published_mappings = query.all()
-        summary["total_published"] = len(published_mappings)
-        logger.info(f"[tasks_availability_sync] Found {len(published_mappings)} Published products to inspect.")
-
-        if not published_mappings:
-            return summary
-
-        # 2. Group by (account_name, factory_id)
-        grouped_mappings: Dict[Tuple[str, str], List[models.ProductMapping]] = {}
-        for m in published_mappings:
-            acc_val = m.account_name.value if hasattr(m.account_name, "value") else str(m.account_name)
-            fid_val = str(m.factory_id or "").strip()
-            grouped_mappings.setdefault((acc_val, fid_val), []).append(m)
-
-        for (acc_name, fid), mappings in grouped_mappings.items():
-            logger.info(
-                f"[tasks_availability_sync] Processing group {acc_name} / fid={fid} ({len(mappings)} items)..."
-            )
+        summary["total_published"] = query.count()
+        # Iterate one factory and at most 500 mappings/Aftercool matches at a time.
+        groups = query.with_entities(models.ProductMapping.account_name, models.ProductMapping.factory_id).distinct().all()
+        for account, fid in groups:
+            acc_name = account.value if hasattr(account, "value") else str(account)
             summary["factories_processed"] += 1
-
-            # 3. Get OTTO API credentials for this account
-            settings = (
-                db.query(models.AccountSettings)
-                .filter(models.AccountSettings.account_name == acc_name)
-                .first()
-            )
-            if not settings or not settings.otto_client_id or not settings.otto_client_secret:
-                err_msg = f"Missing OTTO API credentials for account {acc_name}"
-                logger.error(f"[tasks_availability_sync] {err_msg}")
-                summary["errors"].append(err_msg)
-                for m in mappings:
-                    log_entry = models.AvailabilitySyncLog(
-                        product_ean=m.product_ean,
-                        account_name=acc_name,
-                        factory_id=fid,
-                        sync_result="failed",
-                        error_message=err_msg,
-                    )
-                    db.add(log_entry)
+            factory_query = query.filter(models.ProductMapping.account_name == account,
+                                         models.ProductMapping.factory_id == fid)
+            client = None
+            if not dry_run:
+                settings = db.query(models.AccountSettings).filter_by(account_name=acc_name).first()
+                if not settings or not settings.otto_client_id or not settings.otto_client_secret:
+                    record_error(f"Missing OTTO API credentials for {acc_name}")
+                    summary["synced_failed"] += factory_query.count()
+                    continue
+                client = OttoMarketClient(settings.otto_client_id, settings.otto_client_secret)
+            last_id = 0
+            while True:
+                mappings = factory_query.filter(models.ProductMapping.id > last_id).order_by(models.ProductMapping.id).limit(500).all()
+                if not mappings:
+                    break
+                last_id = mappings[-1].id
+                eans = {m.product_ean for m in mappings}
+                try:
+                    if not fid:
+                        raise ValueError("Factory ID is missing")
+                    products = asyncio.run(fetch_aftercool_products_for_factory(str(fid), acc_name, target_eans=eans))
+                except Exception as exc:
+                    record_error(f"Aftercool {acc_name}/{fid}: {exc}")
+                    summary["synced_failed"] += len(mappings)
+                    # Close the read transaction before the next group/batch.
+                    if not dry_run:
+                        db.rollback()
+                        for ean in eans:
+                            db.add(models.AvailabilitySyncLog(
+                                product_ean=ean, account_name=acc_name, factory_id=fid,
+                                sync_result="failed", error_message=f"Aftercool read failed: {exc}",
+                            ))
+                        db.commit()
+                    continue
+                # Re-read under lock AFTER the network read so concurrent manual edits win.
+                if not dry_run:
+                    mappings = factory_query.filter(models.ProductMapping.product_ean.in_(eans)).populate_existing().with_for_update().all()
+                payload = []
+                sync_data = {}
+                for mapping in mappings:
+                    item = products.get(mapping.product_ean)
+                    product = parse_aftercool_product({"ean": mapping.product_ean, **item}, str(fid)) if item else None
+                    if item and item.get("price_conflict"):
+                        summary["skipped"] += 1
+                        record_error(f"Conflicting Aftercool prices: {acc_name}/{mapping.product_ean}")
+                        if not dry_run:
+                            db.add(models.AvailabilitySyncLog(
+                                product_ean=mapping.product_ean, account_name=acc_name, factory_id=fid,
+                                sync_result="skipped", error_message="Conflicting Aftercool prices; no OTTO update sent",
+                            ))
+                        continue
+                    if not product or product.ean != mapping.product_ean:
+                        summary["skipped"] += 1
+                        record_error(f"Aftercool product missing: {acc_name}/{mapping.product_ean}")
+                        if not dry_run:
+                            db.add(models.AvailabilitySyncLog(
+                                product_ean=mapping.product_ean, account_name=acc_name, factory_id=fid,
+                                sync_result="skipped", error_message="Product not found in Aftercool factory; no OTTO update sent",
+                            ))
+                        continue
+                    stock = extract_stock_from_aftercool_item(item)
+                    stock = DEFAULT_STOCK_QUANTITY if stock is None else stock
+                    summary["out_of_stock_detected"] += int(stock == 0)
+                    old_price = mapping.price
+                    changed = (not mapping.has_manual_price and product.price is not None
+                               and parse_price(mapping.price) != product.price)
+                    summary["price_changes_detected"] += int(changed)
+                    if not dry_run:
+                        apply_aftercool_prices(mapping, product.price, product.price_af)
+                        summary["price_updated"] += int(changed)
+                    sync_data[mapping.product_ean] = {
+                        "old_price": old_price,
+                        "new_price": str(product.price) if changed else old_price,
+                    }
+                    payload.append({"sku": mapping.product_ean, "quantity": stock})
+                if dry_run:
+                    summary["would_sync"] += len(payload)
+                    continue
+                # Release price locks before calling the external service.
                 db.commit()
-                continue
-
-            otto_client = OttoMarketClient(
-                client_id=settings.otto_client_id,
-                client_secret=settings.otto_client_secret,
-                account_name=acc_name,
-                partner_id=settings.otto_partner_id,
-            )
-
-            # 4. Fetch Aftercool products for this factory
-            af_products: Dict[str, Dict[str, Any]] = {}
-            if fid:
-                try:
-                    af_products = asyncio.run(fetch_aftercool_products_for_factory(fid, acc_name))
-                except Exception as af_err:
-                    logger.warning(
-                        f"[tasks_availability_sync] Failed to fetch Aftercool products for {fid}: {af_err}"
-                    )
-
-            # 5. Build quantities update payload and detect price changes
-            qty_payload_all: List[Dict[str, Any]] = []
-            item_sync_data: Dict[str, Dict[str, Any]] = {}
-
-            for m in mappings:
-                ean = str(m.product_ean).strip()
-                af_item = af_products.get(ean)
-
-                # Real stock determination
-                new_stock = DEFAULT_STOCK_QUANTITY
-                if af_item:
-                    extracted_stock = extract_stock_from_aftercool_item(af_item)
-                    if extracted_stock is not None:
-                        new_stock = extracted_stock
-
-                if new_stock == 0:
-                    summary["out_of_stock_detected"] += 1
-
-                # Price inspection
-                old_price = m.price
-                new_price = None
-                if af_item:
-                    row = af_item.get("row") if isinstance(af_item.get("row"), dict) else {}
-                    sofort = str(row.get("SofortkaufenPreis") or "").strip()
-                    start = str(row.get("Startpreis") or "").strip()
-                    candidate_price = sofort if _is_pos(sofort) else (start if _is_pos(start) else None)
-                    if candidate_price and _is_pos(candidate_price):
-                        new_price = candidate_price
-
-                # Check if price changed
-                price_changed = False
-                if (
-                    new_price
-                    and not getattr(m, "has_manual_price", False)
-                    and str(new_price).replace(",", ".") != str(old_price).replace(",", ".")
-                ):
-                    price_changed = True
-                    m.price = new_price
-                    summary["price_updated"] += 1
-                    logger.info(
-                        f"[tasks_availability_sync] Price update for EAN {ean} ({acc_name}): {old_price} -> {new_price}"
-                    )
-
-                item_sync_data[ean] = {
-                    "mapping": m,
-                    "new_stock": new_stock,
-                    "old_stock": None,  # Not tracked in mapping previously
-                    "old_price": old_price,
-                    "new_price": new_price or old_price,
-                    "price_changed": price_changed,
-                }
-                qty_payload_all.append({"sku": ean, "quantity": new_stock})
-
-            if dry_run:
-                logger.info(
-                    f"[tasks_availability_sync] DRY-RUN: Prepared {len(qty_payload_all)} quantity items for {acc_name}/{fid}"
-                )
-                summary["synced_ok"] += len(qty_payload_all)
-                continue
-
-            # 6. Push quantities to OTTO API in chunks of max_items_per_call
-            for i in range(0, len(qty_payload_all), max_items_per_call):
-                chunk = qty_payload_all[i : i + max_items_per_call]
-                logger.info(
-                    f"[tasks_availability_sync] Sending batch of {len(chunk)} items to Otto Availability API ({acc_name})..."
-                )
-                try:
-                    resp = otto_client.update_quantities(chunk)
-                    status_code = resp.get("status_code", 0)
-                    is_ok = status_code in (200, 204)
-
-                    if is_ok:
-                        summary["synced_ok"] += len(chunk)
-                        logger.info(
-                            f"[tasks_availability_sync] Batch of {len(chunk)} successfully synced to Otto ({acc_name})."
-                        )
-                    else:
-                        summary["synced_failed"] += len(chunk)
-                        logger.error(
-                            f"[tasks_availability_sync] Otto API error {status_code} for batch: {resp.get('error') or resp.get('response')}"
-                        )
-
+                for offset in range(0, len(payload), max_items_per_call):
+                    chunk = payload[offset:offset + max_items_per_call]
+                    try:
+                        response = client.update_quantities(chunk)
+                        ok = response.get("status_code") in (200, 204)
+                        error = None if ok else str(response.get("error") or response.get("response") or response.get("status_code"))
+                    except Exception as exc:
+                        ok, error = False, str(exc)
+                    summary["synced_ok" if ok else "synced_failed"] += len(chunk)
+                    if not ok:
+                        record_error(f"OTTO quantities {acc_name}/{fid}: {error}")
                     for item in chunk:
-                        c_ean = item["sku"]
-                        data_ref = item_sync_data.get(c_ean, {})
-                        log_entry = models.AvailabilitySyncLog(
-                            product_ean=c_ean,
-                            account_name=acc_name,
-                            factory_id=fid,
-                            old_stock=data_ref.get("old_stock"),
-                            new_stock=item["quantity"],
-                            old_price=data_ref.get("old_price"),
-                            new_price=data_ref.get("new_price"),
-                            sync_result="ok" if is_ok else "failed",
-                            error_message=None if is_ok else str(resp.get("error") or resp.get("response")),
-                        )
-                        db.add(log_entry)
-
-                except Exception as api_exc:
-                    summary["synced_failed"] += len(chunk)
-                    logger.error(f"[tasks_availability_sync] Exception calling update_quantities: {api_exc}")
-                    for item in chunk:
-                        c_ean = item["sku"]
-                        data_ref = item_sync_data.get(c_ean, {})
-                        log_entry = models.AvailabilitySyncLog(
-                            product_ean=c_ean,
-                            account_name=acc_name,
-                            factory_id=fid,
-                            old_stock=data_ref.get("old_stock"),
-                            new_stock=item["quantity"],
-                            old_price=data_ref.get("old_price"),
-                            new_price=data_ref.get("new_price"),
-                            sync_result="failed",
-                            error_message=str(api_exc),
-                        )
-                        db.add(log_entry)
-
-            db.commit()
-
-            # Small delay between factories
-            if batch_delay_sec > 0:
-                time.sleep(batch_delay_sec)
-
-    except Exception as e:
-        logger.error(f"[tasks_availability_sync] Unhandled error during sync: {e}", exc_info=True)
-        summary["errors"].append(str(e))
-        if db:
+                        db.add(models.AvailabilitySyncLog(
+                            product_ean=item["sku"], account_name=acc_name, factory_id=fid,
+                            new_stock=item["quantity"], sync_result="ok" if ok else "failed",
+                            error_message=error, **sync_data[item["sku"]],
+                        ))
+                    db.commit()
+                    if batch_delay_sec > 0:
+                        time.sleep(batch_delay_sec)
+    except Exception as exc:
+        logger.exception("Availability sync failed")
+        record_error(str(exc))
+        if not dry_run:
             db.rollback()
     finally:
-        if should_close_db and db:
+        if own_db:
             db.close()
-
-    logger.info(f"[tasks_availability_sync] Completed availability sync: {summary}")
     return summary
 
 
@@ -321,8 +205,8 @@ def sync_published_availability(
     filter_factory_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Celery periodic task to keep Published products stock quantity and prices
-    continuously synchronized between Aftercool and OTTO Market.
+    Periodic OTTO stock synchronization and local Aftercool price refresh.
+    Does not update OTTO selling prices.
     """
     logger.info("[tasks_availability_sync.sync_published_availability] Celery task triggered.")
     return run_availability_sync(

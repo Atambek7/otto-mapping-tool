@@ -721,14 +721,9 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
             if isinstance(pd, dict) and pd.get("ean"):
                 row_dict[str(pd["ean"])] = pd.get("row")
 
-    acc = req.account or "JV"
-    if acc == "JV":
-        xl_m = db.query(models.ProductMapping).filter(
-            models.ProductMapping.product_ean.in_(req.product_eans),
-            models.ProductMapping.account_name == "XL"
-        ).first()
-        if xl_m:
-            acc = "XL"
+    acc = str(req.account or "JV").strip().upper()
+    if acc not in ("JV", "XL"):
+        raise HTTPException(status_code=400, detail="Account must be JV or XL")
 
     from services.okb_sync import sync_product_data
     sem = asyncio.Semaphore(5)
@@ -743,11 +738,11 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
     results = await asyncio.gather(*(process(ean) for ean in req.product_eans))
     
     # Pre-fetch existing mappings
-    eans = [r["ean"] for r in results if r.get("status") == "success"]
+    eans = [r["ean"] for r in results if r.get("status") in ("success", "unresolved")]
     existing_mappings = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean.in_(eans),
         models.ProductMapping.account_name == acc
-    ).all()
+    ).with_for_update().all()
     mapping_dict = {m.product_ean: m for m in existing_mappings}
     
     # Fetch existing attributes to avoid duplicates
@@ -761,13 +756,13 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
 
     from services.validator import validate_product
 
+    from services.aftercool_service import apply_aftercool_prices
+
     for res in results:
-        if res.get("status") == "success":
+        if res.get("status") in ("success", "unresolved"):
             ean = res["ean"]
             cat_id = res.get("category_id")
             attributes = res.get("attributes", {})
-            
-            # Update mapping
             db_mapping = mapping_dict.get(ean)
             if not db_mapping:
                 db_mapping = models.ProductMapping(
@@ -775,7 +770,25 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
                 )
                 db.add(db_mapping)
                 mapping_dict[ean] = db_mapping
-                
+
+            metadata = res.get("metadata") or {}
+            apply_aftercool_prices(db_mapping, metadata.get("price"), metadata.get("price_af"))
+            if metadata.get("product_name") and not db_mapping.has_ai_title:
+                from services.brand_guard import sanitize_brand_text
+                db_mapping.product_name = sanitize_brand_text(acc, metadata["product_name"])
+            if metadata.get("image_url"):
+                from services.brand_guard import filter_brand_images_sync
+                images = filter_brand_images_sync(acc, [metadata["image_url"]])
+                if images:
+                    db_mapping.image_url = images[0]
+            if metadata:
+                db_mapping.last_synced_at = datetime.datetime.now(datetime.timezone.utc)
+            res["price"] = db_mapping.price
+            res["has_manual_price"] = bool(db_mapping.has_manual_price)
+            if res.get("status") == "unresolved":
+                continue
+
+            category_changed = bool(cat_id and cat_id != db_mapping.category_id)
             if cat_id:
                 db_mapping.category_id = cat_id
 
@@ -804,7 +817,17 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
                 synced_keys = set(attributes.keys())
                 db_mapping.ai_attributes = [a for a in db_mapping.ai_attributes if a not in synced_keys]
                     
-            errors = validate_product(ean, db_mapping.category_id, attributes)
+            # Remove attributes from the old schema when the category changes.
+            if category_changed:
+                allowed = get_allowed_attribute_names(cat_id)
+                for key, attr in list(attrs_orm_dict.get(ean, {}).items()):
+                    if allowed is not None and key not in allowed and not key.startswith("Bullet Point "):
+                        db.delete(attr)
+                        del attrs_orm_dict[ean][key]
+            all_attributes = {k: a.attribute_value for k, a in attrs_orm_dict.get(ean, {}).items()}
+            all_attributes.update(attributes)
+            errors = validate_product(ean, db_mapping.category_id, all_attributes)
+            db_mapping.missing_attributes = errors
             # Status protection: do not downgrade Published status
             if (db_mapping.status or "").lower() != "published":
                 db_mapping.status = "Error" if errors else "Ready"
@@ -1079,20 +1102,9 @@ async def get_product_mapping(product_ean: str, account: str = None, db: Session
     cat = get_category_by_id(mapping.category_id)
     cat_name = cat.get("name", mapping.category_id) if cat else mapping.category_id
 
-    def _clean_price_val(v):
-        if not v:
-            return None
-        c = str(v).replace("€", "").replace("EUR", "").replace("eur", "").replace(" ", "").replace(",", ".").strip()
-        try:
-            f = float(c)
-            if f > 0.0001:
-                return str(int(f)) if f.is_integer() else f"{f:.2f}"
-        except (ValueError, TypeError):
-            pass
-        return None
-
-    clean_p = _clean_price_val(mapping.price)
-    clean_p_af = _clean_price_val(mapping.price_af)
+    from services.aftercool_service import parse_price
+    clean_p = parse_price(mapping.price)
+    clean_p_af = parse_price(mapping.price_af)
     clean_p_name = mapping.product_name if (mapping.product_name and mapping.product_name.strip() not in ("Без названия", "None", "null")) else None
 
     return {
@@ -1105,8 +1117,9 @@ async def get_product_mapping(product_ean: str, account: str = None, db: Session
         "status": mapping.status,
         "account": actual_account,
         "product_name": clean_p_name,
-        "price": clean_p or clean_p_af,
-        "price_af": clean_p_af
+        "price": str(clean_p) if clean_p is not None else str(clean_p_af) if clean_p_af is not None and not mapping.has_manual_price else None,
+        "price_af": str(clean_p_af) if clean_p_af is not None else None,
+        "has_manual_price": bool(mapping.has_manual_price)
     }
 
 @router.get("/factory/{factory_id}")
@@ -1300,19 +1313,13 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
         updated_fields.append("product_name")
 
     if req.price is not None:
-        raw_price = str(req.price).replace("€", "").replace("EUR", "").replace("eur", "").strip()
-        raw_price = raw_price.replace(",", ".")
-        try:
-            num_price = float(raw_price)
-            if num_price <= 0:
-                raise ValueError("Price must be greater than 0")
-            # Preserve exact manual price entered by user: integer (1500) remains 1500, decimals formatted to 2 decimal places
-            clean_price_str = str(int(num_price)) if num_price.is_integer() else f"{num_price:.2f}"
-            db_mapping.price = clean_price_str
-            db_mapping.has_manual_price = True
-            updated_fields.append("price")
-        except (ValueError, TypeError):
+        from services.aftercool_service import parse_price
+        price = parse_price(req.price)
+        if price is None:
             raise HTTPException(status_code=400, detail="Некорректный формат цены. Укажите число больше 0 (например, 1299 или 1299.99)")
+        db_mapping.price = str(int(price)) if price == price.to_integral_value() else f"{price:.2f}"
+        db_mapping.has_manual_price = True
+        updated_fields.append("price")
 
     db_mapping.last_synced_at = datetime.datetime.utcnow()
     db.commit()

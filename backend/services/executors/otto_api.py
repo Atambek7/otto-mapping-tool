@@ -267,6 +267,7 @@ class OttoApiExecutor(BasePublishExecutor):
 
         # Fetch extra product details (all images, description) from Aftercool
         aftercool_product_map = {}
+        price_conflicts = set()
         try:
             from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
             from ..aftercool_service import resolve_aftercool_account
@@ -294,7 +295,8 @@ class OttoApiExecutor(BasePublishExecutor):
 
                     offset = 0
                     limit = 500
-                    while True:
+                    catalog_complete = False
+                    while offset < 50000:
                         params = {
                             "factory_id": str(plan.factory_id).strip(),
                             "account": aftercool_acc,
@@ -308,12 +310,16 @@ class OttoApiExecutor(BasePublishExecutor):
                             break
                         data = res.json()
                         items_list = data.get("items", data) if isinstance(data, dict) else data
-                        if not isinstance(items_list, list) or not items_list:
+                        if not isinstance(items_list, list):
+                            break
+                        if not items_list:
+                            total = data.get("total") if isinstance(data, dict) else None
+                            catalog_complete = total is None or offset >= int(total)
                             break
                         for p in items_list:
                             row = p.get("row", {})
                             ean = str(p.get("ean") or row.get("EAN") or "").strip()
-                            if not ean:
+                            if ean not in mapping_by_ean:
                                 continue
 
                             pic_urls = extract_images_from_aftercool_row(row, p, account=account_name_str)
@@ -339,6 +345,11 @@ class OttoApiExecutor(BasePublishExecutor):
                                 or ""
                             )
                             parsed = parse_aftercool_product(p, default_factory_id=str(plan.factory_id))
+                            previous = aftercool_product_map.get(ean)
+                            if previous and parsed and (
+                                parse_price(previous.get("price")), parse_price(previous.get("price_af"))
+                            ) != (parsed.price, parsed.price_af):
+                                price_conflicts.add(ean)
                             aftercool_product_map[ean] = {
                                 "price": str(parsed.price) if parsed and parsed.price is not None else None,
                                 "price_af": str(parsed.price_af) if parsed and parsed.price_af is not None else None,
@@ -351,49 +362,34 @@ class OttoApiExecutor(BasePublishExecutor):
 
                         offset += len(items_list)
                         total = data.get("total") if isinstance(data, dict) else None
-                        if total is not None and offset >= total:
+                        if total is not None and offset >= int(total):
+                            catalog_complete = True
                             break
-                        if len(items_list) < limit:
+                        if total is None and len(items_list) < limit:
+                            catalog_complete = True
                             break
+
+                    if not catalog_complete:
+                        # A partial catalog cannot establish that duplicate prices
+                        # do not exist on unseen pages. Recheck each target exactly.
+                        aftercool_product_map.clear()
+                        price_conflicts.clear()
 
                     # Fallback for any EANs in batch not found in the factory batch
                     missing_eans = [e for e in eans if e not in aftercool_product_map]
                     for m_ean in missing_eans:
                         m_rec = mapping_by_ean.get(m_ean)
                         m_fid = m_rec.factory_id if m_rec else str(plan.factory_id).strip()
-                        m_acc = (
-                            m_rec.source_account
-                            if (m_rec and m_rec.source_account)
-                            else resolve_aftercool_account(m_fid, account_name_str, db=db)
-                        )
                         try:
-                            s_items = []
-                            res_s = await safe_get(
-                                f"{AFTERCOOL_BASE_URL}/api/products/by-ean",
-                                params={"account": m_acc, "ean": m_ean, "dataset": "lister", "limit": 1}
-                            )
-                            if res_s and res_s.status_code == 200:
-                                s_data = res_s.json()
-                                s_items = s_data.get("items", []) if isinstance(s_data, dict) else s_data
-
-                            # Secondary fallback to search query if by-ean didn't return items
-                            if not s_items:
-                                res_q = await safe_get(
-                                    f"{AFTERCOOL_BASE_URL}/api/products",
-                                    params={"q": m_ean, "account": m_acc, "dataset": "lister", "include_row": 1, "limit": 5}
-                                )
-                                if res_q and res_q.status_code == 200:
-                                    q_data = res_q.json()
-                                    q_items = q_data.get("items", []) if isinstance(q_data, dict) else q_data
-                                    for qi in q_items:
-                                        qi_row = qi.get("row", {})
-                                        qi_ean = str(qi.get("ean") or qi_row.get("EAN") or "").strip()
-                                        if qi_ean == m_ean:
-                                            s_items = [qi]
-                                            break
+                            from services.aftercool_service import fetch_aftercool_product
+                            exact = await fetch_aftercool_product(m_ean, m_fid, account_name_str)
+                            s_items = [exact.raw_item] if exact else []
 
                             if s_items:
                                 p_s = s_items[0]
+                                parsed_source = parse_aftercool_product(p_s, default_factory_id=m_fid)
+                                if not parsed_source or parsed_source.ean != m_ean:
+                                    continue
                                 row_s = p_s.get("row", {})
                                 cis_s = (
                                     row_s.get("CustomItemSpecifics")
@@ -575,7 +571,19 @@ class OttoApiExecutor(BasePublishExecutor):
             # A manually entered price always wins over automatic Aftercool values.
             af_data = aftercool_product_map.get(item.product_ean, {})
             # The user may have edited the price while external enrichment ran.
-            db.refresh(m, attribute_names=["price", "price_af", "has_manual_price"])
+            db.refresh(m, attribute_names=["price", "price_af", "has_manual_price"], with_for_update=True)
+            if not m.has_manual_price and (item.product_ean in price_conflicts or parse_price(af_data.get("price")) is None):
+                item.status = models.QueueItemStatus.FAILED
+                item.attempts += 1
+                item.error_message = (
+                    "В Aftercool несколько разных цен для этого EAN. Публикация отменена."
+                    if item.product_ean in price_conflicts else
+                    "Не получена однозначная актуальная цена Aftercool. Публикация отменена; проверьте источник."
+                )
+                m.status = "Error"
+                m.last_error = item.error_message
+                failed_count += 1
+                continue
             apply_aftercool_prices(m, af_data.get("price"), af_data.get("price_af"))
             price = parse_price(m.price)
             if price is None and not getattr(m, "has_manual_price", False):

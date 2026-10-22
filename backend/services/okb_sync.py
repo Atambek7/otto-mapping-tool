@@ -834,63 +834,10 @@ async def fetch_product_from_aftercool(
     factory_id: str,
     account: str,
 ) -> Optional[dict]:
-    from routers.aftercool import AFTERCOOL_BASE_URL, get_aftercool_session
+    from services.aftercool_service import fetch_aftercool_product
 
-    client = await get_http_client()
-
-    try:
-        session = await get_aftercool_session()
-        params = {
-            "factory_id": factory_id,
-            "account": account,
-            "dataset": "lister",
-            "q": ean,
-            "limit": 1,
-            "include_row": 1,
-        }
-
-        response = await client.get(
-            f"{AFTERCOOL_BASE_URL}/api/products",
-            params=params,
-            cookies={"session": session},
-        )
-
-        if response.status_code in (401, 403):
-            session = await get_aftercool_session(force_refresh=True)
-            response = await client.get(
-                f"{AFTERCOOL_BASE_URL}/api/products",
-                params=params,
-                cookies={"session": session},
-            )
-
-        response.raise_for_status()
-
-        data = response.json()
-        items = data.get("items", data) if isinstance(data, dict) else data
-        if not isinstance(items, list) or not items:
-            return None
-
-        first_item = items[0]
-        if not isinstance(first_item, dict):
-            return None
-
-        row = first_item.get("row")
-        return row if isinstance(row, dict) else None
-
-    except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "Aftercool returned HTTP %s for %s",
-            exc.response.status_code,
-            ean,
-        )
-    except httpx.HTTPError as exc:
-        logger.warning("HTTP error fetching %s from Aftercool: %s", ean, exc)
-    except (ValueError, json.JSONDecodeError) as exc:
-        logger.warning("Invalid JSON from Aftercool for %s: %s", ean, exc)
-    except Exception:
-        logger.exception("Unexpected error fetching %s from Aftercool", ean)
-
-    return None
+    product = await fetch_aftercool_product(ean, factory_id, account)
+    return product.raw_item.get("row") if product else None
 
 
 # ---------------------------------------------------------------------------
@@ -980,51 +927,52 @@ async def sync_product_data(
     Sync one product from OKB and Aftercool.
 
     Contract:
-      - OKB + Aftercool are fetched concurrently when Aftercool row is absent.
-      - Category is resolved independently from both sources.
-      - OKB category takes precedence only after successful resolution.
-      - Aftercool attributes are the base; OKB attributes override matching keys.
+      - Fresh OKB + Aftercool data are fetched concurrently.
+      - Aftercool category and attributes take precedence.
+      - OKB fills compatible gaps; prices come exclusively from Aftercool.
       - source reflects whether each upstream actually returned product data.
     """
 
-    # When row is pre-provided, we only need OKB remotely.
-    if not row:
+    # Client rows may come from a stale browser cache. Explicit synchronization
+    # always reads Aftercool afresh and never falls back to old client prices.
+    try:
         okb_data, aftercool_row = await asyncio.gather(
             fetch_product_from_okb(ean),
             fetch_product_from_aftercool(ean, factory_id, account),
         )
-    else:
-        okb_data = await fetch_product_from_okb(ean)
-        aftercool_row = row
+    except Exception:
+        logger.exception("Aftercool sync failed for %s (%s)", ean, account)
+        return {"ean": ean, "status": "error", "message": "Aftercool could not be read; synchronization was not applied"}
 
-    # Extract normalized pieces from both sources.
+    # OKB must match the requested product as well.
+    if okb_data and any(str(okb_data.get(k)).strip() != str(ean).strip()
+                        for k in ("sku", "ean") if okb_data.get(k)):
+        okb_data = None
+
     okb_category_id, okb_category_name, okb_attributes = _extract_okb_data(okb_data)
     ac_category_id, ac_category_name, ac_attributes = _extract_aftercool_data(aftercool_row)
-
     okb_found = isinstance(okb_data, dict)
     aftercool_found = isinstance(aftercool_row, dict) and bool(aftercool_row)
 
     if not okb_found and not aftercool_found:
-        return {
-            "ean": ean,
-            "status": "not_found",
-            "message": "Product not found in OKB or Aftercool",
-        }
+        return {"ean": ean, "status": "not_found", "message": "Product not found in OKB or Aftercool"}
 
-    # Resolved category source: prefer OKB when it contains a valid category,
-    # otherwise use Aftercool.
-    final_category_id = okb_category_id or ac_category_id
-    final_category_name = okb_category_name or ac_category_name
+    # Aftercool is authoritative. OKB only fills gaps compatible with its category.
+    final_category_id = ac_category_id or okb_category_id
+    final_category_name = ac_category_name or okb_category_name
+    merged_attributes = normalize_attributes(okb_attributes) if (
+        not ac_category_id or okb_category_id == ac_category_id
+    ) else {}
+    merged_attributes.update(normalize_attributes(ac_attributes))
 
-    # Attributes: Aftercool is base; OKB wins for conflicting canonical keys.
-    merged_attributes = normalize_attributes(ac_attributes)
-    for key, value in okb_attributes.items():
-        clean_value = str(value).strip() if value is not None else ""
-        if not clean_value:
-            continue
-
-        canonical_key = ATTR_SYNONYMS.get(str(key).strip(), str(key).strip())
-        merged_attributes[canonical_key] = clean_value
+    from services.aftercool_service import parse_aftercool_product
+    product = parse_aftercool_product({"ean": ean, "row": aftercool_row or {}}, factory_id)
+    metadata = {
+        "price": str(product.price) if product and product.price is not None else None,
+        "price_af": str(product.price_af) if product and product.price_af is not None else None,
+        "product_name": product.name if product else None,
+        "image_url": product.image_url if product else None,
+    } if aftercool_found else {}
 
     # Category Schema Whitelisting and Numeric Cleaning
     if final_category_id:
@@ -1075,6 +1023,7 @@ async def sync_product_data(
             "status": "unresolved",
             "message": "Product found, but no category or attributes could be resolved",
             "source": source,
+            "metadata": metadata,
         }
 
     return {
@@ -1082,6 +1031,8 @@ async def sync_product_data(
         "status": "success",
         "category": final_category_name,
         "category_id": final_category_id,
+        "category_source": "aftercool" if ac_category_id else "okb" if okb_category_id else None,
+        "metadata": metadata,
         "attributes": merged_attributes,
         "origin_country": delivery_info["origin_country"],
         "delivery_weeks": delivery_info["delivery_weeks"],
