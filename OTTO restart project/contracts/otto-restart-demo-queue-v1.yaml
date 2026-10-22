@@ -1,0 +1,160 @@
+openapi: 3.1.0
+info:
+  title: OttoRestart Phase 5 Demo Queue
+  version: 1.0.0
+  description: >-
+    Single-process, browser-session queue for local dry-run checks only. Task state is
+    in memory. No production worker, OTTO request, Aftercool request, submission,
+    or ONLINE status exists in this contract.
+servers:
+  - url: /restart/api/demo
+paths:
+  /queue:
+    get:
+      operationId: getDemoQueue
+      parameters:
+        - $ref: '#/components/parameters/Account'
+      responses:
+        '200':
+          description: Queue state and tasks scoped to the selected demo account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueSnapshot' }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/enqueue-dry-run:
+    post:
+      operationId: enqueueApprovedDemoDryRuns
+      description: >-
+        Creates in-memory dry-run tasks only from approved demo payloads. Each ID and
+        version is checked on the server. Repeating an identical request is idempotent.
+        It cannot submit, publish, or call an external service.
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [id, expectedVersion]
+                    properties:
+                      id: { type: string }
+                      expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Per-item admission results and the updated account queue. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/pause:
+    post:
+      operationId: pauseDemoDryRuns
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Pauses local dry-run processing for this account. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/resume:
+    post:
+      operationId: resumeDemoDryRuns
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Resumes local dry-run processing for this account. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/stop-accepting:
+    post:
+      operationId: stopAcceptingDemoTasks
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Stops admission of new local tasks for this account. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/start-accepting:
+    post:
+      operationId: startAcceptingDemoTasks
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Resumes admission of local demo tasks for this account. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/tasks/{id}/dry-run:
+    post:
+      operationId: runDemoDryRun
+      description: >-
+        Rechecks the approved version and simulated standard price, then records a
+        local result. A changed price invalidates approval. No OTTO request is made.
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Completed local result or a blocked task with reason. }
+        default: { $ref: '#/components/responses/Error' }
+  /queue/tasks/{id}/cancel:
+    post:
+      operationId: cancelDemoTask
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        '200': { description: Cancels an unstarted local task only. }
+        default: { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    Account:
+      name: account
+      in: query
+      required: true
+      schema: { type: string, enum: [JV, XL] }
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    DemoHeader:
+      name: X-OttoRestart-Demo
+      in: header
+      required: true
+      schema: { type: string, const: '1' }
+  schemas:
+    QueueSnapshot:
+      type: object
+      required: [mode, account, publicationEnabled, paused, acceptingTasks, counts, tasks]
+      properties:
+        mode: { type: string, const: DEMO }
+        account: { type: string, enum: [JV, XL] }
+        publicationEnabled: { type: boolean, const: false }
+        paused: { type: boolean }
+        acceptingTasks: { type: boolean }
+        counts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        tasks: { type: array, items: { type: object } }
+  responses:
+    Error:
+      description: Invalid input, queue state conflict, foreign account, or expired demo session.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, message, requestId]
+            properties:
+              code: { type: string }
+              message: { type: string }
+              requestId: { type: string, format: uuid }

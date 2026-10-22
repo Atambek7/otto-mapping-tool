@@ -1,0 +1,39 @@
+services:
+  restart_db:
+    image: postgres:15-alpine
+    container_name: otto_restart_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-otto_restart_db}
+      POSTGRES_USER: ${POSTGRES_USER:-restart_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-restart_secure_pass}
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - otto_restart_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-restart_user} -d ${POSTGRES_DB:-otto_restart_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  restart_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: otto_restart_backend
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+    ports:
+      - "127.0.0.1:3301:3301"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OTTORESTART_DATABASE_URL=postgresql://restart_user:restart_secure_pass@restart_db:5432/otto_restart_db
+      - OTTORESTART_ALLOWED_ORIGINS=http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
+    depends_on:
+      restart_db:
+        condition: service_healthy
+
+volumes:
+  otto_restart_postgres_data:
