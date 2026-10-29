@@ -1,0 +1,1056 @@
+/* ============================================================================
+   OTTO Restart 3/12M — Settings Workspace Styles (OttoFlow UI/UX Pattern)
+   Strictly following the OttoFlow 3-card layout in OttoRestart Brand Palette
+   ============================================================================ */
+
+.otto-settings-container {
+  max-width: 768px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-bottom: 64px;
+}
+
+/* Page Header */
+.otto-settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.otto-settings-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ff5a36;
+}
+
+.otto-settings-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f3f5f8;
+  margin: 0;
+}
+
+.otto-settings-subtitle {
+  font-size: 13px;
+  color: #9aa7b8;
+  margin: 0;
+}
+
+/* Card Container */
+.otto-settings-card {
+  background: #141923;
+  border: 1px solid #293241;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.15s ease;
+}
+
+/* Card Header */
+.otto-card-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid #293241;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #141923;
+}
+
+.otto-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.otto-card-icon-box {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.otto-card-icon-box.icon-accent {
+  background: rgba(255, 90, 54, 0.12);
+  color: #ff5a36;
+  border: 1px solid rgba(255, 90, 54, 0.28);
+}
+
+.otto-card-icon-box.icon-neutral {
+  background: #1b2230;
+  color: #9aa7b8;
+  border: 1px solid #293241;
+}
+
+.otto-card-title-wrap h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f5f8;
+}
+
+.otto-card-title-wrap p {
+  margin: 2px 0 0 0;
+  font-size: 12px;
+  color: #9aa7b8;
+}
+
+/* Status Badges in Card Header */
+.otto-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.otto-status-badge.badge-neutral {
+  background: #1b2230;
+  color: #c5d0de;
+  border: 1px solid #293241;
+}
+
+.otto-status-badge.badge-active {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+}
+
+.otto-status-badge.badge-warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+}
+
+.otto-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  animation: ottoPulse 2s infinite ease-in-out;
+}
+
+@keyframes ottoPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* Card Body */
+.otto-card-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 1. Language Selector Grid */
+.otto-lang-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .otto-lang-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.otto-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid #293241;
+  background: #1b2230;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.otto-lang-option:hover {
+  border-color: #3b4758;
+  background: #232b3e;
+}
+
+.otto-lang-option.lang-selected {
+  border-color: #ff5a36;
+  background: rgba(255, 90, 54, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 90, 54, 0.25);
+}
+
+.otto-lang-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.otto-lang-flag {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.otto-lang-label-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.otto-lang-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f5f8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.otto-lang-pill {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #141923;
+  color: #9aa7b8;
+  border: 1px solid #293241;
+}
+
+.otto-lang-subtext {
+  font-size: 12px;
+  color: #9aa7b8;
+}
+
+.otto-lang-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #293241;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: transparent;
+  transition: all 0.15s ease;
+}
+
+.otto-lang-option.lang-selected .otto-lang-radio {
+  background: #ff5a36;
+  border-color: #ff5a36;
+  color: #ffffff;
+}
+
+/* 2. User Profile Card Body */
+.otto-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.otto-profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff5a36, #ea580c);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.35);
+  flex-shrink: 0;
+}
+
+.otto-profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.otto-profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.otto-profile-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f3f5f8;
+}
+
+.otto-profile-role-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #1b2230;
+  color: #c5d0de;
+  border: 1px solid #293241;
+}
+
+.otto-profile-account-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(255, 90, 54, 0.12);
+  color: #ff704d;
+  border: 1px solid rgba(255, 90, 54, 0.3);
+}
+
+.otto-profile-desc {
+  font-size: 12px;
+  color: #9aa7b8;
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* 3. OpenAI Key Status Banner */
+.otto-key-active-box {
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #1b2230;
+  border: 1px solid #293241;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.otto-key-active-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.otto-key-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #141923;
+  border: 1px solid #293241;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ff5a36;
+}
+
+.otto-key-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.otto-key-details-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f3f5f8;
+}
+
+.otto-key-details-masked {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #9aa7b8;
+}
+
+.otto-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.otto-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #141923;
+  border: 1px solid #293241;
+  color: #c5d0de;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.otto-btn-secondary:hover:not(:disabled) {
+  background: #232b3e;
+  border-color: #3b4758;
+  color: #f3f5f8;
+}
+
+.otto-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(244, 63, 94, 0.10);
+  border: 1px solid rgba(244, 63, 94, 0.32);
+  color: #fb7185;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.otto-btn-danger:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.20);
+  border-color: rgba(244, 63, 94, 0.55);
+  color: #ffffff;
+}
+
+/* Fallback Notice Banner */
+.otto-notice-banner {
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.30);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: #fbbf24;
+}
+
+.otto-notice-banner-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fbbf24;
+}
+
+/* Key Input Group */
+.otto-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.otto-input-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.otto-input-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9aa7b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.otto-input-subnote {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.otto-key-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.otto-key-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 40px 0 14px;
+  border-radius: 8px;
+  background: #1b2230;
+  border: 1px solid #293241;
+  color: #f3f5f8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.otto-key-input:focus {
+  outline: none;
+  border-color: #ff5a36;
+  box-shadow: 0 0 0 2px rgba(255, 90, 54, 0.2);
+}
+
+.otto-key-input::placeholder {
+  color: #64748b;
+}
+
+.otto-eye-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #7a899c;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.otto-eye-btn:hover {
+  color: #f3f5f8;
+}
+
+/* Security Note */
+.otto-security-box {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #1b2230;
+  border: 1px solid #293241;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #9aa7b8;
+}
+
+.otto-security-title {
+  font-weight: 700;
+  color: #f3f5f8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.otto-security-title svg {
+  color: #ff5a36;
+}
+
+/* Diagnostic Box */
+.otto-diagnostic-box {
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  background: rgba(16, 185, 129, 0.08);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.otto-diagnostic-box.diag-exhausted {
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(244, 63, 94, 0.08);
+}
+
+.otto-diagnostic-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.otto-diagnostic-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.diag-exhausted .otto-diagnostic-title {
+  color: #fb7185;
+}
+
+.otto-diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #c5d0de;
+}
+
+@media (max-width: 640px) {
+  .otto-diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.otto-diagnostic-grid span.diag-muted {
+  color: #7a899c;
+}
+
+/* Card Footer */
+.otto-card-footer {
+  padding: 14px 24px;
+  border-top: 1px solid #293241;
+  background: #141923;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.otto-footer-status {
+  font-size: 12px;
+  color: #7a899c;
+}
+
+.otto-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.otto-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(110deg, #ff5a36, #ea580c);
+  border: 1px solid #ea580c;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.3);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.otto-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.otto-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Toast Message */
+.otto-settings-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background: #141923;
+  border: 1px solid #10b981;
+  color: #34d399;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  animation: ottoToastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ottoToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal Dialog Backdrop & Window */
+.otto-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.otto-modal-dialog {
+  width: 100%;
+  max-width: 440px;
+  background: #141923;
+  border: 1px solid #293241;
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  animation: ottoModalIn 0.18s ease-out;
+}
+
+@keyframes ottoModalIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.otto-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f3f5f8;
+  margin: 0;
+}
+
+.otto-modal-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #9aa7b8;
+  margin: 0;
+}
+
+.otto-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+
+/* ============================================================================
+   LIGHT THEME OVERRIDES (OttoRestart Molten Copper & Cream Palette)
+   ============================================================================ */
+
+.restart-app:not([data-theme="dark"]) .otto-settings-title,
+.restart-app[data-theme="light"] .otto-settings-title {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-settings-subtitle,
+.restart-app[data-theme="light"] .otto-settings-subtitle {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-settings-eyebrow,
+.restart-app[data-theme="light"] .otto-settings-eyebrow {
+  color: #f4512c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-settings-card,
+.restart-app[data-theme="light"] .otto-settings-card {
+  background: #ffffff;
+  border-color: #dce3ec;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-header,
+.restart-app[data-theme="light"] .otto-card-header {
+  background: #ffffff;
+  border-bottom-color: #dce3ec;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-title-wrap h2,
+.restart-app[data-theme="light"] .otto-card-title-wrap h2 {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-title-wrap p,
+.restart-app[data-theme="light"] .otto-card-title-wrap p {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-icon-box.icon-accent,
+.restart-app[data-theme="light"] .otto-card-icon-box.icon-accent {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #ea580c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-icon-box.icon-neutral,
+.restart-app[data-theme="light"] .otto-card-icon-box.icon-neutral {
+  background: #f8fafc;
+  border-color: #dce3ec;
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-status-badge.badge-neutral,
+.restart-app[data-theme="light"] .otto-status-badge.badge-neutral {
+  background: #f8fafc;
+  border-color: #dce3ec;
+  color: #475569;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-status-badge.badge-active,
+.restart-app[data-theme="light"] .otto-status-badge.badge-active {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-status-badge.badge-warning,
+.restart-app[data-theme="light"] .otto-status-badge.badge-warning {
+  background: #fef3c7;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option,
+.restart-app[data-theme="light"] .otto-lang-option {
+  background: #ffffff;
+  border-color: #dce3ec;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option:hover,
+.restart-app[data-theme="light"] .otto-lang-option:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option.lang-selected,
+.restart-app[data-theme="light"] .otto-lang-option.lang-selected {
+  background: #fff7ed;
+  border-color: #f4512c;
+  box-shadow: 0 0 0 1px rgba(244, 81, 44, 0.25);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-name,
+.restart-app[data-theme="light"] .otto-lang-name {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-pill,
+.restart-app[data-theme="light"] .otto-lang-pill {
+  background: #f1f5f9;
+  border-color: #dce3ec;
+  color: #475569;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-subtext,
+.restart-app[data-theme="light"] .otto-lang-subtext {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-radio,
+.restart-app[data-theme="light"] .otto-lang-radio {
+  border-color: #cbd5e1;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option.lang-selected .otto-lang-radio,
+.restart-app[data-theme="light"] .otto-lang-option.lang-selected .otto-lang-radio {
+  background: #f4512c;
+  border-color: #f4512c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-profile-name,
+.restart-app[data-theme="light"] .otto-profile-name {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-profile-role-badge,
+.restart-app[data-theme="light"] .otto-profile-role-badge {
+  background: #f8fafc;
+  border-color: #dce3ec;
+  color: #475569;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-profile-account-badge,
+.restart-app[data-theme="light"] .otto-profile-account-badge {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-profile-desc,
+.restart-app[data-theme="light"] .otto-profile-desc {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-active-box,
+.restart-app[data-theme="light"] .otto-key-active-box {
+  background: #f8fafc;
+  border-color: #dce3ec;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-icon-wrap,
+.restart-app[data-theme="light"] .otto-key-icon-wrap {
+  background: #ffffff;
+  border-color: #dce3ec;
+  color: #f4512c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-details-title,
+.restart-app[data-theme="light"] .otto-key-details-title {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-details-masked,
+.restart-app[data-theme="light"] .otto-key-details-masked {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-btn-secondary,
+.restart-app[data-theme="light"] .otto-btn-secondary {
+  background: #ffffff;
+  border-color: #dce3ec;
+  color: #334155;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-btn-secondary:hover:not(:disabled),
+.restart-app[data-theme="light"] .otto-btn-secondary:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-btn-danger,
+.restart-app[data-theme="light"] .otto-btn-danger {
+  background: #ffe4e6;
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-btn-danger:hover:not(:disabled),
+.restart-app[data-theme="light"] .otto-btn-danger:hover:not(:disabled) {
+  background: #fecdd3;
+  color: #9f1239;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-notice-banner,
+.restart-app[data-theme="light"] .otto-notice-banner {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-notice-banner-text,
+.restart-app[data-theme="light"] .otto-notice-banner-text {
+  color: #b45309;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-input-label,
+.restart-app[data-theme="light"] .otto-input-label {
+  color: #475569;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-input-subnote,
+.restart-app[data-theme="light"] .otto-input-subnote {
+  color: #94a3b8;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-input,
+.restart-app[data-theme="light"] .otto-key-input {
+  background: #ffffff;
+  border-color: #dce3ec;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-input:focus,
+.restart-app[data-theme="light"] .otto-key-input:focus {
+  border-color: #f4512c;
+  box-shadow: 0 0 0 2px rgba(244, 81, 44, 0.15);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-key-input::placeholder,
+.restart-app[data-theme="light"] .otto-key-input::placeholder {
+  color: #94a3b8;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-eye-btn,
+.restart-app[data-theme="light"] .otto-eye-btn {
+  color: #94a3b8;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-eye-btn:hover,
+.restart-app[data-theme="light"] .otto-eye-btn:hover {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-security-box,
+.restart-app[data-theme="light"] .otto-security-box {
+  background: #f8fafc;
+  border-color: #dce3ec;
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-security-title,
+.restart-app[data-theme="light"] .otto-security-title {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-security-title svg,
+.restart-app[data-theme="light"] .otto-security-title svg {
+  color: #f4512c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-diagnostic-box,
+.restart-app[data-theme="light"] .otto-diagnostic-box {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-diagnostic-title,
+.restart-app[data-theme="light"] .otto-diagnostic-title {
+  color: #15803d;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-diagnostic-grid,
+.restart-app[data-theme="light"] .otto-diagnostic-grid {
+  background: #ffffff;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-card-footer,
+.restart-app[data-theme="light"] .otto-card-footer {
+  background: #ffffff;
+  border-top-color: #dce3ec;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-footer-status,
+.restart-app[data-theme="light"] .otto-footer-status {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-btn-primary,
+.restart-app[data-theme="light"] .otto-btn-primary {
+  background: linear-gradient(110deg, #f4512c, #ea580c);
+  border-color: #ea580c;
+  color: #ffffff;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-modal-dialog,
+.restart-app[data-theme="light"] .otto-modal-dialog {
+  background: #ffffff;
+  border-color: #dce3ec;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.15);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-modal-title,
+.restart-app[data-theme="light"] .otto-modal-title {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-modal-desc,
+.restart-app[data-theme="light"] .otto-modal-desc {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-settings-toast,
+.restart-app[data-theme="light"] .otto-settings-toast {
+  background: #ffffff;
+  border-color: #bbf7d0;
+  color: #15803d;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+

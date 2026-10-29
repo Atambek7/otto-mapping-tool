@@ -75,7 +75,8 @@ async def get_authoritative_factory_eans(
 
     eans = set()
     offset = 0
-    limit = 5000
+    # Match the 500-item page size used by the Aftercool products proxy.
+    limit = 500
 
     async with httpx.AsyncClient(cookies={"session": session}, timeout=30.0) as client:
         while True:

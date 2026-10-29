@@ -150,24 +150,14 @@ async def get_factory_product_map(factory_id: str, account: str, force_refresh: 
         if now - cached_time < FACTORY_ITEMS_TTL:
             return cached_data
 
-    session = await get_aftercool_session(force_refresh=force_refresh)
+    from services.aftercool_service import iter_products
+
     name_to_ean = {}
-    async with httpx.AsyncClient(cookies={"session": session}, timeout=30.0) as client:
-        res = await client.get(
-            f"{AFTERCOOL_BASE_URL}/api/products",
-            params={"factory_id": fid, "account": acc, "limit": 5000}
-        )
-        if res.status_code == 200:
-            data = res.json()
-            items = data.get("items", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            for item in items:
-                pname = item.get("name")
-                ean = item.get("ean")
-                if pname and ean:
-                    norm = _normalize_title(pname)
-                    name_to_ean[norm] = str(ean).strip()
-        elif cache_key in _FACTORY_ITEMS_CACHE:
-            return _FACTORY_ITEMS_CACHE[cache_key][1]
+    # Do not cache a partial name map when a later page fails.
+    async for page in iter_products(fid, account=acc, dataset="lister", page_size=500):
+        for product in page:
+            if product.name:
+                name_to_ean[_normalize_title(product.name)] = product.ean
 
     _FACTORY_ITEMS_CACHE[cache_key] = (now, name_to_ean)
     return name_to_ean

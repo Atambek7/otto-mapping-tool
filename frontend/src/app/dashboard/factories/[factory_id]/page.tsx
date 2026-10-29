@@ -32,6 +32,8 @@ import AiTitleModal from "@/components/AiTitleModal";
 import { PriceEndingModal } from "@/components/PriceEndingModal";
 import { useTranslation } from "react-i18next";
 
+import { parsePositivePrice, getAftercoolPrice } from "@/lib/prices";
+
 // --- Helpers ---
 const deCollator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
 
@@ -45,13 +47,6 @@ function parseSpecifics(raw: any) {
   return [];
 }
 
-const parsePositivePrice = (val: any): string | null => {
-  if (!val) return null;
-  const s = String(val).replace("€", "").replace(/EUR/gi, "").replace(",", ".").trim();
-  const num = parseFloat(s);
-  return (!isNaN(num) && num > 0) ? (num % 1 === 0 ? String(Math.floor(num)) : num.toFixed(2)) : null;
-};
-
 const getItemNumericPrice = (item: any, mappings: Record<string, any>): number => {
   if (!item) return 0;
   const row = item.row || {};
@@ -64,19 +59,9 @@ const getItemNumericPrice = (item: any, mappings: Record<string, any>): number =
     if (!isNaN(num) && num > 0) return num;
   }
 
-  // 2. Catalog Startpreis
-  const startPrice = parsePositivePrice(row.Startpreis);
-  if (startPrice) {
-    const num = parseFloat(startPrice);
-    if (!isNaN(num) && num > 0) return num;
-  }
-
-  // 3. Catalog SofortkaufenPreis
-  const sofortPrice = parsePositivePrice(row.SofortkaufenPreis);
-  if (sofortPrice) {
-    const num = parseFloat(sofortPrice);
-    if (!isNaN(num) && num > 0) return num;
-  }
+  if (item.price_conflict) return 0;
+  const catalogPrice = getAftercoolPrice(row);
+  if (catalogPrice) return Number(catalogPrice);
 
   // 4. Any other price field (e.g. row.price or item.price)
   const otherPrice = parsePositivePrice(row.price || item.price);
@@ -94,12 +79,15 @@ const getRowKey = (p: any, index: number): string => {
   return String(row.ItemID || row.id || p.id || `${p.ean || row.EAN || 'item'}_${index}`);
 };
 
-export const getProductStatusKey = (product: any, mapData: any): "published" | "in progress" | "ready" | "need" | "error" | "unmapped" => {
+const getProductStatusKey = (product: any, mapData: any): "published" | "existing" | "in progress" | "ready" | "need" | "error" | "unmapped" => {
   const rawStatus = (mapData?.status || "").toLowerCase().trim();
 
   // If there is no category assigned, product is strictly "unmapped"
   const cat = mapData?.category_id || mapData?.category || product?.category_id || product?.category;
   const hasCategory = Boolean(cat && String(cat).trim() !== "" && String(cat).trim() !== "0" && String(cat).toLowerCase().trim() !== "none");
+
+  if (rawStatus === "published" && hasCategory) return "published";
+  if (mapData?.otto_product_exists === true) return "existing";
 
   if (!hasCategory) {
     return "unmapped";
@@ -253,6 +241,20 @@ const VirtualRowComponent = ({
               >
                 <Check className="w-3 h-3" />
                 <span>{t("workspace.status_published")}</span>
+              </span>
+            );
+          }
+          if (stKey === "existing") {
+            const checkedAt = mapData?.otto_checked_at
+              ? new Date(mapData.otto_checked_at).toLocaleString("ru-RU")
+              : null;
+            return (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200/80 dark:bg-teal-950/40 dark:text-teal-400 dark:border-teal-800/60"
+                title={checkedAt ? `Карточка товара найдена в OTTO: ${checkedAt}` : "Карточка товара найдена в OTTO"}
+              >
+                <Check className="w-3 h-3" />
+                <span>{t("workspace.status_existing")}</span>
               </span>
             );
           }
@@ -438,6 +440,7 @@ export default function FactoryWorkspace() {
             prev.current_day === current.current_day &&
             prev.progress?.published === current.progress?.published &&
             prev.progress?.failed === current.progress?.failed &&
+            prev.progress?.existing === current.progress?.existing &&
             prev.progress?.processing === current.progress?.processing &&
             prev.progress?.pending === current.progress?.pending
           ) {
@@ -604,7 +607,7 @@ export default function FactoryWorkspace() {
   const dragCounterRef = useRef(0);
 
   // Mappings state: EAN -> { category, status, category_name, published_at, attributes, product_name, price, has_ai_title, has_manual_price }
-  const [mappings, setMappings] = useState<Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, attributes?: Record<string, string>, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean }>>({});
+  const [mappings, setMappings] = useState<Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, attributes?: Record<string, string>, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean, otto_product_exists?: boolean, otto_checked_at?: string | null }>>({});
 
   // Drag-to-select state (all via refs to avoid stale closures)
   const isDragging = useRef(false);
@@ -635,7 +638,7 @@ export default function FactoryWorkspace() {
       if (mapRes.ok) {
         const mapData = await mapRes.json();
         lastStatusCheckTimeRef.current = new Date().toISOString();
-        const normalized: Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean }> = {};
+        const normalized: Record<string, { category: string, status: string, category_name?: string, published_at?: string | null, product_name?: string, price?: string, has_ai_title?: boolean, has_manual_price?: boolean, otto_product_exists?: boolean, otto_checked_at?: string | null }> = {};
         for (const [ean, val] of Object.entries(mapData as any)) {
           const v = val as any;
           normalized[ean] = {
@@ -646,7 +649,9 @@ export default function FactoryWorkspace() {
             product_name: (v.product_name && v.product_name.trim() !== "Без названия" && v.product_name.toLowerCase() !== "null") ? v.product_name : undefined,
             price: parsePositivePrice(v.price) || undefined,
             has_ai_title: Boolean(v.has_ai_title),
-            has_manual_price: Boolean(v.has_manual_price)
+            has_manual_price: Boolean(v.has_manual_price),
+            otto_product_exists: Boolean(v.otto_product_exists),
+            otto_checked_at: v.otto_checked_at || null
           };
         }
         setMappings(prev => {
@@ -665,7 +670,9 @@ export default function FactoryWorkspace() {
                 oldVal.published_at !== newVal.published_at ||
                 oldVal.product_name !== newVal.product_name ||
                 oldVal.price !== newVal.price ||
-                oldVal.has_ai_title !== newVal.has_ai_title
+                oldVal.has_ai_title !== newVal.has_ai_title ||
+                oldVal.otto_product_exists !== newVal.otto_product_exists ||
+                oldVal.otto_checked_at !== newVal.otto_checked_at
               ) {
                 hasDiff = true;
                 break;
@@ -844,8 +851,11 @@ export default function FactoryWorkspace() {
             else if (r.status === "not_found" || r.status === "unresolved") notFound++;
             else error++;
           }
+        } else {
+          error += chunk.length;
         }
       } catch (e: any) {
+        error += chunk.length;
         console.error(e);
       }
       setTaskProgress(prev => prev ? { ...prev, current: Math.min(i + chunkSize, eansToSync.length) } : null);
@@ -927,11 +937,13 @@ export default function FactoryWorkspace() {
         )
       );
 
+      const isCacheStale = !cached?.fetchedAt || Date.now() - cached.fetchedAt > 30 * 60 * 1000;
+
       if (cached?.products?.length) {
         setProducts(cached.products);
         setTotalCatalogCount(cached.total || cached.products.length);
         setLoading(false);
-        if (!isCachedTruncated) {
+        if (!isCachedTruncated && !isCacheStale) {
           setIsBackgroundLoading(false);
         }
       } else {
@@ -940,18 +952,24 @@ export default function FactoryWorkspace() {
 
       // 2. Fetch from network if not cached or if it looks truncated (exactly 500 or less than total)
       let all = cached?.products || [];
-      if (!all.length || isCachedTruncated) {
+      if (!all.length || isCachedTruncated || isCacheStale) {
         try {
           setIsBackgroundLoading(true);
+          const syncRes = await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST", signal, timeout: 180000 } as RequestInit & { timeout: number }, 0);
+          if (!syncRes.ok) throw new Error("Aftercool metadata sync failed");
+          const syncResult = await syncRes.json();
+          const priceConflicts = new Set<string>(syncResult.price_conflicts || []);
+          if (syncResult.price_conflicts?.length) toast.error(`Конфликт цен Aftercool: ${syncResult.price_conflicts.join(", ")}. Эти цены не изменены.`);
+          if (syncResult.status === "partial_error" && (syncResult.catalog_complete === false || !syncResult.price_conflicts?.length)) throw new Error(syncResult.error || "Aftercool metadata sync incomplete");
           const PAGE_SIZE = 500;
           const res = await fetchWithAuth(
-            `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1`,
+            `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&sync_db=0`,
             { signal }
           );
           if (!res.ok) throw new Error("Failed to fetch products");
           const data = await res.json();
           if (isCancelled || signal.aborted) return;
-          const firstChunk = data?.items || data || [];
+          const firstChunk = (data?.items || data || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
           all = [...firstChunk];
 
           // Immediately display products on screen (<200ms perceived load)
@@ -981,26 +999,20 @@ export default function FactoryWorkspace() {
               const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
               const results = await Promise.all(
                 batch.map(async (off) => {
-                  try {
-                    const r = await fetchWithAuth(
-                      `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=0`,
-                      { signal }
-                    );
-                    if (!r.ok) return [];
-                    const d = await r.json();
-                    return d?.items || d || [];
-                  } catch (e: any) {
-                    if (e?.name === "AbortError" || signal.aborted) return [];
-                    return [];
-                  }
+                  const r = await fetchWithAuth(
+                    `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=0`,
+                    { signal }
+                  );
+                  if (!r.ok) throw new Error(`Aftercool: HTTP ${r.status}, offset ${off}`);
+                  const d = await r.json();
+                  return (d?.items || d || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
                 })
               );
               if (isCancelled || signal.aborted) return;
 
               const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
-              if (validChunks.length === 0) {
-                // Aftercool returned no more products, stop pagination early
-                break;
+              if (validChunks.length !== results.length) {
+                throw new Error("Aftercool вернул неполный каталог. Повторите обновление.");
               }
 
               for (const chunk of validChunks) {
@@ -1013,18 +1025,20 @@ export default function FactoryWorkspace() {
             }
           }
 
-          if (all.length > 0 && !isCancelled && !signal.aborted) {
-            await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
+          if (all.length < total) throw new Error("Aftercool вернул неполный каталог");
+          if (!isCancelled && !signal.aborted) {
+            await setCachedFactory({ factoryId, products: all, total, fetchedAt: Date.now() }, false, account);
             // Single final transition update once background loading completes
             startTransition(() => {
               setProducts([...all]);
-              setTotalCatalogCount(all.length);
+              setTotalCatalogCount(total);
               setStreamedLoadedCount(all.length);
             });
           }
         } catch (e: any) {
           if (e?.name !== "AbortError" && !signal.aborted) {
             console.error("Failed to load factory products:", e);
+            toast.error("Каталог Aftercool загружен не полностью. Повторите обновление.");
           }
         } finally {
           if (!isCancelled && !signal.aborted) {
@@ -1093,13 +1107,19 @@ export default function FactoryWorkspace() {
     if (loading || isBackgroundLoading) return;
     setIsBackgroundLoading(true);
     try {
+      const syncRes = await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST", timeout: 180000 } as RequestInit & { timeout: number }, 0);
+      if (!syncRes.ok) throw new Error("Aftercool metadata sync failed");
+      const syncResult = await syncRes.json();
+      const priceConflicts = new Set<string>(syncResult.price_conflicts || []);
+      if (syncResult.price_conflicts?.length) toast.error(`Конфликт цен Aftercool: ${syncResult.price_conflicts.join(", ")}. Эти цены не изменены.`);
+      if (syncResult.status === "partial_error" && (syncResult.catalog_complete === false || !syncResult.price_conflicts?.length)) throw new Error(syncResult.error || "Aftercool metadata sync incomplete");
       const PAGE_SIZE = 500;
       const res = await fetchWithAuth(
-        `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&refresh=true`
+        `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&refresh=true&sync_db=0`
       );
       if (!res.ok) throw new Error("Failed to sync products");
       const data = await res.json();
-      let all = data?.items || data || [];
+      let all = (data?.items || data || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
       setProducts([...all]);
       setLoading(false);
 
@@ -1122,22 +1142,18 @@ export default function FactoryWorkspace() {
           const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
           const results = await Promise.all(
             batch.map(async (off) => {
-              try {
-                const r = await fetchWithAuth(
-                  `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=0`
-                );
-                if (!r.ok) return [];
-                const d = await r.json();
-                return d?.items || d || [];
-              } catch {
-                return [];
-              }
+              const r = await fetchWithAuth(
+                `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=0`
+              );
+              if (!r.ok) throw new Error(`Aftercool: HTTP ${r.status}, offset ${off}`);
+              const d = await r.json();
+              return (d?.items || d || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
             })
           );
 
           const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
-          if (validChunks.length === 0) {
-            break;
+          if (validChunks.length !== results.length) {
+            throw new Error("Aftercool вернул неполный каталог. Повторите обновление.");
           }
 
           for (const chunk of validChunks) {
@@ -1157,14 +1173,16 @@ export default function FactoryWorkspace() {
         }
       }
 
-      if (all.length > 0) {
-        await setCachedFactory({ factoryId, products: all, total: all.length, fetchedAt: Date.now() }, false, account);
+      if (all.length < total) throw new Error("Aftercool вернул неполный каталог");
+      {
+        await setCachedFactory({ factoryId, products: all, total, fetchedAt: Date.now() }, false, account);
         setProducts([...all]);
-        setTotalCatalogCount(all.length);
+        setTotalCatalogCount(total);
         await fetchMappings();
       }
     } catch (e) {
       console.error(e);
+      toast.error("Не удалось полностью обновить каталог Aftercool. Попробуйте ещё раз.");
     } finally {
       setIsBackgroundLoading(false);
       setLoading(false);
@@ -1901,6 +1919,7 @@ export default function FactoryWorkspace() {
         if (q === "need") return stKey === "need";
         if (q === "ready") return stKey === "ready";
         if (q === "error") return stKey === "error";
+        if (q === "existing") return stKey === "existing";
         if (q === "published") return stKey === "published";
         if (q === "in progress" || q === "processing") return stKey === "in progress";
         return stKey.includes(q);
@@ -2325,7 +2344,7 @@ export default function FactoryWorkspace() {
 
   // ── COMBINED SINGLE-PASS CATALOG STATS (75% FASTER) ──
   const { dataQualityStats, over70Count, xlAlreadyGeneratedCount } = useMemo(() => {
-    const counts = { ready: 0, needAttrs: 0, error: 0, unmapped: 0, published: 0 };
+    const counts = { ready: 0, needAttrs: 0, error: 0, unmapped: 0, published: 0, existing: 0 };
     let over70 = 0;
     let xlGen = 0;
     const isJv = account === "JV";
@@ -2338,6 +2357,7 @@ export default function FactoryWorkspace() {
       // 1. Data quality stats
       const stKey = getProductStatusKey(p, mapData);
       if (stKey === "published") counts.published++;
+      else if (stKey === "existing") counts.existing++;
       else if (stKey === "ready") counts.ready++;
       else if (stKey === "need") counts.needAttrs++;
       else if (stKey === "error") counts.error++;
@@ -2557,7 +2577,7 @@ export default function FactoryWorkspace() {
       </div>
 
       {/* ── COMPACT SEGMENTED STATUS STRIP ── */}
-      <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-6">
+      <div className="bg-white dark:bg-card rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7">
         <button
           type="button"
           onClick={() => setStatusFilter("")}
@@ -2616,6 +2636,20 @@ export default function FactoryWorkspace() {
 
         <button
           type="button"
+          onClick={() => setStatusFilter(statusFilter === "existing" ? "" : "existing")}
+          className={cn(
+            "p-3 text-left transition-colors",
+            statusFilter === "existing" ? "bg-teal-50/80 dark:bg-teal-950/30" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/20"
+          )}
+        >
+          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">{t("workspace.status_existing")}</span>
+          <span className="text-lg font-bold text-teal-600 dark:text-teal-400 tracking-tight mt-0.5 block">
+            {dataQualityStats.existing.toLocaleString()}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setStatusFilter(statusFilter === "unmapped" ? "" : "unmapped")}
           className={cn(
             "p-3 text-left transition-colors",
@@ -2666,6 +2700,9 @@ export default function FactoryWorkspace() {
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 {t("workspace.drip_daily_at", { time: activePlan.daily_time })}{" "}
                 <strong className="text-emerald-600 dark:text-emerald-400 font-semibold">{activePlan.progress?.published || 0}</strong> / {activePlan.total_products} {t("workspace.drip_items")}
+                {activePlan.progress?.existing > 0 && (
+                  <span className="ml-2 text-teal-700 dark:text-teal-400 font-medium">· {activePlan.progress.existing} {t("workspace.drip_existing")}</span>
+                )}
                 {activePlan.progress?.failed > 0 && (
                   <span className="ml-2 text-rose-600 font-medium">· {t("workspace.drip_errors")} {activePlan.progress.failed}</span>
                 )}
@@ -3114,6 +3151,7 @@ export default function FactoryWorkspace() {
             >
               <option value="">{t("workspace.all_statuses")}</option>
               <option value="published">{t("workspace.status_published")}</option>
+              <option value="existing">{t("workspace.status_existing")}</option>
               <option value="in progress">{t("workspace.status_in_progress")}</option>
               <option value="ready">{t("workspace.status_ready")}</option>
               <option value="need">{t("workspace.status_need")}</option>
@@ -3131,8 +3169,7 @@ export default function FactoryWorkspace() {
             const ean = product.ean || row.EAN || "";
             const rowKey = getRowKey(product, virtualRow.index);
             const img = row.GalleryURL || row.PictureURL || "";
-            const priceStr = row.Startpreis || row.SofortkaufenPreis || "0";
-            const price = parseFloat(priceStr.replace(',', '.')) > 0 ? priceStr : (row.SofortkaufenPreis || "-");
+            const price = (!product.price_conflict && getAftercoolPrice(row)) || "-";
             const mapData = mappings[ean];
             const isSelected = selectedIds.has(rowKey);
 
@@ -3510,7 +3547,7 @@ export default function FactoryWorkspace() {
             : processed
           ).map((p) => ({
             ean: p.ean || (p.row && p.row.EAN) || "",
-            price: mappings[p.ean || (p.row && p.row.EAN) || ""]?.price || p.price || (p.row && (p.row.Startpreis || p.row.SofortkaufenPreis)),
+            price: parsePositivePrice(mappings[p.ean || p.row?.EAN || ""]?.price) || (!p.price_conflict ? getAftercoolPrice(p.row) || parsePositivePrice(p.price) : ""),
           }))}
           onPricesUpdated={handlePricesUpdated}
         />

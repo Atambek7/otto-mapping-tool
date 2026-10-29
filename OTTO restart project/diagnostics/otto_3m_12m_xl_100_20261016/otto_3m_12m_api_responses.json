@@ -1,0 +1,3312 @@
+{
+  "account": "XL",
+  "created_at_utc": "2026-10-16T10:54:55.271743+00:00",
+  "endpoint": "GET /v5/products/{sku}/marketplace-status",
+  "input_source": "user-provided 3M/12M groups in chat; CSV export was not provided",
+  "full_catalog_scan": false,
+  "responses": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424040821/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424040821"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424040821",
+        "moin": "M00YP201ST",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424040821"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00YP201ST"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.088Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424535488/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424535488"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424535488",
+        "moin": "M008V4014K",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424535488"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M008V4014K"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:23.270Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424482478/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424482478"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424482478",
+        "moin": "M00Y3901ZU",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424482478"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00Y3901ZU"
+          }
+        ],
+        "lastModified": "2026-06-02T09:44:05.098Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424536270/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424536270"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424536270",
+        "moin": "M00H6A01UT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424536270"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00H6A01UT"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:44.694Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424173239/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424173239"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424173239",
+        "moin": "M001N401ZJ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424173239"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M001N401ZJ"
+          }
+        ],
+        "lastModified": "2026-06-02T10:49:20.844Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424790986/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424790986"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424790986",
+        "moin": "M005I401YD",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424790986"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M005I401YD"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:56.515Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424970333/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424970333"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424970333",
+        "moin": "M00KP401WT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424970333"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00KP401WT"
+          }
+        ],
+        "lastModified": "2026-06-02T09:45:56.381Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424862218/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424862218"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424862218",
+        "moin": "M009LA01J8",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424862218"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M009LA01J8"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:56.244Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424315677/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424315677"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424315677",
+        "moin": "M00ME50143",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424315677"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00ME50143"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:27.011Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424878899/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424878899"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424878899",
+        "moin": "M00AQ401W3",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424878899"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00AQ401W3"
+          }
+        ],
+        "lastModified": "2026-06-02T09:40:38.964Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424406863/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424406863"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424406863",
+        "moin": "M008U6010I",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424406863"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M008U6010I"
+          }
+        ],
+        "lastModified": "2026-06-02T10:47:57.338Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424805048/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424805048"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424805048",
+        "moin": "M0046401YT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424805048"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M0046401YT"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:33.976Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424146165/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424146165"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424146165",
+        "moin": "M00MS401QV",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424146165"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00MS401QV"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:58.018Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424826401/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424826401"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424826401",
+        "moin": "M00CY5016Q",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424826401"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00CY5016Q"
+          }
+        ],
+        "lastModified": "2026-06-02T12:22:03.322Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4062292263446/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4062292263446"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4062292263446",
+        "moin": "M00YH5014I",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4062292263446"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00YH5014I"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.080Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424829884/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424829884"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424829884",
+        "moin": "M004Q501A1",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424829884"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M004Q501A1"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:45.925Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424374728/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424374728"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424374728",
+        "moin": "M00SHA01J4",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424374728"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00SHA01J4"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:27.912Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424615289/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424615289"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424615289",
+        "moin": "M005I501FG",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424615289"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M005I501FG"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:44.675Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4062292263767/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4062292263767"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4062292263767",
+        "moin": "M00FU60101",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4062292263767"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00FU60101"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.068Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282938168/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282938168"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282938168",
+        "moin": "M00BA401RY",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282938168"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00BA401RY"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:21.590Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424550023/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424550023"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424550023",
+        "moin": "M00KX301ZS",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424550023"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00KX301ZS"
+          }
+        ],
+        "lastModified": "2026-06-02T12:02:03.775Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424260274/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424260274"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424260274",
+        "moin": "M00ER4012A",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424260274"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00ER4012A"
+          }
+        ],
+        "lastModified": "2026-06-02T09:44:06.179Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424752939/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424752939"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424752939",
+        "moin": "M002V6010H",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424752939"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M002V6010H"
+          }
+        ],
+        "lastModified": "2026-06-02T12:21:38.205Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424264777/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424264777"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424264777",
+        "moin": "M00RB301RG",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424264777"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00RB301RG"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:54.063Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424822724/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424822724"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424822724",
+        "moin": "M008LA01JT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424822724"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M008LA01JT"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:18.493Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282888319/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282888319"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282888319",
+        "moin": "M003N101QY",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282888319"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M003N101QY"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.075Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282969629/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282969629"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282969629",
+        "moin": "M00TE701L6",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282969629"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00TE701L6"
+          }
+        ],
+        "lastModified": "2026-06-02T12:02:00.653Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282904347/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282904347"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282904347",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          },
+          {
+            "code": "301006 - Dimensionierung Werte identisch",
+            "title": "Die Variante konnte in diesem Produkt nicht angelegt werden, da sich die gepflegten Werte der variantenbildenden Merkmale von anderen Varianten in diesem Produkt nicht unterscheiden. Pflegen Sie pro Varianten unterschiedliche Werte."
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282904347"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-wohnzimmer-set-designer-eckcouch-luxusstuhl-xxl-polstersofa-wohnlandschaft-2-st-ecksofa-plus-sessel-hergestellt-in-europa-S0ZBX0NC/#variationId=S0ZBX0NCTORA"
+          }
+        ],
+        "lastModified": "2026-06-02T12:22:11.029Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424765779/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424765779"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424765779",
+        "moin": "M00JE501DR",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424765779"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00JE501DR"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:43.110Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424033892/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424033892"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424033892",
+        "moin": "M00S0201SP",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424033892"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00S0201SP"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.076Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424326727/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424326727"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424326727",
+        "moin": "M008Y701JA",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424326727"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M008Y701JA"
+          }
+        ],
+        "lastModified": "2026-06-02T12:20:40.839Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424949391/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424949391"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424949391",
+        "moin": "M00J55012N",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424949391"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00J55012N"
+          }
+        ],
+        "lastModified": "2026-06-02T09:44:43.114Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424054002/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424054002"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424054002",
+        "moin": "M00EV6010L",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424054002"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00EV6010L"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:38.114Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424826647/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424826647"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424826647",
+        "moin": "M00L0401YI",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424826647"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00L0401YI"
+          }
+        ],
+        "lastModified": "2026-07-16T06:46:15.090Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424348910/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424348910"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424348910",
+        "moin": "M002R401QT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424348910"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M002R401QT"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:44.103Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424388145/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424388145"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424388145",
+        "moin": "M00P9401L7",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424388145"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00P9401L7"
+          }
+        ],
+        "lastModified": "2026-06-02T08:18:56.849Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424318425/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424318425"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424318425",
+        "moin": "M007M5018T",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424318425"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M007M5018T"
+          }
+        ],
+        "lastModified": "2026-10-05T17:21:39.130Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424584257/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424584257"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424584257",
+        "moin": "M00BV301Z3",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424584257"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00BV301Z3"
+          }
+        ],
+        "lastModified": "2026-06-02T12:02:05.492Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424540871/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424540871"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424540871",
+        "moin": "M00F14012S",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424540871"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00F14012S"
+          }
+        ],
+        "lastModified": "2026-06-02T12:02:00.521Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424050844/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424050844"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424050844",
+        "moin": "M0007401S2",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424050844"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M0007401S2"
+          }
+        ],
+        "lastModified": "2026-06-02T12:02:02.485Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282959064/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282959064"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282959064",
+        "moin": "M006Q201U0",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282959064"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M006Q201U0"
+          }
+        ],
+        "lastModified": "2026-10-12T16:53:12.426Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424553529/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424553529"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424553529",
+        "moin": "M00WH6018P",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424553529"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00WH6018P"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:18.686Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282934290/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282934290"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282934290",
+        "moin": "M005F401PP",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282934290"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M005F401PP"
+          }
+        ],
+        "lastModified": "2026-06-02T12:01:22.227Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424853063/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424853063"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424853063",
+        "moin": "M00LIA01UG",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424853063"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00LIA01UG"
+          }
+        ],
+        "lastModified": "2026-06-02T12:21:32.957Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424374650/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424374650"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424374650",
+        "moin": "M003H401U4",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424374650"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M003H401U4"
+          }
+        ],
+        "lastModified": "2026-06-02T08:15:33.559Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424140316/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424140316"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424140316",
+        "moin": "M00YL401J8",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424140316"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00YL401J8"
+          }
+        ],
+        "lastModified": "2026-06-02T12:22:12.486Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424509342/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424509342"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424509342",
+        "moin": "M0024901ZQ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424509342"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M0024901ZQ"
+          }
+        ],
+        "lastModified": "2026-06-02T09:46:54.224Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424603408/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424603408"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424603408",
+        "moin": "M00YS401X5",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424603408"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00YS401X5"
+          }
+        ],
+        "lastModified": "2026-06-02T09:43:39.528Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424830491/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424830491"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424830491",
+        "moin": "M00PH401YV",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424830491"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00PH401YV"
+          }
+        ],
+        "lastModified": "2026-06-02T12:22:04.512Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424567618/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424567618"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424567618",
+        "moin": "M0004401MV",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - Nonseller",
+            "title": "Über einen Zeitraum von mindestens drei Monaten wurde kein Nettoumsatz erzeugt. Bei Rückfragen erstellen Sie dazu bitte einen Vorgang im Partner Helpdesk. Weitere Informationen: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424567618"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M0004401MV"
+          }
+        ],
+        "lastModified": "2026-06-02T09:24:33.695Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424365436/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424365436"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424365436",
+        "moin": "M00Z0301ZQ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424365436"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-moderne-deko-skulpturen-mit-abstrakter-katzenfigur-von-designer-skulptur-a745-98-cm-hergestellt-in-europa-S0CCT0KC/#variationId=S0CCT0KC2XQ7"
+          }
+        ],
+        "lastModified": "2026-10-05T17:23:41.218Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424365023/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424365023"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424365023",
+        "moin": "M0010301ZR",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424365023"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neuheit-abstrakte-kuh-figur-fuer-garten-dekoration-skulptur-statue-skulptur-einer-kuh-hergestellt-in-europa-S0BCT0QI/#variationId=S0BCT0QIF7RV"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:25.733Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282905955/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282905955"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282905955",
+        "moin": "M00BE201FY",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282905955"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00BE201FY"
+          }
+        ],
+        "lastModified": "2025-11-17T10:07:49.332Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424342901/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424342901"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424342901",
+        "moin": "M008X301XR",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424342901"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-handbemalte-surfboard-skulpturen-in-abstrakter-kunstform-abstrakte-figur-surfbrett-hergestellt-in-europa-S0NCS088/#variationId=S0NCS088XL5U"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:44.615Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367683/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367683"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367683",
+        "moin": "M00AN301T7",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367683"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-giraffen-dekorationsfigur-fuer-den-garten-neu-im-sortiment-skulptur-p23-205-cm-hergestellt-in-europa-S02CR01I/#variationId=S02CR01IJNK5"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.357Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367829/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367829"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367829",
+        "moin": "M000P301TS",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367829"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neuartige-garten-dekorationsfigur-im-modernen-gorilla-design-skulptur-a756e-128x78x118-cm-hergestellt-in-europa-S02CR0A0/#variationId=S02CR0A061UP"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.357Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424368000/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424368000"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424368000",
+        "moin": "M00UR301TE",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424368000"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-dekorationen-garten-giraffe-figur-skulptur-ensemble-skulptur-a795a-320-cm-hergestellt-in-europa-S04CR0KK/#variationId=S04CR0KK2RLM"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.370Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367201/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367201"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367201",
+        "moin": "M00WL301T9",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367201"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-buntes-skulpturen-set-katze-aus-echter-handarbeit-im-abstrakten-abstrakte-figur-katze-hergestellt-in-europa-S00CR0S2/#variationId=S00CR0S2YOVI"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.393Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424475999/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424475999"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424475999",
+        "moin": "M00274013M",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424475999"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neu-kunststoff-henne-dekofigur-fuer-den-garten-osterdekoration-hoehe-skulptur-n27-32cm-hergestellt-in-europa-S05CV0FA/#variationId=S05CV0FA2KYU"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.456Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366945/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366945"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366945",
+        "moin": "M003K301T2",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366945"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-garten-skulptur-in-form-eines-abstrakten-dinosauriers-fuer-die-skulptur-d3-50x100-cm-hergestellt-in-europa-S0ZCQ0EB/#variationId=S0ZCQ0EBXVXF"
+          }
+        ],
+        "lastModified": "2026-10-05T17:31:47.540Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424260038/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424260038"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424260038",
+        "moin": "M008E301S1",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424260038"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M008E301S1"
+          }
+        ],
+        "lastModified": "2026-04-26T14:00:44.685Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424260090/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424260090"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424260090",
+        "moin": "M001N4012F",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424260090"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M001N4012F"
+          }
+        ],
+        "lastModified": "2026-04-26T14:00:45.843Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424365948/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424365948"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424365948",
+        "moin": "M00E2301ZA",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424365948"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-kunstskulptur-frau-abstrakt-figuren-dekoration-set-skulptur-p144c-85-cm-hergestellt-in-europa-S0DCT012/#variationId=S0DCT012WNI2"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:29.060Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366129/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366129"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366129",
+        "moin": "M00R3301ZF",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366129"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-luxus-garten-skulpturen-in-modernem-abstraktem-design-skulptur-a703a-98x200-cm-hergestellt-in-europa-S0DCT0FI/#variationId=S0DCT0FI2D9G"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:29.163Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424364767/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424364767"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424364767",
+        "moin": "M00BY301YK",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424364767"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-hundeskulptur-fuer-gartendekoration-skulptur-a709a-63x75-cm-hergestellt-in-europa-S0BCT0C4/#variationId=S0BCT0C4EVDJ"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:26.831Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424476071/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424476071"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424476071",
+        "moin": "M00D640111",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424476071"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-designer-xxl-wasserwand-270cm-wassersaeule-fuer-bar-und-lokal-saeule-hergestellt-in-europa-S08CU069/#variationId=S08CU069W2FX"
+          }
+        ],
+        "lastModified": "2026-10-12T06:37:29.973Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424519877/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424519877"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424519877",
+        "moin": "M004H40112",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424519877"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-garten-ornament-vogel-adler-91x172cm-figur-skulptur-statue-dekor-skulptur-a344-91x172cm-hergestellt-in-europa-S0CCU0S4/#variationId=S0CCU0S4JBTC"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:27.888Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282958715/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282958715"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282958715",
+        "moin": "M00ST201P4",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282958715"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00ST201P4"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:47.044Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424260045/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424260045"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424260045",
+        "moin": "M00FE301SW",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424260045"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M00FE301SW"
+          }
+        ],
+        "lastModified": "2026-04-26T14:00:44.686Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424475159/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424475159"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424475159",
+        "moin": "M004G40125",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424475159"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-dekorative-figur-statue-skulptur-93cm-amerikanischer-feuerwehrmann-p15-skulptur-material-acryl-93-cm-hoehe-hergestellt-in-europa-S0SCU08D/#variationId=S0SCU08DIYP7"
+          }
+        ],
+        "lastModified": "2026-10-05T17:46:03.722Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424362534/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424362534"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424362534",
+        "moin": "M00AJ301YD",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424362534"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-skulptur-deko-abstrakte-designerfigur-katze-skulptur-a740-110-cm-hergestellt-in-europa-S02CT0Y4/#variationId=S02CT0Y421JL"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.370Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282905986/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282905986"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282905986",
+        "moin": "M00ME201F0",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282905986"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/latexmatratze-topper-mehrere-zonen-matratze-exklusive-7-zonen-king-size-dicke-xlmoebel-40-cm-hoch-matratze-hergestellt-in-europa-S0LBZ0BO/#variationId=S0LBZ0BOP1WC"
+          }
+        ],
+        "lastModified": "2025-11-17T10:07:42.143Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424475296/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424475296"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424475296",
+        "moin": "M00GS40127",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424475296"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neu-kunststoff-skulptur-leuchtturm-figuren-statue-figuren-statuen-skulptur-l31-143cm-hergestellt-in-europa-S01CV0MC/#variationId=S01CV0MC67HI"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.381Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424364507/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424364507"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424364507",
+        "moin": "M00WW301YJ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424364507"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-abstrakte-skulptur-ballon-hunde-dekoration-fuer-frauen-in-skulptur-a865-100-cm-hergestellt-in-europa-S0ACT0RZ/#variationId=S0ACT0RZU2BH"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.507Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366549/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366549"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366549",
+        "moin": "M009H301T1",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366549"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-designer-skulpturen-im-abstrakten-stil-fuer-den-garten-moderne-skulptur-a738-24x90-cm-hergestellt-in-europa-S0XCQ0WC/#variationId=S0XCQ0WCVOYK"
+          }
+        ],
+        "lastModified": "2026-10-05T17:50:06.934Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424592559/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424592559"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424592559",
+        "moin": "M00264012R",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424592559"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-skulptur-eines-abstrakten-hais-mit-einer-laenge-von-250-cm-bunte-skulptur-i61-250cm-hergestellt-in-europa-S0NCU03R/#variationId=S0NCU03RVPNE"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:42.239Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424368192/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424368192"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424368192",
+        "moin": "M002T301TD",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424368192"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-handbemalte-bunte-figuren-skulptur-im-abstrakten-design-skulptur-scd005f-65-cm-hergestellt-in-europa-S04CR0T7/#variationId=S04CR0T7CU1R"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.376Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424589665/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424589665"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424589665",
+        "moin": "M0043301ZV",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424589665"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-gruene-gartendekoration-in-entenform-mit-modernem-design-skulptur-a464-73cm-hergestellt-in-europa-S0DCT052/#variationId=S0DCT052IAXS"
+          }
+        ],
+        "lastModified": "2026-04-26T17:48:13.548Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367003/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367003"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367003",
+        "moin": "M00JK301TF",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367003"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neuheit-garten-deko-skulptur-moderne-gorilla-figur-design-statue-skulptur-a732-70-cm-hergestellt-in-europa-S00CR04R/#variationId=S00CR04ROLMB"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.338Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424364682/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424364682"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424364682",
+        "moin": "M003X301YI",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424364682"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-abstrakte-skulptur-frau-in-akrobatischer-pose-dekofigur-skulptur-p151b-140x150-cm-hergestellt-in-europa-S0ACT0W9/#variationId=S0ACT0W9AAG2"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.551Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424365146/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424365146"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424365146",
+        "moin": "M00I0301ZJ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424365146"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-dekorative-gorilla-designer-figur-statue-fuer-garten-dekoration-skulptur-a732-70-cm-hergestellt-in-europa-S0CCT08B/#variationId=S0CCT08BXUNY"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:27.900Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366082/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366082"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366082",
+        "moin": "M00J3301Z7",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366082"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-kunststoffskulptur-einer-kuh-im-abstrakten-design-fuer-die-skulptur-a670b-67x104-cm-hergestellt-in-europa-S0DCT0DK/#variationId=S0DCT0DKII90"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:29.185Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424591668/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424591668"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424591668",
+        "moin": "M00F24012C",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424591668"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-skulptur-butler-figur-statue-in-140cm-fuer-restaurants-und-hotels-skulptur-i38-140cm-hergestellt-in-europa-S0LCU0MO/#variationId=S0LCU0MOPUEL"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:47.174Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367942/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367942"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367942",
+        "moin": "M00LR301T8",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367942"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-wohnaccessoires-skulptur-abstrakte-hasenfigur-fuer-stilvolle-skulptur-a814b-120-cm-hergestellt-in-europa-S04CR0I8/#variationId=S04CR0I86K09"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.461Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366815/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366815"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366815",
+        "moin": "M008I301TD",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366815"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-kuenstlerische-moderne-abstrakte-figur-handgemalte-dekorative-garten-skulptur-a673-147x210x55-cm-hergestellt-in-europa-S0YCQ0QD/#variationId=S0YCQ0QDHHVO"
+          }
+        ],
+        "lastModified": "2026-10-05T18:00:10.369Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367553/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367553"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367553",
+        "moin": "M00UM301TI",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367553"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-skulpturale-dekorationen-abstrakte-designs-fuer-stilvolle-skulptur-p141b-85-cm-hergestellt-in-europa-S01CR0N0/#variationId=S01CR0N0FB0B"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.342Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424364248/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424364248"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424364248",
+        "moin": "M00KU6010Y",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424364248"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-hund-garten-skulptur-dekoration-neue-designfigur-skulptur-a784a-47x55-cm-hergestellt-in-europa-S06CT0CN/#variationId=S06CT0CNINYN"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.469Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424342864/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424342864"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424342864",
+        "moin": "M003X301XK",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424342864"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-bunte-skulpturen-im-abstrakten-stil-designer-loft-skulptur-in-abstrakte-figur-surfbrett-hergestellt-in-europa-S0NCS072/#variationId=S0NCS072Z6L8"
+          }
+        ],
+        "lastModified": "2026-10-05T18:06:15.053Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367843/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367843"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367843",
+        "moin": "M00BP301TK",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367843"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-handgefertigte-designer-skulpturen-aus-der-loft-kollektion-abstrakte-abstrakte-figur-pferd-hergestellt-in-europa-S02CR0JR/#variationId=S02CR0JRF1MF"
+          }
+        ],
+        "lastModified": "2026-10-05T18:16:33.474Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424260137/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424260137"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424260137",
+        "moin": "M007E301S6",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424260137"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/?moin=M007E301S6"
+          }
+        ],
+        "lastModified": "2026-04-26T14:00:45.853Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367614/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367614"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367614",
+        "moin": "M00WM301TG",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367614"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-handgefertigte-dekorative-skulpturen-von-abstrakten-zoo-figuren-fuer-skulptur-a751a-80-cm-hergestellt-in-europa-S01CR0PQ/#variationId=S01CR0PQCQ8X"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.361Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366273/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366273"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366273",
+        "moin": "M00U4301ZB",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366273"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-garten-skulptur-moderne-abstrakte-hirsch-figur-dekoration-skulptur-a801-75x75-cm-hergestellt-in-europa-S0DCT0L0/#variationId=S0DCT0L0MCNO"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:29.191Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424368666/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424368666"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424368666",
+        "moin": "M00IC4011C",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424368666"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neue-dekorative-skulptur-bunte-elefantenfiguren-modernes-design-skulptur-sca002f-70x80-cm-hergestellt-in-europa-S0BCU04E/#variationId=S0BCU04EBB4C"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:27.938Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4067282850088/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4067282850088"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4067282850088",
+        "moin": "M002X101JF",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4067282850088"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-sofa-design-moebel-fuer-das-wohnzimmer-dreisitzer-couch-aus-textil-1-teile-hergestellt-in-europa-S0SBN0Z3/#variationId=S0SBN0Z3H804"
+          }
+        ],
+        "lastModified": "2026-10-05T18:22:31.769Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424518238/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424518238"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424518238",
+        "moin": "M00IC4011Y",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424518238"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-neu-210cm-grosse-skulptur-des-loewen-im-zoo-stil-als-gartendekoration-skulptur-a378-118x210cm-hergestellt-in-europa-S0BCU04T/#variationId=S0BCU04TVCH0"
+          }
+        ],
+        "lastModified": "2026-10-05T18:22:39.877Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367638/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367638"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367638",
+        "moin": "M003N301TQ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367638"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-handgefertigte-wohn-dekor-skulptur-in-abstrakter-tierform-skulptur-a622g-115-cm-hergestellt-in-europa-S01CR0WR/#variationId=S01CR0WR8WVB"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:23.349Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424366525/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424366525"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424366525",
+        "moin": "M001H301TA",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424366525"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-moderne-wohnzimmer-skulptur-set-abstrakte-moai-figuren-dekoration-skulptur-n90-75x25x24-5cm-hergestellt-in-europa-S0XCQ0PZ/#variationId=S0XCQ0PZTS6S"
+          }
+        ],
+        "lastModified": "2025-11-18T14:13:05.849Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424368420/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424368420"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424368420",
+        "moin": "M00M24010N",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424368420"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-dekorative-skulpturen-set-mit-abstrakten-schwein-motiven-fuer-die-skulptur-sad001f-hergestellt-in-europa-S0XCT077/#variationId=S0XCT0771OBJ"
+          }
+        ],
+        "lastModified": "2025-11-18T14:13:03.337Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424367959/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424367959"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424367959",
+        "moin": "M00MR301TT",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424367959"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-gorilla-garten-dekofigur-in-modernem-design-neu-gestaltet-skulptur-a756d-128x78x118-cm-hergestellt-in-europa-S04CR0J3/#variationId=S04CR0J3ZMF9"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.498Z"
+      },
+      "transport_error": null
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v5/products/4069424368277/marketplace-status",
+        "account": "XL",
+        "requested_sku": "4069424368277"
+      },
+      "http_status": 200,
+      "attempts": 1,
+      "body": {
+        "sku": "4069424368277",
+        "moin": "M00WT301TZ",
+        "status": "REJECTED",
+        "errors": [
+          {
+            "code": "602016 - LOW_PERFORMER",
+            "title": "Die Variante wurde deaktiviert, da über einen Zeitraum von mindestens zwölf Monaten kein Nettoumsatz generiert wurde. Weitere Informationen finden Sie in folgendem Helpdesk-Artikel: https://account.otto.market/s/article/Deaktivierung-von-Low-Performern-und-Produkten-mit-erhoehter-Retourenquote"
+          }
+        ],
+        "links": [
+          {
+            "rel": "variation",
+            "href": "/v5/products/4069424368277"
+          },
+          {
+            "rel": "shop",
+            "href": "https://www.otto.de/p/xlmoebel-skulptur-dekorative-skulptur-im-design-einer-abstrakten-giraffe-fuer-die-skulptur-scd004a-150-cm-hergestellt-in-europa-S04CR0VS/#variationId=S04CR0VSJ1BY"
+          }
+        ],
+        "lastModified": "2025-11-18T14:12:24.472Z"
+      },
+      "transport_error": null
+    }
+  ]
+}

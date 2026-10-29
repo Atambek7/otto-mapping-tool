@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Pencil, Loader2 } from "lucide-react";
 
+import { parsePositivePrice } from "@/lib/prices";
+
 interface InlinePriceCellProps {
   price: string | number;
   ean: string;
@@ -24,14 +26,7 @@ export const InlinePriceCell = React.memo(function InlinePriceCell({
   className
 }: InlinePriceCellProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const parseCleanPrice = (val: any): string => {
-    if (!val || val === "-" || val === "—") return "";
-    const s = String(val).replace("€", "").replace(/EUR/gi, "").replace(",", ".").trim();
-    const num = parseFloat(s);
-    if (isNaN(num) || num <= 0) return "";
-    return num % 1 === 0 ? String(Math.floor(num)) : num.toFixed(2);
-  };
-  const rawPriceStr = parseCleanPrice(price);
+  const rawPriceStr = parsePositivePrice(price);
   const [inputValue, setInputValue] = useState(rawPriceStr);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,31 +59,10 @@ export const InlinePriceCell = React.memo(function InlinePriceCell({
   const handleSave = async () => {
     if (isSavingRef.current) return;
 
-    const rawInput = inputValue
-      .replace("€", "")
-      .replace(/EUR/gi, "")
-      .trim()
-      .replace(",", ".");
-
-    if (!rawInput) {
-      toast.error("Цена не может быть пустой");
-      setInputValue(previousPriceRef.current);
-      setIsEditing(false);
-      return;
-    }
-
-    const num = parseFloat(rawInput);
-    if (isNaN(num) || num <= 0) {
+    const cleanPrice = parsePositivePrice(inputValue);
+    if (!cleanPrice) {
       toast.error("Укажите корректную цену больше 0 (например, 1299 или 1299.99)");
       setInputValue(previousPriceRef.current);
-      setIsEditing(false);
-      return;
-    }
-
-    // Preserve exact manual price entered by user
-    const cleanPrice = num % 1 === 0 ? String(Math.floor(num)) : num.toFixed(2);
-
-    if (cleanPrice === (previousPriceRef.current || "").trim()) {
       setIsEditing(false);
       return;
     }

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 import datetime
 from typing import Optional, Dict, Any, List
@@ -201,7 +202,7 @@ async def get_products(
     db: Session = Depends(get_db)
 ):
     """
-    Fetches a page of products from Aftercool with Redis caching and optional background DB sync.
+    Fetches a page of products from Aftercool with Redis caching; requested DB sync completes before success is returned.
     Supports cross-account routing for transferred factories.
     """
     fid_str = str(factory_id).strip() if factory_id else ""
@@ -211,12 +212,17 @@ async def get_products(
 
     cache_key = f"aftercool:products:{acc_str}:{fid_str}:{dataset}:{q}:{limit}:{offset}:{include_row}:{dedup}"
 
+    async def sync_page(page):
+        if include_row == 1 and sync_db == 1 and fid_str and acc_str:
+            result = await asyncio.to_thread(sync_products_to_db, fid_str, acc_str, page, 500, src_account)
+            if result.get("price_conflicts") and isinstance(page, dict):
+                page = {**page, "sync_status": "partial_error", "price_conflicts": result["price_conflicts"]}
+        return page
+
     if not refresh:
         cached_data = await get_cached_json(cache_key)
         if cached_data:
-            if background_tasks and include_row == 1 and sync_db == 1 and fid_str:
-                background_tasks.add_task(sync_products_to_db, fid_str, acc_str, cached_data, 500, src_account)
-            return cached_data
+            return await sync_page(cached_data)
 
     params = {
         "account": aftercool_acc,
@@ -255,10 +261,7 @@ async def get_products(
         # Cache for 30 minutes (1800s)
         await set_cached_json(cache_key, data, ex=1800)
 
-    if background_tasks and include_row == 1 and sync_db == 1 and fid_str:
-        background_tasks.add_task(sync_products_to_db, fid_str, acc_str, data, 500, src_account)
-
-    return data
+    return await sync_page(data)
 
 
 @router.post("/sync-metadata/{factory_id}")

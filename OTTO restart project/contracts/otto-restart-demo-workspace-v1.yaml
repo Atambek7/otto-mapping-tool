@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: OttoRestart Demo Workspace API
+  version: 1.0.0
+  description: >-
+    Same-origin, session-scoped synthetic data contract for the OttoRestart prototype.
+    It is not a production API and has no OTTO, Aftercool, filesystem, SQLite, or OttoFlow adapter.
+servers:
+  - url: /restart/api/demo
+security: []
+paths:
+  /overview:
+    get:
+      summary: Read synthetic dashboard data
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      responses:
+        '200': { description: Demo-only metrics and fixtures }
+  /batches:
+    get:
+      summary: Search session demo batches
+      parameters:
+        - {$ref: '#/components/parameters/Account'}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: status, schema: {type: string}}
+        - {in: query, name: page, schema: {type: integer, minimum: 1}}
+        - {in: query, name: pageSize, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200': {description: Account-scoped synthetic batch summaries}
+    post:
+      summary: Create only a synthetic demo batch in session memory
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period, name, itemCount]
+              properties:
+                period: {type: string, enum: [3M, 12M]}
+                name: {type: string, maxLength: 120}
+                itemCount: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        '200': {description: Created synthetic fixture batch}
+  /batches/preview:
+    post:
+      summary: Preview synthetic batch without writes or external calls
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period, name, itemCount]
+              properties:
+                period: {type: string, enum: [3M, 12M]}
+                name: {type: string, maxLength: 120}
+                itemCount: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        '200': {description: Synthetic counts, sample DEMO IDs and writesPerformed false}
+  /batches/{batchId}:
+    get:
+      summary: Read a batch and its synthetic rows
+      parameters:
+        - {$ref: '#/components/parameters/Account'}
+        - {in: path, name: batchId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Session demo batch details}
+        '404': {description: Batch does not exist in this demo account}
+  /batches/{batchId}/items:
+    get:
+      summary: Search and paginate synthetic batch rows
+      parameters:
+        - {$ref: '#/components/parameters/Account'}
+        - {in: path, name: batchId, required: true, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: page, schema: {type: integer, minimum: 1}}
+        - {in: query, name: pageSize, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200': {description: One server-paginated page of synthetic batch rows}
+  /ean-pool:
+    get:
+      summary: Read synthetic EAN-like demo identifiers and statuses
+      parameters:
+        - {$ref: '#/components/parameters/Account'}
+        - {in: query, name: status, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+      responses:
+        '200': {description: DEMO identifiers only; values are not GTINs}
+  /ean-pool/demo-import:
+    post:
+      summary: Add synthetic DEMO identifiers to the session pool
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count: {type: integer, minimum: 1, maximum: 20, default: 4}
+      responses:
+        '200': {description: Synthetic codes added to session memory}
+  /events:
+    get:
+      summary: Read demo audit events
+      parameters:
+        - {$ref: '#/components/parameters/Account'}
+        - {in: query, name: q, schema: {type: string}}
+      responses:
+        '200': {description: Events from local demo session only}
+  /settings:
+    get:
+      summary: Read account-scoped demo settings
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      responses:
+        '200': {description: Publish remains hard-coded disabled}
+    patch:
+      summary: Change permitted demo-only settings
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                defaultPeriod: {type: string, enum: [3M, 12M]}
+                maximumDemoBatchItems: {type: integer, minimum: 1, maximum: 1000}
+                strictAttributeChecks: {type: boolean}
+      responses:
+        '200': {description: Saved demo settings; production publish cannot be enabled}
+  /reset:
+    post:
+      summary: Reset all synthetic state in this browser session
+      parameters: [{$ref: '#/components/parameters/Account'}]
+      responses:
+        '200': {description: Demo session fixtures reset}
+components:
+  parameters:
+    Account:
+      in: query
+      name: account
+      required: true
+      schema: {type: string, enum: [JV, XL]}

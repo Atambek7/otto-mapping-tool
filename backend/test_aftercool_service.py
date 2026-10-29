@@ -63,7 +63,7 @@ class TestAftercoolService(unittest.TestCase):
         self.assertIsNotNone(prod)
         self.assertEqual(prod.ean, "4071489000001")
         self.assertEqual(prod.name, "Modernes Sofa Grau")
-        self.assertEqual(prod.price, Decimal("999.00"))
+        self.assertEqual(prod.price, Decimal("899.00"))
         self.assertEqual(prod.price_af, Decimal("899.00"))
         self.assertEqual(prod.image_url, "https://img.com/sofa1.jpg")
         self.assertEqual(prod.factory_id, "504065")

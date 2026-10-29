@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: OttoRestart Phase 4 Demo Review
+  version: 1.0.0
+  description: >-
+    Browser-scoped, in-memory fixture API in the standalone Next.js application.
+    No database writes, real GTINs, external AI, OTTO, or Aftercool calls.
+    Sessions expire after one hour of inactivity. Publication is always disabled.
+servers:
+  - url: /restart/api/demo
+paths:
+  /items:
+    get:
+      operationId: listDemoItems
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200': { description: Scoped demo items, pagination, available and reserved demo identifiers }
+        default: { $ref: '#/components/responses/Error' }
+  /items/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Account'
+      - $ref: '#/components/parameters/ItemId'
+    get:
+      operationId: getDemoItem
+      responses:
+        '200': { description: Old and new content, identity, price snapshot, version, issues, approval and audit events }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      operationId: patchDemoItem
+      description: >-
+        Same-origin browser writes with the demo header and existing session only.
+        Accepts title, category, material/color/width/height attributes, and local image IDs.
+        Price, identity, status, account and Product Reference mode are not editable.
+        Material edits clear approval and the immutable approved payload.
+      parameters:
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, patch]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                patch:
+                  type: object
+                  additionalProperties: false
+                  required: [title, category, attributes, images]
+                  properties:
+                    title: { type: string, maxLength: 500 }
+                    category: { type: string, enum: [demo-chair, demo-sofa] }
+                    attributes: { type: object, additionalProperties: { type: string, maxLength: 200 } }
+                    images: { type: array, items: { type: string, enum: [chair] } }
+      responses:
+        '200': { description: Updated versioned demo item }
+        default: { $ref: '#/components/responses/Error' }
+  /items/{id}/{action}:
+    post:
+      operationId: runDemoReviewAction
+      description: >-
+        Prepare checks price and eligibility before reserving a supplied DEMO identifier.
+        Approval re-reads simulated old-SKU standardPrice and captures an immutable payload.
+        A changed price requires revalidation and reapproval. AI suggestions are local stubs.
+        Price arithmetic uses integer cents: JV minus 1000, XL minus 1500.
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/DemoHeader'
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [prepare, suggest, refresh-price, validate, approve, simulate-price-change] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Updated item; approval can remain blocked with visible issues. publishAllowed is always false. }
+        default: { $ref: '#/components/responses/Error' }
+  /approve:
+    post:
+      operationId: approveDemoSelection
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [id, expectedVersion]
+                    properties:
+                      id: { type: string }
+                      expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Per-ID results with independent version, account, validation and price checks }
+        default: { $ref: '#/components/responses/Error' }
+  /reset:
+    post:
+      operationId: resetDemoSession
+      description: Reset the current browser's complete JV and XL fixture set.
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/DemoHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Fresh scoped demo list }
+        default: { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    Account:
+      name: account
+      in: query
+      required: true
+      schema: { type: string, enum: [JV, XL] }
+    ItemId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    DemoHeader:
+      name: X-OttoRestart-Demo
+      in: header
+      required: true
+      schema: { type: string, const: '1' }
+  responses:
+    Error:
+      description: Invalid input (422), wrong origin (403), scoped not found (404), expired session/version conflict (409)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, message, requestId]
+            properties:
+              code: { type: string }
+              message: { type: string }
+              requestId: { type: string, format: uuid }

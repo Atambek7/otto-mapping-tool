@@ -12,6 +12,7 @@ import models
 from services.distribution import distribute_products_round_robin
 from services.categories_repo import get_category_by_id
 from services.factory_scope import get_authoritative_factory_eans
+from services.queue_reconciliation import load_observations
 from scripts.reconcile_factories import reconcile_all_factories
 
 logger = logging.getLogger("publish_pipeline")
@@ -488,12 +489,39 @@ def list_pipeline_plans(
         for row in stats_rows
     }
 
+    # The stored queue status remains the result of the submission attempt. For
+    # the live progress projection, subtract only failed items whose exact
+    # attempt has a matching, account-scoped read-only OTTO existence check.
+    active_plan_ids = [
+        p.id for p in plans
+        if p.status in (models.PlanStatus.ACTIVE, models.PlanStatus.PAUSED)
+    ]
+    existing_by_plan: Dict[int, int] = {}
+    if active_plan_ids:
+        failed_items = (
+            db.query(models.PublishQueueItem)
+            .filter(
+                models.PublishQueueItem.plan_id.in_(active_plan_ids),
+                models.PublishQueueItem.account_name == account_name,
+                models.PublishQueueItem.status == models.QueueItemStatus.FAILED,
+            )
+            .order_by(models.PublishQueueItem.id.asc())
+            .all()
+        )
+        account_value = account_name.value if hasattr(account_name, "value") else str(account_name)
+        observations = load_observations(account_value, failed_items)
+        for item in failed_items:
+            if item.id in observations:
+                existing_by_plan[item.plan_id] = existing_by_plan.get(item.plan_id, 0) + 1
+
     result = []
     for p in plans:
         s = stats_by_plan.get(p.id, {"published": 0, "processing": 0, "failed": 0, "pending": 0})
         published_cnt = s["published"]
         processing_cnt = s["processing"]
-        failed_cnt = s["failed"]
+        submission_failed_cnt = s["failed"]
+        existing_cnt = existing_by_plan.get(p.id, 0)
+        failed_cnt = max(0, submission_failed_cnt - existing_cnt)
         pending_cnt = s["pending"]
 
         result.append({
@@ -512,6 +540,8 @@ def list_pipeline_plans(
                 "published": published_cnt,
                 "processing": processing_cnt,
                 "failed": failed_cnt,
+                "submission_failed": submission_failed_cnt,
+                "existing": existing_cnt,
                 "pending": pending_cnt,
                 "percentage": round((published_cnt / p.total_products * 100), 1) if p.total_products else 0
             }
@@ -604,6 +634,8 @@ def get_plan_items(
     from services.categories_service import resolve_category_names
     cat_names = resolve_category_names(cat_ids, db)
 
+    account = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+    observations = load_observations(account, queue_items)
     items_result = []
     for it in queue_items:
         m = mappings.get(it.product_ean)
@@ -622,6 +654,8 @@ def get_plan_items(
             "scheduled_date": it.scheduled_date.isoformat() if it.scheduled_date else None,
             "status": it.status.value if hasattr(it.status, "value") else str(it.status),
             "attempts": it.attempts,
+            "otto_product_exists": True if it.id in observations else None,
+            "otto_checked_at": observations.get(it.id, {}).get("checked_at"),
             "error_message": it.error_message,
             "missing_attributes": it.missing_attributes or [],
             "published_at": it.published_at.isoformat() if it.published_at else None,
@@ -654,8 +688,15 @@ def retry_failed_items(plan_id: int, db: Session = Depends(get_db)):
         )
         .all()
     )
+    account = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+    try:
+        observations = load_observations(account, failed_items, strict=True)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Не удалось проверить сохранённую сверку OTTO. Повторная отправка остановлена.")
+    # Existing cards must not be resent by a blanket retry of historical failures.
+    failed_items = [item for item in failed_items if item.id not in observations]
     if not failed_items:
-        return {"success": True, "message": "No failed items to retry.", "retried_count": 0}
+        return {"success": True, "message": "Нет ошибок для повторной отправки; найденные карточки OTTO пропущены.", "retried_count": 0}
 
     now_utc = datetime.now(timezone.utc)
     for it in failed_items:

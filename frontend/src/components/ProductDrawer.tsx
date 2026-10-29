@@ -14,14 +14,9 @@ import { useAccount } from "@/lib/useAccount";
 import { showOpenAiErrorToast } from "@/lib/openaiError";
 import { cn } from "@/lib/utils";
 
-const schemaCache = new Map<string, any[]>();
+import { parsePositivePrice, getAftercoolPrice } from "@/lib/prices";
 
-const parsePositivePrice = (val?: string | number | null): string => {
-  if (val === undefined || val === null) return "";
-  const clean = String(val).replace("€", "").replace(/EUR/gi, "").replace(/\s/g, "").replace(",", ".").trim();
-  const num = parseFloat(clean);
-  return (!isNaN(num) && num > 0) ? (num % 1 === 0 ? String(Math.floor(num)) : num.toFixed(2)) : "";
-};
+const schemaCache = new Map<string, any[]>();
 
 interface ProductDrawerProps {
   product: any;
@@ -121,7 +116,7 @@ function ProductDrawerComponent({
   const fallbackName = initialProductName || row.Artikelbeschreibung || product?.name || "";
   const displayName = (dbName && dbName.trim() !== "Без названия" && dbName.toLowerCase() !== "null") ? dbName : fallbackName;
   const name = displayName;
-  const displayPrice = parsePositivePrice(dbPrice) || parsePositivePrice(initialPrice) || parsePositivePrice(row.Startpreis) || parsePositivePrice(row.SofortkaufenPreis) || parsePositivePrice(product?.price) || "";
+  const displayPrice = parsePositivePrice(dbPrice) || parsePositivePrice(initialPrice) || (!product?.price_conflict ? getAftercoolPrice(row) || parsePositivePrice(product?.price) : "") || "";
   const img = row.GalleryURL || row.PictureURL || product?.img || product?.image_url || "";
 
   useEffect(() => {
@@ -504,6 +499,8 @@ function ProductDrawerComponent({
           const fetchRes = await fetchWithAuth(`/mapping/product/${ean}?account=${account}`);
           if (fetchRes.ok) {
             const fetchdata = await fetchRes.json();
+            setDbPrice(fetchdata.price || null);
+            if (fetchdata.product_name) setDbName(fetchdata.product_name);
             let newCatId = "";
             let newCatName = "";
             if (fetchdata.category_id) {
@@ -543,7 +540,7 @@ function ProductDrawerComponent({
             
             // Update parent table mapping state immediately
             if (newCatId) {
-              onSave(ean, newCatId, newCatName, cleanAttrs, fetchdata.status || "Ready");
+              onSave(ean, newCatId, newCatName, cleanAttrs, fetchdata.status || "Ready", fetchdata.product_name, fetchdata.price);
             }
           }
         } else if (r && (r.status === "not_found" || r.status === "unresolved")) {

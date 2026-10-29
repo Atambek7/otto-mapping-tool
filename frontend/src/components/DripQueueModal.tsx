@@ -47,6 +47,8 @@ interface QueueItem {
   error_message?: string;
   missing_attributes?: string[];
   published_at?: string;
+  otto_product_exists?: boolean | null;
+  otto_checked_at?: string;
 }
 
 interface EnrichedQueueItem extends QueueItem {
@@ -98,7 +100,7 @@ export default function DripQueueModal({
   const [retrying, setRetrying] = useState<boolean>(false);
   const [triggeringNow, setTriggeringNow] = useState(false);
 
-  const [statusTab, setStatusTab] = useState<"all" | "pending" | "processing" | "published" | "failed">("all");
+  const [statusTab, setStatusTab] = useState<"all" | "pending" | "processing" | "published" | "failed" | "existing">("all");
   const [searchInput, setSearchInput] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | "all">("all");
@@ -261,11 +263,13 @@ export default function DripQueueModal({
   // Stats calculation
   const stats = useMemo(() => {
     let published = 0;
+    let existing = 0;
     let processing = 0;
     let failed = 0;
     let pending = 0;
     for (const it of items) {
-      if (it.status === "published") published++;
+      if (it.status === "failed" && it.otto_product_exists) existing++;
+      else if (it.status === "published") published++;
       else if (it.status === "processing") processing++;
       else if (it.status === "failed") failed++;
       else pending++;
@@ -273,6 +277,7 @@ export default function DripQueueModal({
     return {
       total: items.length,
       published,
+      existing,
       processing,
       failed,
       pending,
@@ -326,7 +331,8 @@ export default function DripQueueModal({
   const filteredItems = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
     return enrichedItems.filter((it) => {
-      if (statusTab !== "all" && it.status !== statusTab) {
+      const displayStatus = it.status === "failed" && it.otto_product_exists ? "existing" : it.status;
+      if (statusTab !== "all" && displayStatus !== statusTab) {
         return false;
       }
       if (selectedDayFilter !== "all" && it.scheduled_day !== selectedDayFilter) {
@@ -591,6 +597,19 @@ export default function DripQueueModal({
             >
               Опубликованы ({stats.published})
             </button>
+            {stats.existing > 0 && (
+              <button
+                onClick={() => setStatusTab("existing")}
+                className={cn(
+                  "px-3 py-1 rounded-md font-medium transition-colors cursor-pointer",
+                  statusTab === "existing"
+                    ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                )}
+              >
+                Есть в OTTO ({stats.existing})
+              </button>
+            )}
             <button
               onClick={() => setStatusTab("failed")}
               className={cn(
@@ -689,7 +708,18 @@ export default function DripQueueModal({
                       <div className="font-semibold text-slate-900 dark:text-white line-clamp-2" title={item.displayTitle}>
                         {item.displayTitle}
                       </div>
-                      {item.error_message && (
+                      {item.otto_product_exists && item.otto_checked_at && (
+                        <div className="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Карточка найдена в OTTO: {new Date(item.otto_checked_at).toLocaleString("ru-RU")}. Доступность покупки не проверялась.
+                        </div>
+                      )}
+                      {item.otto_product_exists && item.error_message && (
+                        <details className="mt-1.5 text-[11px] text-slate-500" onClick={(event) => event.stopPropagation()}>
+                          <summary className="cursor-pointer">История: ошибка предыдущей отправки</summary>
+                          <div className="mt-1">{item.error_message}</div>
+                        </details>
+                      )}
+                      {!item.otto_product_exists && item.error_message && (
                         <div
                           className={cn(
                             "mt-1.5 p-2 rounded border text-[11px] leading-tight",
@@ -701,7 +731,7 @@ export default function DripQueueModal({
                           {item.error_message}
                         </div>
                       )}
-                      {item.missing_attributes && item.missing_attributes.length > 0 && (
+                      {!item.otto_product_exists && item.missing_attributes && item.missing_attributes.length > 0 && (
                         <div className="mt-1.5 p-1.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-[11px] text-amber-700 dark:text-amber-300">
                           <strong>Отсутствуют:</strong> {item.missing_attributes.join(", ")}
                         </div>
@@ -737,7 +767,11 @@ export default function DripQueueModal({
 
                     {/* Status */}
                     <td className="py-2.5 px-4">
-                      {item.status === "published" ? (
+                      {item.status === "failed" && item.otto_product_exists ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/60">
+                          <CheckCircle2 className="w-3 h-3" /> Есть в OTTO
+                        </span>
+                      ) : item.status === "published" ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/60">
                           <CheckCircle2 className="w-3 h-3" /> Опубликован
                         </span>

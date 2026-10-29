@@ -1,0 +1,546 @@
+openapi: 3.1.0
+info:
+  title: OttoRestart API
+  version: 1.0.0
+  description: >-
+    Contract for the isolated OttoRestart development API. The local backend
+    currently has no user authentication; production authentication and deployment
+    still require a separate review. No OTTO or Aftercool integration is included.
+servers:
+  - url: /api/restart
+    description: OttoRestart API base path (to be implemented in its own service)
+tags:
+  - name: Overview
+  - name: Batches
+  - name: EAN pool
+  - name: Queue
+paths:
+  /health:
+    get:
+      tags: [Overview]
+      operationId: getHealth
+      summary: Check whether the isolated OttoRestart API is responding
+      responses:
+        '200':
+          description: API service status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, const: ok }
+                  service: { type: string, const: ottorestart-local-api }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /csrf:
+    get:
+      tags: [Overview]
+      operationId: getCsrfToken
+      summary: Issue a development CSRF token for browser write requests
+      responses:
+        '200':
+          description: CSRF token and same-site cookie
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { type: string }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /overview:
+    get:
+      tags: [Overview]
+      operationId: getOverview
+      summary: Read overview counts for one account
+      parameters:
+        - $ref: '#/components/parameters/Account'
+      responses:
+        '200':
+          description: Current OttoRestart overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overview'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /batches:
+    get:
+      tags: [Batches]
+      operationId: listBatches
+      summary: List batches for one account
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/BatchStatus'
+        - name: query
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        '200':
+          description: A page of batches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchPage'
+        default:
+          $ref: '#/components/responses/ApiError'
+    post:
+      tags: [Batches]
+      operationId: createBatch
+      summary: Create an imported batch without submitting products to OTTO
+      description: >-
+        Creates a Restart batch only. The request must not publish to OTTO or
+        consume/reserve EANs. Production publication is outside this contract.
+      security:
+        - csrfCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchRequest'
+      responses:
+        '201':
+          description: Batch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /batches/{batchId}:
+    get:
+      tags: [Batches]
+      operationId: getBatch
+      summary: Read a batch by ID
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Account'
+      responses:
+        '200':
+          description: Batch details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Batch' }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /batches/{batchId}/items:
+    get:
+      tags: [Batches]
+      operationId: listBatchItems
+      summary: Read a paginated list of candidate EANs from one batch
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: query
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: A filtered page of candidate EANs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchItemPage'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /batches/preview:
+    post:
+      tags: [Batches]
+      operationId: previewBatch
+      summary: Validate candidate EANs without persisting or reserving EANs
+      description: >-
+        Dry-run only. Does not persist a batch, reserve EANs, or call any OTTO
+        write endpoint. Data-source lookups will be added only after their
+        access boundaries are approved.
+      security:
+        - csrfCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchPreviewRequest'
+      responses:
+        '200':
+          description: Dry-run summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchPreview'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /imports/preview:
+    post:
+      tags: [Batches]
+      operationId: previewImportFile
+      summary: Parse and validate an EAN import file without saving it
+      description: Accepts .xlsx, .csv, or .txt. Does not call any external data source.
+      security:
+        - csrfCookie: []
+      parameters:
+        - name: account
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Account' }
+        - name: period
+          in: query
+          schema: { $ref: '#/components/schemas/Period' }
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Parsed values and validation results; nothing persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchPreview'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /ean-pool:
+    get:
+      tags: [EAN pool]
+      operationId: listEanPool
+      summary: Read EAN pool entries for one account
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/EanStatus'
+      responses:
+        '200':
+          description: A page of EAN entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EanPage'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /ean-pool/import:
+    post:
+      tags: [EAN pool]
+      operationId: importEans
+      summary: Import EANs into one account's OttoRestart pool
+      description: >-
+        Validates checksum, duplicates, and global pool uniqueness in one
+        transaction. This does not reserve EANs for a batch or call external services.
+      security:
+        - csrfCookie: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account, eans]
+              properties:
+                account: { $ref: '#/components/schemas/Account' }
+                eans:
+                  type: array
+                  minItems: 1
+                  maxItems: 10000
+                  items: { type: string, pattern: '^\d{8,14}$' }
+      responses:
+        '201':
+          description: EANs imported as AVAILABLE
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [importedCount, account, status, importedAt]
+                properties:
+                  importedCount: { type: integer, minimum: 0 }
+                  account: { $ref: '#/components/schemas/Account' }
+                  status: { type: string, const: AVAILABLE }
+                  importedAt: { type: string, format: date-time }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /queue:
+    get:
+      tags: [Queue]
+      operationId: getQueue
+      summary: Read OttoRestart queue status for one account
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of OttoRestart queue entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuePage'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /events:
+    get:
+      tags: [Overview]
+      operationId: listEvents
+      summary: Read import and pool audit events for one account
+      parameters:
+        - $ref: '#/components/parameters/Account'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of Restart audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+        default:
+          $ref: '#/components/responses/ApiError'
+components:
+  securitySchemes:
+    csrfCookie:
+      type: apiKey
+      in: cookie
+      name: ottorestart_csrf
+  parameters:
+    Account:
+      name: account
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/Account'
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  responses:
+    ApiError:
+      description: OttoRestart API error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    Account:
+      type: string
+      enum: [JV, XL]
+    Period:
+      type: string
+      enum: [3M, 12M]
+    BatchStatus:
+      type: string
+      enum: [IMPORTED, PREVIEWED, NEEDS_REVIEW, READY, CANCELLED]
+    EanStatus:
+      type: string
+      enum: [AVAILABLE, RESERVED, SUBMITTED, USED, QUARANTINED]
+    QueueStatus:
+      type: string
+      enum: [IDLE, PAUSED, RUNNING, NEEDS_ATTENTION]
+    Batch:
+      type: object
+      additionalProperties: false
+      required: [id, account, period, name, status, itemCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        account: { $ref: '#/components/schemas/Account' }
+        period: { $ref: '#/components/schemas/Period' }
+        name: { type: string, maxLength: 160 }
+        status: { $ref: '#/components/schemas/BatchStatus' }
+        itemCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    PageInfo:
+      type: object
+      additionalProperties: false
+      required: [page, pageSize, totalItems, totalPages]
+      properties:
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 200 }
+        totalItems: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+    BatchPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Batch' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    BatchItem:
+      type: object
+      required: [id, batchId, account, sourceEan, rowNumber]
+      properties:
+        id: { type: integer }
+        batchId: { type: string, format: uuid }
+        account: { $ref: '#/components/schemas/Account' }
+        sourceEan: { type: string, pattern: '^\d{8,14}$' }
+        rowNumber: { type: integer, minimum: 1 }
+    BatchItemPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BatchItem' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    RestartEvent:
+      type: object
+      required: [id, account, eventType, entityType, entityId, summary, metadata, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        account: { $ref: '#/components/schemas/Account' }
+        eventType: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        summary: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    EventPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RestartEvent' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    CreateBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [account, period, name, sourceEans]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        period: { $ref: '#/components/schemas/Period' }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        sourceEans:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { type: string, pattern: '^\d{8,14}$' }
+    BatchPreviewRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateBatchRequest'
+    BatchPreview:
+      type: object
+      additionalProperties: false
+      required: [account, inputCount, uniqueCount, duplicateCount, duplicates, invalidEans, sourceEans, warnings]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        period:
+          anyOf:
+            - $ref: '#/components/schemas/Period'
+            - type: 'null'
+        sourceEans: { type: array, items: { type: string } }
+        inputCount: { type: integer, minimum: 0 }
+        uniqueCount: { type: integer, minimum: 0 }
+        duplicateCount: { type: integer, minimum: 0 }
+        duplicates: { type: array, items: { type: string } }
+        invalidEans: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        dataSourcesChecked:
+          type: array
+          items: { type: string, enum: [LOCAL_FORMAT_ONLY] }
+    Overview:
+      type: object
+      additionalProperties: false
+      required: [account, counts, generatedAt]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        counts:
+          type: object
+          additionalProperties: false
+          required: [candidates, awaitingReview, needsAttention, queued, onlineConfirmed, availableEans]
+          properties:
+            candidates: { type: integer, minimum: 0 }
+            awaitingReview: { type: integer, minimum: 0 }
+            needsAttention: { type: integer, minimum: 0 }
+            queued: { type: integer, minimum: 0 }
+            onlineConfirmed: { type: integer, minimum: 0 }
+            availableEans: { type: integer, minimum: 0 }
+        generatedAt: { type: string, format: date-time }
+    EanEntry:
+      type: object
+      additionalProperties: false
+      required: [ean, account, status, importedAt]
+      properties:
+        ean: { type: string, pattern: '^\d{8,14}$' }
+        account: { $ref: '#/components/schemas/Account' }
+        status: { $ref: '#/components/schemas/EanStatus' }
+        batchId: { type: [string, 'null'], format: uuid }
+        importedAt: { type: string, format: date-time }
+    EanPage:
+      type: object
+      required: [items, page]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EanEntry' } }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    QueuePage:
+      type: object
+      required: [account, status, items, page]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        status: { $ref: '#/components/schemas/QueueStatus' }
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, batchId, state, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              batchId: { type: string, format: uuid }
+              state: { type: string, enum: [WAITING, PROCESSING, ACCEPTED, FAILED, NEEDS_RECONCILE] }
+              createdAt: { type: string, format: date-time }
+        page: { $ref: '#/components/schemas/PageInfo' }
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+          enum: [UNAUTHENTICATED, FORBIDDEN, VALIDATION_ERROR, CONFLICT, NOT_FOUND, RATE_LIMITED, INTERNAL_ERROR]
+        message: { type: string }
+        requestId: { type: string }
+        details: { type: object, additionalProperties: true }

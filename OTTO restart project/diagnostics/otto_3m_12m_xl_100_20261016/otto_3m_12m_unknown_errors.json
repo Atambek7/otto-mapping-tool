@@ -1,0 +1,29 @@
+{
+  "unknown_code_occurrences": [
+    {
+      "sku": "4067282904347",
+      "expected_period": "3M",
+      "error_index": 1,
+      "code": "301006 - Dimensionierung Werte identisch",
+      "title": "Die Variante konnte in diesem Produkt nicht angelegt werden, da sich die gepflegten Werte der variantenbildenden Merkmale von anderen Varianten in diesem Produkt nicht unterscheiden. Pflegen Sie pro Varianten unterschiedliche Werte.",
+      "title_periods": []
+    }
+  ],
+  "unknown_code_values": [
+    "301006 - Dimensionierung Werte identisch"
+  ],
+  "contradictions": [],
+  "ambiguous_cases": [],
+  "state_changed_or_no_known_limit": [],
+  "uncheckable": [],
+  "response_data_anomalies": [
+    {
+      "sku": "4067282904347",
+      "http_status": 200,
+      "missing_fields": [
+        "moin"
+      ],
+      "note": "API returned HTTP 200 and matching 3M error, but omitted moin."
+    }
+  ]
+}
