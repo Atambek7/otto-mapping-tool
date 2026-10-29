@@ -42,7 +42,7 @@ function ShellContent({ children }: { children: ReactNode }) {
     event.preventDefault();
     const query = search.trim();
     if (!query) return;
-    router.push(`/review?q=${encodeURIComponent(query)}`);
+    router.push(`/afterbuy?q=${encodeURIComponent(query)}`);
     setSearchOpen(false);
   }
   return (

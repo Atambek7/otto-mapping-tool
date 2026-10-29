@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { OverviewWorkspace } from "@/components/demo/overview-workspace";
+import { WelcomePage } from "@/components/welcome/welcome-page";
 
-export const metadata: Metadata = { title: "Обзор OttoRestart · DEMO" };
-export default function OverviewPage() { return <OverviewWorkspace />; }
+export const metadata: Metadata = { title: "Добро пожаловать · OttoRestart" };
+
+export default function HomePage() {
+  return <WelcomePage />;
+}

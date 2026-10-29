@@ -3,13 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   BookOpenText,
   Clock3,
-  ClipboardCheck,
-  Layers3,
-  LayoutDashboard,
-  PackageSearch,
+  Factory,
+  House,
+  Send,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
@@ -19,20 +17,15 @@ type NavigationItem = { href: string; label: string; icon: LucideIcon };
 type NavigationGroup = { label: string; items: NavigationItem[] };
 
 const groups: NavigationGroup[] = [
-  { label: "Обзор", items: [{ href: "/", label: "Панель управления", icon: LayoutDashboard }] },
+  { label: "Обзор", items: [{ href: "/", label: "Добро пожаловать", icon: House }] },
   {
-    label: "Рабочий процесс",
+    label: "Каталоги 3/12M",
     items: [
-      { href: "/review", label: "Кандидаты 3/12M", icon: PackageSearch },
-      { href: "/batches", label: "Партии Restart", icon: Layers3 },
-      { href: "/quality-control", label: "Quality Control", icon: ClipboardCheck },
+      { href: "/afterbuy", label: "Товары Afterbuy", icon: Factory },
+      { href: "/direct-otto", label: "Товары напрямую из ОТТО", icon: Send },
     ],
   },
   { label: "Данные", items: [{ href: "/library", label: "OTTO Library", icon: BookOpenText }] },
-  {
-    label: "Публикация",
-    items: [{ href: "/queue", label: "Очередь и планировщик", icon: Activity }],
-  },
 ];
 
 export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNavigate }: { desktopHidden?: boolean; mobileOpen?: boolean; onNavigate?: () => void }) {
@@ -70,17 +63,22 @@ export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNa
             })}
           </section>
         ))}
+
+        <div className="sidebar-rule" style={{ margin: "6px 4px 4px" }} />
+
+        <div className="nav-group">
+          <Link
+            aria-current={restartPath.startsWith("/settings") ? "page" : undefined}
+            className={`nav-link${restartPath.startsWith("/settings") ? " active" : ""}`}
+            href="/settings"
+            onClick={onNavigate}
+          >
+            <Settings2 size={17} strokeWidth={1.8} />
+            <span>Настройки</span>
+          </Link>
+        </div>
       </nav>
       <div className="sidebar-bottom">
-        <Link
-          aria-current={restartPath.startsWith("/settings") ? "page" : undefined}
-          className={`nav-link${restartPath.startsWith("/settings") ? " active" : ""}`}
-          href="/settings"
-          onClick={onNavigate}
-        >
-          <Settings2 size={17} strokeWidth={1.8} />
-          <span>Настройки</span>
-        </Link>
         <div className="sidebar-footnote"><Clock3 size={14} /> Restart 3/12M</div>
       </div>
     </aside>
