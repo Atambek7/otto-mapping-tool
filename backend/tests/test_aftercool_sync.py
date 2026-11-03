@@ -174,53 +174,20 @@ class DatabaseTests(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def sync(self, **kwargs):
-        with patch('tasks_availability_sync.fetch_aftercool_products_for_factory', AsyncMock(return_value={'DEMO-PRICE': item()})), \
-             patch('tasks_availability_sync.OttoMarketClient', autospec=True) as client:
-            client.return_value.update_quantities.return_value = {'status_code': 200}
-            result = run_availability_sync(db=self.db, batch_delay_sec=0, **kwargs)
-        return result, client
-
-    def test_availability_updates_local_price_and_stock_not_otto_price(self):
-        result, client = self.sync()
-        self.assertEqual(result['errors'], [])
-        self.assertEqual(result['price_updated'], 1)
-        self.assertEqual(self.jv.price, '2149.99')
-        self.assertEqual(self.jv.price_af, '2149.99')
-        self.assertEqual(self.xl.price, '777')
-        client.assert_called_once_with('fixture', 'fixture')
-        client.return_value.update_quantities.assert_called_once_with([{'sku': 'DEMO-PRICE', 'quantity': 0}])
-        client.return_value.publish_products.assert_not_called()
-        self.assertEqual(self.db.query(models.AvailabilitySyncLog).count(), 1)
-
-    def test_manual_price_and_missing_source_price_preserved(self):
-        self.jv.price = '999.99'
-        self.jv.has_manual_price = True
-        self.db.commit()
-        result, _ = self.sync()
-        self.assertEqual(self.jv.price, '999.99')
-        self.assertEqual(self.jv.price_af, '2149.99')
-        self.assertEqual(result['price_updated'], 0)
-
-    def test_dry_run_does_not_write_even_if_caller_commits(self):
-        result, client = self.sync(dry_run=True)
-        self.db.commit()
-        self.db.expire_all()
-        self.assertEqual(self.jv.price, '1399.99')
-        self.assertEqual(self.db.query(models.AvailabilitySyncLog).count(), 0)
+    def test_periodic_price_and_stock_sync_is_disabled(self):
+        from tasks_availability_sync import sync_published_availability
+        before_price = self.jv.price
+        with patch('tasks_availability_sync.fetch_aftercool_products_for_factory') as fetch, \
+             patch('services.otto_client.OttoMarketClient') as client:
+            result = run_availability_sync(db=self.db, filter_account='JV')
+            task_result = sync_published_availability.run(filter_account='JV')
+        self.assertEqual(result['status'], 'disabled')
+        self.assertEqual(result['writes'], 0)
+        self.assertEqual(task_result['status'], 'disabled')
+        fetch.assert_not_called()
         client.assert_not_called()
-        self.assertEqual(result['price_updated'], 0)
-        self.assertEqual(result['price_changes_detected'], 1)
-
-    def test_missing_or_failed_source_never_sends_default_stock(self):
-        for source in ({}, RuntimeError('second page failed')):
-            fetch = AsyncMock(side_effect=source) if isinstance(source, Exception) else AsyncMock(return_value=source)
-            with patch('tasks_availability_sync.fetch_aftercool_products_for_factory', fetch), \
-                 patch('tasks_availability_sync.OttoMarketClient', autospec=True) as client:
-                result = run_availability_sync(db=self.db, batch_delay_sec=0)
-            client.return_value.update_quantities.assert_not_called()
-            self.assertTrue(result['errors'])
-            self.assertEqual(self.jv.price, '1399.99')
+        self.assertEqual(self.jv.price, before_price)
+        self.assertEqual(self.db.query(models.AvailabilitySyncLog).count(), 0)
 
     def test_bulk_sync_keeps_selected_jv_and_saves_prices(self):
         from routers.mapping import sync_okb_bulk, SyncOkbBulkRequest
@@ -300,15 +267,6 @@ class DatabaseTests(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(self.jv.price, '1399.99')
         self.assertEqual(result['price_conflicts'], ['DEMO-PRICE'])
-
-    def test_availability_conflict_does_not_send_otto_update_or_change_price(self):
-        with patch('tasks_availability_sync.fetch_aftercool_products_for_factory', AsyncMock(return_value={'DEMO-PRICE': {'price_conflict': True}})), \
-             patch('tasks_availability_sync.OttoMarketClient', autospec=True) as client:
-            result = run_availability_sync(db=self.db, batch_delay_sec=0)
-        client.return_value.update_quantities.assert_not_called()
-        self.assertEqual(self.jv.price, '1399.99')
-        self.assertEqual(result['skipped'], 1)
-        self.assertIn('Conflicting', result['errors'][0])
 
     def test_catalog_refresh_preserves_ai_title_and_manual_price(self):
         self.jv.has_ai_title = True

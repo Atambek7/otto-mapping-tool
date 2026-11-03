@@ -28,6 +28,7 @@ export const resources = {
       nav: {
         dashboard: "Панель управления",
         factories: "Фабрики",
+        drip_factories: "Фабрики Drip Feed",
         products: "Поиск товаров",
         validation: "Валидация",
         export: "Центр экспорта",
@@ -535,6 +536,7 @@ export const resources = {
       nav: {
         dashboard: "Dashboard",
         factories: "Factories",
+        drip_factories: "Drip Feed factories",
         products: "Products Search",
         validation: "Validation",
         export: "Export Center",

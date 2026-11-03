@@ -94,88 +94,25 @@ class TestAvailabilitySync(unittest.TestCase):
         payload = mock_client.update_quantities.call_args[0][0]
         self.assertEqual(payload, [{"sku": "4000000000003", "quantity": 12}])
 
-    @patch("tasks_availability_sync.OttoMarketClient")
-    @patch("tasks_availability_sync.fetch_aftercool_products_for_factory")
-    def test_run_availability_sync_price_update_and_logging(self, mock_fetch_af, mock_otto_client_cls):
-        # Setup mock Otto client
-        mock_client_instance = MagicMock()
-        mock_client_instance.update_quantities.return_value = {"status_code": 200}
-        mock_otto_client_cls.return_value = mock_client_instance
-
-        # Setup AccountSettings
+    def test_periodic_availability_sync_is_disabled_without_network_or_price_writes(self):
         settings = models.AccountSettings(
-            account_name="JV",
-            otto_client_id="test-id",
-            otto_client_secret="test-secret",
-            otto_partner_id="test-partner",
+            account_name="JV", otto_client_id="fixture", otto_client_secret="fixture"
         )
-        self.db.add(settings)
-
-        # Setup ProductMappings: one with price change, one with unchanged price
-        p1 = models.ProductMapping(
-            product_ean="4071489000001",
-            account_name=models.AccountType.JV,
-            factory_id="101",
-            status="Published",
-            price="100.00",
+        mapping = models.ProductMapping(
+            product_ean="4071489000001", account_name=models.AccountType.JV,
+            factory_id="101", status="Published", price="100.00",
         )
-        p2 = models.ProductMapping(
-            product_ean="4071489000002",
-            account_name=models.AccountType.JV,
-            factory_id="101",
-            status="Published",
-            price="200.00",
-        )
-        self.db.add_all([p1, p2])
+        self.db.add_all([settings, mapping])
         self.db.commit()
-
-        # Mock Aftercool returning new price for p1 and new stock for both
-        mock_af_data = {
-            "4071489000001": {
-                "row": {
-                    "Menge": "8",
-                    "Startpreis": "129.99",
-                    "SofortkaufenPreis": "9999.99",
-                }
-            },
-            "4071489000002": {
-                "row": {
-                    "Menge": "0",  # Out of stock
-                    "Startpreis": "200.00",
-                    "SofortkaufenPreis": "8888.88",
-                }
-            },
-        }
-        
-        async def _fake_fetch(*args, **kwargs):
-            return mock_af_data
-            
-        mock_fetch_af.side_effect = _fake_fetch
-
-        summary = run_availability_sync(db=self.db, batch_delay_sec=0)
-
-        self.assertEqual(summary["total_published"], 2)
-        self.assertEqual(summary["factories_processed"], 1)
-        self.assertEqual(summary["synced_ok"], 2)
-        self.assertEqual(summary["price_updated"], 1)
-        self.assertEqual(summary["out_of_stock_detected"], 1)
-
-        # Verify DB mapping was updated for p1
-        self.db.refresh(p1)
-        self.assertEqual(p1.price, "129.99")
-
-        # Verify AvailabilitySyncLog records
-        logs = self.db.query(models.AvailabilitySyncLog).all()
-        self.assertEqual(len(logs), 2)
-        log_eans = {l.product_ean: l for l in logs}
-
-        self.assertEqual(log_eans["4071489000001"].new_stock, 8)
-        self.assertEqual(log_eans["4071489000001"].new_price, "129.99")
-        self.assertEqual(log_eans["4071489000001"].sync_result, "ok")
-
-        self.assertEqual(log_eans["4071489000002"].new_stock, 0)
-        self.assertEqual(log_eans["4071489000002"].sync_result, "ok")
-
+        with patch("tasks_availability_sync.fetch_aftercool_products_for_factory") as fetch, \
+             patch("services.otto_client.OttoMarketClient") as client:
+            result = run_availability_sync(db=self.db)
+        self.assertEqual(result["status"], "disabled")
+        self.assertEqual(result["writes"], 0)
+        self.assertEqual(mapping.price, "100.00")
+        fetch.assert_not_called()
+        client.assert_not_called()
+        self.assertEqual(self.db.query(models.AvailabilitySyncLog).count(), 0)
 
 if __name__ == "__main__":
     unittest.main()
