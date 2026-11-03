@@ -63,6 +63,7 @@ interface CatalogProductsTableProps {
   onApplyAiAttributes: (selectedIds?: string[]) => void;
   onApplyAiCategories: (selectedIds?: string[]) => void;
   onSyncFromOtto: (selectedIds?: string[]) => void;
+  onAssignNewEan?: (selectedIds?: string[]) => void;
   showToast: (msg: string) => void;
 }
 
@@ -81,6 +82,7 @@ export function CatalogProductsTable({
   onApplyAiAttributes,
   onApplyAiCategories,
   onSyncFromOtto,
+  onAssignNewEan,
   showToast,
 }: CatalogProductsTableProps) {
   const { account } = useRestartAccount();
@@ -287,64 +289,64 @@ export function CatalogProductsTable({
         className="ottoflow-kpi-strip"
         aria-label="Сводка статусов каталога"
       >
-        {/* Tile 1: ВСЕ ТОВАРЫ */}
+        {/* Tile 1: Все товары */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("")}
           className={`ottoflow-kpi-tile ${statusFilter === "" ? "kpi-active" : ""}`}
         >
-          <span className="kpi-label">ВСЕ ТОВАРЫ</span>
-          <span className="kpi-value text-white">{metrics.total}</span>
+          <span className="kpi-label">Все товары</span>
+          <span className="kpi-value text-white tabular-nums">{metrics.total}</span>
         </button>
 
-        {/* Tile 2: ГОТОВЫ */}
+        {/* Tile 2: Готовы */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("READY")}
           className={`ottoflow-kpi-tile ${statusFilter === "READY" ? "kpi-active border-emerald-500" : ""}`}
         >
-          <span className="kpi-label">ГОТОВЫ</span>
-          <span className="kpi-value text-emerald-400">{metrics.ready}</span>
+          <span className="kpi-label">Готовы</span>
+          <span className="kpi-value text-emerald-400 tabular-nums">{metrics.ready}</span>
         </button>
 
-        {/* Tile 3: 3 МЕСЯЦА */}
+        {/* Tile 3: 3 месяца */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("3M")}
           className={`ottoflow-kpi-tile ${statusFilter === "3M" ? "kpi-active border-amber-500" : ""}`}
         >
-          <span className="kpi-label">3 МЕСЯЦА</span>
-          <span className="kpi-value text-amber-400">{metrics.count3m}</span>
+          <span className="kpi-label">3 месяца</span>
+          <span className="kpi-value text-amber-400 tabular-nums">{metrics.count3m}</span>
         </button>
 
-        {/* Tile 4: 12 МЕСЯЦЕВ */}
+        {/* Tile 4: 12 месяцев */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("12M")}
           className={`ottoflow-kpi-tile ${statusFilter === "12M" ? "kpi-active border-orange-500" : ""}`}
         >
-          <span className="kpi-label">12 МЕСЯЦЕВ</span>
-          <span className="kpi-value text-orange-400">{metrics.count12m}</span>
+          <span className="kpi-label">12 месяцев</span>
+          <span className="kpi-value text-orange-400 tabular-nums">{metrics.count12m}</span>
         </button>
 
-        {/* Tile 5: ОШИБКИ */}
+        {/* Tile 5: Ошибки */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("ERROR")}
           className={`ottoflow-kpi-tile ${statusFilter === "ERROR" ? "kpi-active border-rose-500" : ""}`}
         >
-          <span className="kpi-label">ОШИБКИ</span>
-          <span className="kpi-value text-rose-400">{metrics.errors}</span>
+          <span className="kpi-label">Ошибки</span>
+          <span className="kpi-value text-rose-400 tabular-nums">{metrics.errors}</span>
         </button>
 
-        {/* Tile 6: ОПУБЛИКОВАНЫ */}
+        {/* Tile 6: Опубликованы */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("PUBLISHED")}
           className={`ottoflow-kpi-tile ${statusFilter === "PUBLISHED" ? "kpi-active border-teal-500" : ""}`}
         >
-          <span className="kpi-label">ОПУБЛИКОВАНЫ</span>
-          <span className="kpi-value text-teal-400">{metrics.published}</span>
+          <span className="kpi-label">Опубликованы</span>
+          <span className="kpi-value text-teal-400 tabular-nums">{metrics.published}</span>
         </button>
       </section>
 
@@ -433,8 +435,8 @@ export function CatalogProductsTable({
                 />
               </th>
 
-              {/* Col 2: ФОТО */}
-              <th className="th-photo">ФОТО</th>
+              {/* Col 2: Фото */}
+              <th className="th-photo">Фото</th>
 
               {/* Col 3: Название товара + >70 Filter Button */}
               <th className="th-name">
@@ -709,19 +711,33 @@ export function CatalogProductsTable({
                       className="td-ean"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        type="button"
-                        className="ean-badge-btn"
-                        onClick={(e) => handleCopyEan(product.ean, e)}
-                        title="Нажмите, чтобы скопировать EAN"
-                      >
-                        <span className="ean-text">{product.ean}</span>
-                        {copiedEan === product.ean ? (
-                          <Check size={12} className="text-emerald-400" />
-                        ) : (
-                          <Copy size={12} className="ean-copy-icon" />
+                      <div className="ean-cell-stack">
+                        <button
+                          type="button"
+                          className={`ean-badge-btn ${product.hasNewEan ? "ean-badge-new" : ""}`}
+                          onClick={(e) => handleCopyEan(product.ean, e)}
+                          title={
+                            product.hasNewEan && product.sourceEan
+                              ? `Новый EAN: ${product.ean} (исходный Aftercool EAN: ${product.sourceEan}). Нажмите, чтобы скопировать.`
+                              : "Нажмите, чтобы скопировать EAN"
+                          }
+                        >
+                          <span className="ean-text tabular-nums">{product.ean}</span>
+                          {copiedEan === product.ean ? (
+                            <Check size={12} className="text-emerald-400" />
+                          ) : (
+                            <Copy size={12} className="ean-copy-icon" />
+                          )}
+                        </button>
+                        {product.hasNewEan && product.sourceEan && (
+                          <div className="ean-origin-row">
+                            <span className="ean-new-tag">Новый EAN</span>
+                            <span className="ean-origin-text tabular-nums" title={`Исходный Aftercool EAN: ${product.sourceEan}`}>
+                              ← {product.sourceEan}
+                            </span>
+                          </div>
                         )}
-                      </button>
+                      </div>
                     </td>
 
                     {/* Col 5: Цена — ручное редактирование без скидочной подписи */}
@@ -814,6 +830,14 @@ export function CatalogProductsTable({
         totalCount={items.length}
         onClearSelection={() => setSelectedIds([])}
         onSelectAll={() => setSelectedIds(items.map((i) => i.id))}
+        onAssignNewEan={
+          onAssignNewEan
+            ? () => {
+                onAssignNewEan(selectedIds);
+                setSelectedIds([]);
+              }
+            : undefined
+        }
         onApplyDefaults={() => {
           showToast(
             `✓ Применены стандартные параметры фабрики для ${selectedIds.length} товаров`

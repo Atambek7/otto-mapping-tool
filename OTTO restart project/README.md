@@ -2,6 +2,15 @@
 
 Standalone OttoRestart workspace for the Restart 3/12M flow. The public base path is `/restart`. **The current UI is a demo prototype and uses only synthetic data in an in-memory browser session.** It does not load actual goods, call OTTO/Aftercool, write to Phase 3 SQLite, or publish anything. The separate FastAPI/SQLite prototype remains available for development experiments, but the current UI does not call it.
 
+## Авторизация (Login / Password)
+
+Доступ ко всем разделам `/restart/*` и API защищён базовой авторизацией по логину и паролю.
+- Логин и пароль по умолчанию: `admin` / `admin`.
+- Настройка через переменные окружения: `OTTORESTART_AUTH_USER`, `OTTORESTART_AUTH_PASSWORD`, `OTTORESTART_AUTH_SECRET`.
+- Сессия хранится в подписанной HttpOnly-куке `ottorestart_session` (срок действия: 7 дней).
+- Кнопка выхода из системы расположена в правом верхнем углу панели управления (топбар).
+- При публикации в публичный интернет необходимо сменить стандартный пароль `admin` на надёжный через `OTTORESTART_AUTH_PASSWORD`.
+
 ## API contract (design only)
 
 - OpenAPI document: `contracts/otto-restart-api-v1.yaml`.

@@ -19,6 +19,7 @@ interface ProductSelectionBarProps {
   totalCount: number;
   onClearSelection: () => void;
   onSelectAll?: () => void;
+  onAssignNewEan?: () => Promise<void> | void;
   onApplyDefaults?: () => Promise<void> | void;
   onApplyAiTitles?: () => Promise<void> | void;
   onSyncFromOtto: () => Promise<void> | void;
@@ -31,6 +32,7 @@ export function ProductSelectionBar({
   totalCount,
   onClearSelection,
   onSelectAll,
+  onAssignNewEan,
   onApplyDefaults,
   onApplyAiTitles,
   onSyncFromOtto,
@@ -157,6 +159,24 @@ export function ProductSelectionBar({
 
         {/* Right Side: Action Buttons matching Photo 4 (No ,99, No в XL) */}
         <div className="selection-bar-actions">
+          {/* 0. Новый EAN */}
+          {onAssignNewEan && (
+            <button
+              type="button"
+              className="selection-btn btn-action-new-ean"
+              onClick={() =>
+                runWithProgress(
+                  `Назначение нового EAN и запись в OTTO Library для ${selectedCount} товаров...`,
+                  onAssignNewEan
+                )
+              }
+              title="Назначить новый EAN для перезапуска и сохранить связку «Aftercool EAN = новый OTTO EAN» в OTTO Library"
+            >
+              <Tag size={14} className="icon-tag-ean" />
+              <span>Новый EAN ({selectedCount})</span>
+            </button>
+          )}
+
           {/* 1. Defaults */}
           <button
             type="button"

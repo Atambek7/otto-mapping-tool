@@ -206,7 +206,10 @@ export function DripScheduleModal({
                     <span className="drip-toggle-title">
                       Защита от пересечений категорий (Anti-collision)
                     </span>
-                    <span className="drip-rec-badge">🛡️ Рекомендуется</span>
+                    <span className="drip-rec-badge">
+                      <ShieldCheck size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />
+                      Рекомендуется
+                    </span>
                   </div>
                   <p className="drip-toggle-desc">
                     Интеллектуально распределяет схожие позиции по разным дням для максимальной конверсии

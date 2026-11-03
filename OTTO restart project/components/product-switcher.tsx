@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Layers } from "lucide-react";
 import logoRed from "@/components/demo/images/otto-logo_red.png";
 import logoBrown from "@/components/demo/images/otto_log_brown.png";
 
@@ -52,7 +52,7 @@ export function ProductSwitcher() {
           <span><strong>OttoRestart</strong><small>Управление Restart 3/12M</small></span>
         </Link>
         <a href="/dashboard" className="product-choice">
-          <span className="product-choice-dot flow-dot" />
+          <span className="product-choice-logo"><Layers size={15} /></span>
           <span><strong>OttoFlow</strong><small>Операции и экспорт</small></span>
         </a>
       </div>

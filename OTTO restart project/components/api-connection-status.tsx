@@ -1,5 +1,13 @@
+import { Database } from "lucide-react";
+
 export function ApiConnectionStatus() {
-  return <div className="connection-state connection-demo" title="Все экраны OttoRestart используют синтетические данные в локальной demo-сессии">
-    <span /> Demo-сервис · локально
-  </div>;
+  return (
+    <div
+      className="connection-state"
+      title="Рабочая среда OttoRestart 3/12M"
+    >
+      <Database size={13} />
+      <span>Локальный режим</span>
+    </div>
+  );
 }

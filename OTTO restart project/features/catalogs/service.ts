@@ -1,6 +1,31 @@
 import type { RestartAccount } from "@/features/api/types";
 import { MOCK_FACTORIES, MOCK_CATALOG_PRODUCTS } from "./mock-data";
-import type { AfterbuyFactoryItem, CatalogProductItem, FactoryMetrics, FactoryProductsMetrics } from "./types";
+import type {
+  AfterbuyFactoryItem,
+  CatalogEanLinkRecord,
+  CatalogProductItem,
+  FactoryCompletionHistoryItem,
+  FactoryCompletionStatus,
+  FactoryMetrics,
+  FactoryProductsMetrics,
+} from "./types";
+
+function computeEan13CheckDigit(twelveDigits: string): string {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const digit = parseInt(twelveDigits[i], 10) || 0;
+    sum += i % 2 === 0 ? digit : digit * 3;
+  }
+  const mod = sum % 10;
+  return String(mod === 0 ? 0 : 10 - mod);
+}
+
+function generateValidEan13(account: RestartAccount, sequenceNumber: number): string {
+  const prefix = account === "JV" ? "4260991" : "4260992";
+  const body = String(sequenceNumber).padStart(5, "0").slice(-5);
+  const twelve = `${prefix}${body}`;
+  return `${twelve}${computeEan13CheckDigit(twelve)}`;
+}
 
 // Pricing rule: JV -10 EUR (1000 cents), XL -15 EUR (1500 cents)
 export function calculateRestartPriceCents(oldPriceCents: number, account: RestartAccount): number {
@@ -69,6 +94,8 @@ export function getProductComputedStatus(
 export class CatalogDemoService {
   private factories: AfterbuyFactoryItem[] = [...MOCK_FACTORIES];
   private products: CatalogProductItem[] = [...MOCK_CATALOG_PRODUCTS];
+  private eanLinks: CatalogEanLinkRecord[] = [];
+  private eanCounter = 10420;
 
   calculateRestartPriceCents(oldPriceCents: number, account: RestartAccount): number {
     return calculateRestartPriceCents(oldPriceCents, account);
@@ -103,6 +130,163 @@ export class CatalogDemoService {
     };
 
     return { items, metrics };
+  }
+
+  async getFactoriesAsync(
+    account: RestartAccount,
+    search = "",
+    statusFilter = "ALL",
+    sortByNew = false
+  ): Promise<{
+    items: AfterbuyFactoryItem[];
+    metrics: FactoryMetrics & {
+      completeCount: number;
+      notCompleteCount: number;
+      unknownCount: number;
+      totalNewCandidates: number;
+    };
+  }> {
+    try {
+      const url = `/restart/api/backend/factories?account=${account}&status=${encodeURIComponent(
+        statusFilter
+      )}&sort_by_new=${sortByNew ? "true" : "false"}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const backendItems: AfterbuyFactoryItem[] = (data.items || []).map((it: any) => ({
+          id: String(it.id),
+          name: it.name || `Фабрика ${it.id}`,
+          account: it.account || account,
+          totalProductsCatalog: it.totalCandidates || 0,
+          candidatesCount3m: it.period3mCount || 0,
+          candidatesCount12m: it.period12mCount || 0,
+          totalCandidates: it.totalCandidates || 0,
+          readyCount: it.readyCount || 0,
+          needsAiCount: 0,
+          errorCount: it.errorCount || 0,
+          existsInOttoCount: it.publishedCount || 0,
+          isCached: true,
+          lastUpdated: it.lastCompletedAt || it.lastScannedAt || "2026-10-30",
+          status: (it.status as FactoryCompletionStatus) || "UNKNOWN",
+          newCandidatesCount: it.newCandidatesCount || 0,
+          firstCompletedAt: it.firstCompletedAt,
+          lastCompletedAt: it.lastCompletedAt,
+          lastScannedAt: it.lastScannedAt,
+          wasPreviouslyCompleted: Boolean(it.wasPreviouslyCompleted),
+        }));
+
+        let filtered = backendItems;
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          filtered = filtered.filter(
+            (f) => f.name.toLowerCase().includes(q) || f.id.includes(q)
+          );
+        }
+
+        return {
+          items: filtered,
+          metrics: {
+            totalCandidates: backendItems.reduce((sum, f) => sum + f.totalCandidates, 0),
+            totalFactories: backendItems.length,
+            count3m: backendItems.reduce((sum, f) => sum + f.candidatesCount3m, 0),
+            count12m: backendItems.reduce((sum, f) => sum + f.candidatesCount12m, 0),
+            cachedCount: backendItems.length,
+            completeCount: data.completeCount || 0,
+            notCompleteCount: data.notCompleteCount || 0,
+            unknownCount: data.unknownCount || 0,
+            totalNewCandidates: data.totalNewCandidates || 0,
+          },
+        };
+      }
+    } catch {
+      // Graceful fallback to local mock data if backend unavailable
+    }
+
+    const fallback = this.getFactories(account, search);
+    return {
+      items: fallback.items,
+      metrics: {
+        ...fallback.metrics,
+        completeCount: 0,
+        notCompleteCount: fallback.items.length,
+        unknownCount: 0,
+        totalNewCandidates: 0,
+      },
+    };
+  }
+
+  async getFactoryCompletionHistoryAsync(
+    account: RestartAccount,
+    factoryId: string
+  ): Promise<FactoryCompletionHistoryItem[]> {
+    try {
+      const res = await fetch(
+        `/restart/api/backend/factories/${factoryId}/history?account=${account}`,
+        { cache: "no-store" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return data.items || [];
+      }
+    } catch {
+      // Ignore errors
+    }
+    return [];
+  }
+
+  async completeFactoryAsync(
+    account: RestartAccount,
+    factoryId: string
+  ): Promise<{ success: boolean; message?: string }> {
+    try {
+      const res = await fetch(
+        `/restart/api/backend/factories/${factoryId}/complete?account=${account}`,
+        { method: "POST", cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        return { success: true };
+      }
+      return { success: false, message: data.detail || "Не удалось завершить фабрику" };
+    } catch (err: any) {
+      return { success: false, message: err?.message || "Ошибка сети" };
+    }
+  }
+
+  async pasteImportContentAsync(
+    account: RestartAccount,
+    rawText: string,
+    filename = "manual_import.txt",
+    dryRun = false
+  ): Promise<any> {
+    const res = await fetch("/restart/api/backend/imports/paste", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account,
+        raw_text: rawText,
+        filename,
+        dry_run: dryRun,
+      }),
+    });
+    return res.json();
+  }
+
+  async uploadImportFileAsync(
+    account: RestartAccount,
+    file: File,
+    dryRun = false
+  ): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(
+      `/restart/api/backend/imports/upload?account=${account}&dry_run=${dryRun ? "true" : "false"}`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+    return res.json();
   }
 
   getFactoryById(factoryId: string, account: RestartAccount): AfterbuyFactoryItem | undefined {
@@ -227,6 +411,139 @@ export class CatalogDemoService {
     };
 
     return { items: directItems, metrics };
+  }
+
+  // Interactive action: Assign new EANs to selected products and record Aftercool EAN -> New OTTO EAN links
+  async assignNewEansAsync(productIds: string[]): Promise<number> {
+    const targetProducts = this.products.filter((p) => productIds.includes(p.id));
+    if (targetProducts.length === 0) return 0;
+
+    const account = targetProducts[0].account;
+    const itemsPayload = targetProducts.map((p) => ({
+      source_type: p.factoryId ? "AFTERCOOL" : "OTTO_DIRECT",
+      aftercool_product_id: p.id,
+      aftercool_sku: p.ean,
+      aftercool_ean: p.sourceEan || p.ean,
+      factory_id: p.factoryId || null,
+      factory_name: p.factoryName || null,
+      title: p.title,
+      price_cents: p.oldStandardPriceCents,
+      category: p.category,
+      period: p.period || "3M",
+    }));
+
+    try {
+      const res = await fetch("/restart/api/backend/library/assign-ean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account, items: itemsPayload }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const assignedMap = new Map<string, { newEan: string; linkId: string }>();
+        for (const item of data.assigned || []) {
+          assignedMap.set(item.sourceEan, { newEan: item.newEan, linkId: item.linkId });
+        }
+
+        const nowIso = new Date().toISOString();
+        this.products = this.products.map((p) => {
+          const originalEan = p.sourceEan || p.ean;
+          const assigned = assignedMap.get(originalEan);
+          if (assigned) {
+            const newEan = assigned.newEan;
+            const linkRecord: CatalogEanLinkRecord = {
+              id: assigned.linkId,
+              productId: p.id,
+              account: p.account,
+              factoryId: p.factoryId,
+              factoryName: p.factoryName,
+              title: p.title,
+              sourceEan: originalEan,
+              newEan,
+              period: p.period,
+              assignedAt: nowIso,
+            };
+            this.eanLinks = [linkRecord, ...this.eanLinks.filter((item) => item.productId !== p.id)];
+            return {
+              ...p,
+              sourceEan: originalEan,
+              ean: newEan,
+              newEan,
+              hasNewEan: true,
+              eanAssignedAt: nowIso,
+            };
+          }
+          return p;
+        });
+
+        return data.count || targetProducts.length;
+      }
+    } catch (err) {
+      console.warn("[catalog-service] Backend assign-ean failed, falling back to local:", err);
+    }
+
+    return this.assignNewEans(productIds);
+  }
+
+  // Synchronous fallback
+  assignNewEans(productIds: string[]): number {
+    let updatedCount = 0;
+    const nowIso = new Date().toISOString();
+
+    this.products = this.products.map((p) => {
+      if (productIds.includes(p.id)) {
+        updatedCount++;
+        this.eanCounter += 1;
+        const originalEan = p.sourceEan || p.ean;
+        const newEan = generateValidEan13(p.account, this.eanCounter);
+
+        const linkRecord: CatalogEanLinkRecord = {
+          id: `EAN-LINK-${this.eanCounter}`,
+          productId: p.id,
+          account: p.account,
+          factoryId: p.factoryId,
+          factoryName: p.factoryName,
+          title: p.title,
+          sourceEan: originalEan,
+          newEan,
+          period: p.period,
+          assignedAt: nowIso,
+        };
+
+        this.eanLinks = [
+          linkRecord,
+          ...this.eanLinks.filter((item) => item.productId !== p.id),
+        ];
+
+        return {
+          ...p,
+          sourceEan: originalEan,
+          ean: newEan,
+          newEan,
+          hasNewEan: true,
+          eanAssignedAt: nowIso,
+        };
+      }
+      return p;
+    });
+
+    return updatedCount;
+  }
+
+  getEanLinks(account: RestartAccount, query = ""): CatalogEanLinkRecord[] {
+    let list = this.eanLinks.filter((item) => item.account === account);
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(
+        (item) =>
+          item.sourceEan.toLowerCase().includes(q) ||
+          item.newEan.toLowerCase().includes(q) ||
+          item.title.toLowerCase().includes(q) ||
+          (item.factoryName || "").toLowerCase().includes(q)
+      );
+    }
+    return list;
   }
 
   // Interactive demo action: Apply AI Title rewriting to <= 70 chars

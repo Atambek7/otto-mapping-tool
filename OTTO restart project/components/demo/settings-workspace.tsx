@@ -264,9 +264,6 @@ export function DemoSettingsWorkspace() {
     <div className="otto-settings-container">
       {/* Page Header */}
       <div className="otto-settings-header">
-        <div className="otto-settings-eyebrow">
-          <span>{t.eyebrow}</span>
-        </div>
         <h1 className="otto-settings-title">{t.title}</h1>
         <p className="otto-settings-subtitle">{t.subtitle}</p>
       </div>
@@ -284,7 +281,7 @@ export function DemoSettingsWorkspace() {
             </div>
           </div>
           <span className="otto-status-badge badge-neutral">
-            {lang === "ru" ? "RU (РУССКИЙ)" : "EN (ENGLISH)"}
+            {lang === "ru" ? "RU (Русский)" : "EN (English)"}
           </span>
         </div>
 
@@ -297,13 +294,12 @@ export function DemoSettingsWorkspace() {
               onClick={() => handleLanguageChange("ru")}
             >
               <div className="otto-lang-content">
-                <span className="otto-lang-flag" role="img" aria-label="Russian">
-                  🇷🇺
+                <span className="otto-lang-flag" aria-hidden="true">
+                  RU
                 </span>
                 <div className="otto-lang-label-wrap">
                   <div className="otto-lang-name">
                     <span>{t.langRuTitle}</span>
-                    <span className="otto-lang-pill">RU</span>
                   </div>
                   <div className="otto-lang-subtext">{t.langRuDesc}</div>
                 </div>
@@ -320,13 +316,12 @@ export function DemoSettingsWorkspace() {
               onClick={() => handleLanguageChange("en")}
             >
               <div className="otto-lang-content">
-                <span className="otto-lang-flag" role="img" aria-label="English">
-                  🇬🇧
+                <span className="otto-lang-flag" aria-hidden="true">
+                  EN
                 </span>
                 <div className="otto-lang-label-wrap">
                   <div className="otto-lang-name">
                     <span>{t.langEnTitle}</span>
-                    <span className="otto-lang-pill">EN</span>
                   </div>
                   <div className="otto-lang-subtext">{t.langEnDesc}</div>
                 </div>
@@ -352,7 +347,7 @@ export function DemoSettingsWorkspace() {
             </div>
           </div>
           <span className="otto-status-badge badge-active">
-            <span className="otto-pulse-dot" />
+            <CheckCircle2 size={13} />
             <span>{t.activeStatus}</span>
           </span>
         </div>

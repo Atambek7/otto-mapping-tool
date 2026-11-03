@@ -7,6 +7,7 @@ import {
   Clock3,
   Factory,
   House,
+  ScanSearch,
   Send,
   Settings2,
   type LucideIcon,
@@ -21,6 +22,7 @@ const groups: NavigationGroup[] = [
   {
     label: "Каталоги 3/12M",
     items: [
+      { href: "/discover", label: "Выявить новые 3/12", icon: ScanSearch },
       { href: "/afterbuy", label: "Товары Afterbuy", icon: Factory },
       { href: "/direct-otto", label: "Товары напрямую из ОТТО", icon: Send },
     ],

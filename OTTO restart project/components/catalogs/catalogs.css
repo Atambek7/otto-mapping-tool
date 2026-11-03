@@ -1,3 +1,4 @@
+/* hallmark:v2.0.0 | mode:app | preset:editorial-studio | fonts:Montserrat,JetBrains Mono | accent:#F4512C */
 /* Catalogs & Factory Styles for OttoRestart (Afterbuy & Direct OTTO) */
 
 /* Layout & Grid for Factory Cards */
@@ -60,7 +61,7 @@
   background: #141923;
   color: #f3f5f8;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .back-circle-btn:hover {
@@ -120,11 +121,11 @@
 }
 
 .catalog-metric-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -191,7 +192,7 @@
   background: var(--surface-muted);
   color: var(--ink);
   font-size: 12px;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .catalog-search-input:focus {
@@ -221,7 +222,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   white-space: nowrap;
 }
 
@@ -290,14 +291,17 @@
 }
 
 .factory-card {
-  display: block;
+  display: flex;
+  flex-direction: column;
   text-decoration: none;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 16px 18px;
   position: relative;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
@@ -310,14 +314,17 @@
 .factory-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
+  width: 100%;
 }
 
 .factory-card-brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .factory-card-checkbox {
@@ -343,6 +350,7 @@
 .factory-info {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .factory-name {
@@ -398,9 +406,25 @@
 
 .factory-card-bottom {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.factory-card-bottom-main {
+  display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  width: 100%;
+}
+
+.factory-card-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .factory-items-count {
@@ -465,9 +489,9 @@
 .catalog-product-table th {
   padding: 12px 14px;
   font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--muted);
   background: var(--surface-muted);
   border-bottom: 1px solid var(--line);
@@ -748,7 +772,7 @@
   font-weight: 600;
   letter-spacing: 0.9px;
   color: var(--sidebar-muted);
-  text-transform: uppercase;
+  text-transform: none;
   line-height: 1.1;
   opacity: 0.85;
 }
@@ -760,7 +784,7 @@
   transform: translateY(-50%);
   color: var(--sidebar-muted);
   opacity: 0.7;
-  transition: all 0.2s ease;
+  transition: transform 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 .restart-app .product-switcher-centered[open] .product-chevron {
@@ -839,9 +863,10 @@
 
 .restart-app[data-theme="light"] .restart-sidebar .nav-group h2,
 .restart-app:not([data-theme="dark"]) .restart-sidebar .nav-group h2 {
-  color: var(--muted) !important;
-  font-weight: 700;
-  letter-spacing: 1.15px;
+  color: var(--color-ink-2) !important;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .restart-app[data-theme="light"] .restart-sidebar .nav-link,
@@ -1027,7 +1052,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
 }
 
@@ -1186,7 +1211,7 @@
   cursor: pointer;
   padding: 3px 6px;
   border-radius: 5px;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   white-space: nowrap;
 }
 
@@ -1227,7 +1252,7 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.16s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1), color 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid transparent;
   white-space: nowrap;
 }
@@ -1341,7 +1366,7 @@
   justify-content: center;
   border-radius: 7px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   margin-left: 2px;
 }
 
@@ -1502,7 +1527,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   flex-shrink: 0;
 }
 
@@ -1564,7 +1589,7 @@
   gap: 7px;
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   color: var(--muted);
 }
@@ -1624,7 +1649,7 @@
 .attribute-key {
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -1707,7 +1732,7 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   border: 1px solid transparent;
 }
 
@@ -1748,7 +1773,7 @@
   font-weight: 600;
   color: var(--ink);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .modal-btn-close:hover {
@@ -1998,7 +2023,7 @@ tr:hover .price-hover-pencil {
   justify-content: center;
   border: 1px solid var(--line);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .inline-save-btn {
@@ -2305,7 +2330,7 @@ tr:hover .price-hover-pencil {
   justify-content: center;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-close-btn:hover {
@@ -2335,7 +2360,7 @@ tr:hover .price-hover-pencil {
   color: var(--muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-tab-btn:hover {
@@ -2733,7 +2758,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-secondary-btn:hover {
@@ -2765,7 +2790,7 @@ tr:hover .price-hover-pencil {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.3);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-save-btn:hover {
@@ -2969,7 +2994,7 @@ tr:hover .price-hover-pencil {
   justify-content: center;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-close-icon-btn:hover {
@@ -3011,7 +3036,7 @@ tr:hover .price-hover-pencil {
   flex-shrink: 0;
   cursor: zoom-in;
   padding: 4px;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
@@ -3164,7 +3189,7 @@ tr:hover .price-hover-pencil {
   padding: 3px;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   flex-shrink: 0;
 }
 
@@ -3368,7 +3393,7 @@ tr:hover .price-hover-pencil {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--muted);
 }
 
@@ -3387,7 +3412,7 @@ tr:hover .price-hover-pencil {
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
@@ -3536,7 +3561,7 @@ tr:hover .price-hover-pencil {
   font-size: 11px;
   color: var(--ink-secondary);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .quick-cat-chip:hover {
@@ -3693,7 +3718,7 @@ tr:hover .price-hover-pencil {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--muted);
 }
 
@@ -3714,7 +3739,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .accordion-toggle-btn:hover {
@@ -3848,7 +3873,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-footer-btn-secondary:hover {
@@ -3871,7 +3896,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drawer-footer-btn-cancel:hover {
@@ -3890,7 +3915,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.3);
 }
 
@@ -3912,7 +3937,7 @@ tr:hover .price-hover-pencil {
   border: 1px solid rgba(255, 90, 54, 0.35) !important;
   font-weight: 600 !important;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-feed-btn:hover {
@@ -4034,7 +4059,7 @@ tr:hover .price-hover-pencil {
 .drip-banner-badge {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.5px;
   padding: 2px 8px;
   border-radius: 6px;
@@ -4104,7 +4129,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-banner-btn-secondary:hover {
@@ -4120,7 +4145,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .btn-pause {
@@ -4230,7 +4255,7 @@ tr:hover .price-hover-pencil {
   border-radius: 6px;
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.5px;
 }
 
@@ -4270,7 +4295,7 @@ tr:hover .price-hover-pencil {
   cursor: pointer;
   padding: 6px;
   border-radius: 6px;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-queue-close-btn:hover {
@@ -4328,7 +4353,7 @@ tr:hover .price-hover-pencil {
   color: var(--muted);
   padding: 5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-queue-refresh-btn:hover {
@@ -4385,7 +4410,7 @@ tr:hover .price-hover-pencil {
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .btn-trigger-now {
@@ -4448,7 +4473,7 @@ tr:hover .price-hover-pencil {
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .status-tab:hover {
@@ -4781,7 +4806,7 @@ tr:hover .price-hover-pencil {
   padding: 4px 6px;
   cursor: pointer;
   color: var(--ink);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .page-nav-btn:disabled {
@@ -4805,7 +4830,7 @@ tr:hover .price-hover-pencil {
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-queue-btn-close:hover {
@@ -4913,7 +4938,7 @@ tr:hover .price-hover-pencil {
   gap: 6px;
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.5px;
   color: var(--muted);
   margin-bottom: 12px;
@@ -4962,7 +4987,7 @@ tr:hover .price-hover-pencil {
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .drip-day-pill.active {
@@ -5107,7 +5132,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-modal-submit-btn:hover {
@@ -5231,11 +5256,11 @@ tr:hover .price-hover-pencil {
 }
 
 .ottoflow-kpi-tile .kpi-label {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: #9aa7b8;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   margin-bottom: 4px;
 }
 
@@ -5438,9 +5463,10 @@ tr:hover .price-hover-pencil {
 }
 
 .ottoflow-table th.th-photo {
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   color: #9aa7b8;
   padding-top: 14px;
 }
@@ -5564,7 +5590,7 @@ tr:hover .price-hover-pencil {
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   padding: 0 4px;
   text-align: center;
 }
@@ -5607,7 +5633,7 @@ tr:hover .price-hover-pencil {
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .th-az-btn:hover {
@@ -5776,6 +5802,13 @@ tr:hover .price-hover-pencil {
 }
 
 /* EAN cell */
+.ean-cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .ean-badge-btn {
   display: inline-flex;
   align-items: center;
@@ -5788,7 +5821,35 @@ tr:hover .price-hover-pencil {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.ean-badge-btn.ean-badge-new {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.38);
+  color: #34d399;
+}
+
+.ean-origin-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+
+.ean-new-tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+  font-weight: 700;
+  font-size: 9px;
+}
+
+.ean-origin-text {
+  color: #7a899c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
 }
 
 .ean-badge-btn:hover {
@@ -5835,7 +5896,7 @@ tr:hover .price-hover-pencil {
   border: 1px solid #293241;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
   max-width: 100%;
 }
 
@@ -5928,7 +5989,7 @@ tr:hover .price-hover-pencil {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .empty-reset-btn:hover {
@@ -5974,6 +6035,59 @@ tr:hover .price-hover-pencil {
 }
 
 /* Photo 4 Action Buttons */
+.btn-action-new-ean {
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+}
+
+.btn-action-new-ean:hover {
+  background: rgba(14, 165, 233, 0.28);
+  border-color: rgba(56, 189, 248, 0.7);
+  color: #bae6fd;
+}
+
+.icon-tag-ean {
+  color: #38bdf8;
+}
+
+.restart-app:not([data-theme="dark"]) .btn-action-new-ean,
+.restart-app[data-theme="light"] .btn-action-new-ean {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #0369a1;
+}
+
+.restart-app:not([data-theme="dark"]) .btn-action-new-ean:hover,
+.restart-app[data-theme="light"] .btn-action-new-ean:hover {
+  background: #bae6fd;
+  border-color: #38bdf8;
+  color: #075985;
+}
+
+.restart-app:not([data-theme="dark"]) .icon-tag-ean,
+.restart-app[data-theme="light"] .icon-tag-ean {
+  color: #0284c7;
+}
+
+.restart-app:not([data-theme="dark"]) .ean-badge-btn.ean-badge-new,
+.restart-app[data-theme="light"] .ean-badge-btn.ean-badge-new {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.restart-app:not([data-theme="dark"]) .ean-new-tag,
+.restart-app[data-theme="light"] .ean-new-tag {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.restart-app:not([data-theme="dark"]) .ean-origin-text,
+.restart-app[data-theme="light"] .ean-origin-text {
+  color: #64748b;
+}
+
 .btn-action-defaults {
   background: rgba(5, 150, 105, 0.16);
   border: 1px solid rgba(5, 150, 105, 0.4);
@@ -6132,7 +6246,7 @@ tr:hover .price-hover-pencil {
 .drip-account-chip {
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   padding: 3px 8px;
   border-radius: 6px;
   background: rgba(255, 90, 54, 0.14);
@@ -6161,7 +6275,7 @@ tr:hover .price-hover-pencil {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-close-btn:hover {
@@ -6207,7 +6321,7 @@ tr:hover .price-hover-pencil {
   gap: 8px;
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: #cbd5e1;
 }
@@ -6249,7 +6363,7 @@ tr:hover .price-hover-pencil {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   font-family: inherit;
 }
 
@@ -6344,7 +6458,7 @@ tr:hover .price-hover-pencil {
   align-items: flex-start;
   gap: 12px;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
   user-select: none;
 }
 
@@ -6372,7 +6486,7 @@ tr:hover .price-hover-pencil {
   align-items: center;
   justify-content: center;
   color: transparent;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .custom-checkbox.checked {
@@ -6439,7 +6553,7 @@ tr:hover .price-hover-pencil {
 .drip-kpi-label {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: #64748b;
 }
@@ -6561,7 +6675,7 @@ tr:hover .price-hover-pencil {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
 .drip-btn-secondary:hover:not(:disabled) {
@@ -6582,7 +6696,7 @@ tr:hover .price-hover-pencil {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(234, 88, 12, 0.45);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .drip-btn-primary:hover:not(:disabled) {
@@ -7347,6 +7461,123 @@ tr:hover .price-hover-pencil {
   background: #f1f4f8;
   border-color: #cbd5e1;
 }
+
+/* ============================================================================
+ * Factory Completion State Machine & Filter Tabs (Phase A)
+ * ============================================================================ */
+.factory-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.factory-filter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 7px;
+  border: 1px solid var(--color-rule, rgba(255, 255, 255, 0.08));
+  background: var(--color-paper-2, #141923);
+  color: var(--color-ink-2, #94a3b8);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-micro, 120ms) var(--ease-out, ease),
+              background-color var(--dur-micro, 120ms) var(--ease-out, ease),
+              border-color var(--dur-micro, 120ms) var(--ease-out, ease);
+}
+
+.factory-filter-tab:hover {
+  color: var(--color-ink, #f1f5f9);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.factory-filter-tab.active {
+  background: var(--color-accent-soft, rgba(255, 90, 54, 0.12));
+  border-color: var(--color-accent, #ff5a36);
+  color: var(--color-accent, #ff5a36);
+}
+
+.factory-filter-tab.tab-complete.active {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: #10b981;
+  color: #10b981;
+}
+
+.factory-filter-tab.tab-not-complete.active {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.factory-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+
+.factory-status-badge.badge-complete {
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+}
+
+.factory-status-badge.badge-not-complete {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+}
+
+.factory-status-badge.badge-unknown {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-muted, #94a3b8);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.factory-status-badge.badge-new-candidates {
+  background: linear-gradient(135deg, rgba(255, 90, 54, 0.2), rgba(234, 88, 12, 0.25));
+  color: #ff704d;
+  border: 1px solid rgba(255, 90, 54, 0.45);
+  box-shadow: 0 0 10px rgba(255, 90, 54, 0.2);
+}
+
+.factory-completion-subline {
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.factory-completion-subline.complete {
+  background: rgba(16, 185, 129, 0.08);
+  color: #10b981;
+}
+
+.factory-completion-subline.previously-complete {
+  background: rgba(245, 158, 11, 0.08);
+  color: #f59e0b;
+}
+
+.factory-card-complete {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+.factory-card-complete:hover {
+  border-color: #10b981 !important;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.15) !important;
+}
+
 
 
 

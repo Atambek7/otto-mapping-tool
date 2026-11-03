@@ -1,0 +1,618 @@
+/* Hallmark v2.0.0 — Discover 3/12M View Stylesheet */
+
+.discover-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Header */
+.discover-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.discover-header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.discover-header-title h1 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.discover-header-title p {
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  margin: 0;
+}
+
+.discover-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* Scanner Hub Hero Card */
+.discover-scanner-card {
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  box-shadow: var(--shadow-card);
+}
+
+.discover-scanner-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.discover-scanner-intro {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.discover-scanner-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.discover-scanner-title h2 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-ink);
+  margin: 0 0 4px 0;
+}
+
+.discover-scanner-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--status-ready-ink);
+  font-weight: 500;
+}
+
+.discover-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-ready-ink);
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.2);
+}
+
+.discover-scan-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control-lg);
+  padding: 0 20px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 90, 54, 0.25);
+  transition: background var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
+}
+
+.discover-scan-action-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+}
+
+.discover-scan-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.discover-scanner-desc {
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Progress Box */
+.discover-progress-banner {
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.discover-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.discover-progress-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--color-rule);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.discover-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff5a36, #ea580c);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Options Grid (The 2 Target Branches requested by user) */
+.discover-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+@media (max-width: 860px) {
+  .discover-options-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.discover-option-card {
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-md);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-micro) var(--ease-out),
+              transform var(--dur-micro) var(--ease-out);
+  position: relative;
+  overflow: hidden;
+}
+
+.discover-option-card:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+}
+
+.discover-option-top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.discover-option-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.discover-source-chip {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+}
+
+.chip-otto-direct {
+  background: rgba(14, 116, 144, 0.12);
+  color: #0284c7;
+  border: 1px solid rgba(14, 116, 144, 0.3);
+}
+
+.chip-afterbuy {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.discover-option-number {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.discover-option-header-content {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+}
+
+.discover-option-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.icon-box-otto {
+  background: rgba(14, 116, 144, 0.1);
+  color: #0284c7;
+  border: 1px solid rgba(14, 116, 144, 0.25);
+}
+
+.icon-box-afterbuy {
+  background: rgba(244, 81, 44, 0.1);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent-border);
+}
+
+.discover-option-title-wrap h3 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-ink);
+  margin: 0 0 4px 0;
+}
+
+.discover-option-title-wrap p {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.discover-option-body {
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Metric Pills Strip inside Card */
+.discover-option-metrics {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.discover-metric-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+}
+
+.discover-metric-pill strong {
+  color: var(--color-ink);
+}
+
+.discover-option-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: var(--control-md);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-micro) var(--ease-out),
+              border-color var(--dur-micro) var(--ease-out),
+              color var(--dur-micro) var(--ease-out);
+}
+
+.discover-option-btn:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+/* Architecture Pipeline Block */
+.discover-architecture-card {
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  box-shadow: var(--shadow-card);
+}
+
+.discover-architecture-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.discover-architecture-header h3 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.discover-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+@media (max-width: 900px) {
+  .discover-steps-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.discover-step-item {
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.discover-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.discover-step-number {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.discover-step-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.discover-step-desc {
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.discover-endpoint-code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--color-paper-hover);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-xs);
+  color: var(--color-ink);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * Bulk Import Card (Phase A)
+ * ============================================================================ */
+.discover-import-card {
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  box-shadow: var(--shadow-card);
+}
+
+.discover-import-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.discover-import-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.discover-import-title h3 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-ink);
+  margin: 0 0 4px 0;
+}
+
+.discover-import-title p {
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  margin: 0;
+}
+
+.discover-import-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  background: var(--color-paper-3, #0f141d);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.discover-import-textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.discover-import-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.discover-import-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.discover-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.discover-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.discover-sample-btn {
+  height: 36px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.discover-sample-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+.discover-submit-import-btn {
+  height: 36px;
+  padding: 0 16px;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background var(--dur-micro) var(--ease-out);
+}
+
+.discover-submit-import-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.discover-submit-import-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.discover-import-results {
+  background: var(--color-paper-3, #0f141d);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.discover-results-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.discover-result-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.discover-result-metric span {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.discover-result-metric strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+

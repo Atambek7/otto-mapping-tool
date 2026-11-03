@@ -2,6 +2,15 @@ import type { RestartAccount, RestartPeriod } from "@/features/api/types";
 
 export type ProductSourceType = "AFTERBUY" | "DIRECT_OTTO";
 
+export type FactoryCompletionStatus = "COMPLETE" | "NOT_COMPLETE" | "UNKNOWN";
+
+export interface FactoryCompletionHistoryItem {
+  id: string;
+  completedAt: string;
+  candidatesCount: number;
+  publishedEans: string[];
+}
+
 export type ProductRestartStatus =
   | "3M"
   | "12M"
@@ -27,6 +36,25 @@ export interface AfterbuyFactoryItem {
   existsInOttoCount: number;
   isCached: boolean;
   lastUpdated: string;
+  status?: FactoryCompletionStatus;
+  newCandidatesCount?: number;
+  firstCompletedAt?: string | null;
+  lastCompletedAt?: string | null;
+  lastScannedAt?: string | null;
+  wasPreviouslyCompleted?: boolean;
+}
+
+export interface CatalogEanLinkRecord {
+  id: string;
+  productId: string;
+  account: RestartAccount;
+  factoryId?: string;
+  factoryName?: string;
+  title: string;
+  sourceEan: string;
+  newEan: string;
+  period: RestartPeriod;
+  assignedAt: string;
 }
 
 export interface CatalogProductItem {
@@ -36,6 +64,10 @@ export interface CatalogProductItem {
   factoryName?: string;
   account: RestartAccount;
   ean: string;
+  sourceEan?: string;
+  newEan?: string;
+  hasNewEan?: boolean;
+  eanAssignedAt?: string;
   sku: string;
   title: string;
   aiSuggestedTitle?: string;

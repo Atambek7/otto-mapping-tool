@@ -16,11 +16,7 @@ export function WelcomePage() {
       {/* SECTION A — Welcome Header */}
       <header className="welcome-header">
         <div className="welcome-header-left">
-          <div className="welcome-eyebrow">
-            <span>OTTO Restart 3/12M</span>
-          </div>
-
-          <h1 className="welcome-title">Добро пожаловать!</h1>
+          <h1 className="welcome-title">Добро пожаловать в OttoRestart 3/12M</h1>
 
           <p className="welcome-subtitle">
             Инструмент подготовки и повторного запуска в продажу товаров OTTO, снятых после 3 или 12 месяцев.

@@ -75,6 +75,13 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
     showToast(`✓ Синхронизировано с ОТТО: для ${count} товаров подтянуты категории и характеристики`);
   }
 
+  async function handleAssignNewEan(selectedIds?: string[]) {
+    const targetIds = selectedIds && selectedIds.length > 0 ? selectedIds : items.map((p) => p.id);
+    const assignedCount = await catalogDemoService.assignNewEansAsync(targetIds);
+    setRefreshTrigger((n) => n + 1);
+    showToast(`✓ Назначен новый EAN для ${assignedCount} товаров (сохранено в PostgreSQL OTTO Library)`);
+  }
+
   function handleTitleSave(id: string, newTitle: string) {
     catalogDemoService.updateProductTitle(id, newTitle);
     setRefreshTrigger((n) => n + 1);
@@ -123,8 +130,8 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
           </Link>
           <div className="factory-title-block">
             <h1>{factoryName}</h1>
-            <p>
-              {metrics.total} товаров 3/12M в каталоге · {account}
+            <p className="tabular-nums">
+              {metrics.total} товаров 3/12M в каталоге (аккаунт {account})
             </p>
           </div>
         </div>
@@ -166,6 +173,7 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
         onApplyAiAttributes={handleApplyAiAttributes}
         onApplyAiCategories={handleApplyAiCategories}
         onSyncFromOtto={handleSyncFromOtto}
+        onAssignNewEan={handleAssignNewEan}
         showToast={showToast}
       />
     </div>

@@ -1,3 +1,4 @@
+/* hallmark:v2.0.0 | mode:app | preset:editorial-studio | fonts:Montserrat,JetBrains Mono | accent:#F4512C */
 /* ============================================================================
    OTTO Restart 3/12M — Settings Workspace Styles (OttoFlow UI/UX Pattern)
    Strictly following the OttoFlow 3-card layout in OttoRestart Brand Palette
@@ -181,7 +182,7 @@
   background: #1b2230;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
 }
 
@@ -203,8 +204,25 @@
 }
 
 .otto-lang-flag {
-  font-size: 26px;
-  line-height: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #141923;
+  border: 1px solid #293241;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #f3f5f8;
+  flex-shrink: 0;
+}
+
+.otto-lang-option.lang-selected .otto-lang-flag {
+  background: rgba(255, 90, 54, 0.16);
+  border-color: rgba(255, 90, 54, 0.35);
+  color: #ff704d;
 }
 
 .otto-lang-label-wrap {
@@ -247,7 +265,7 @@
   justify-content: center;
   flex-shrink: 0;
   color: transparent;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .otto-lang-option.lang-selected .otto-lang-radio {
@@ -325,12 +343,12 @@
   line-height: 1.45;
 }
 
-/* 3. OpenAI Key Status Banner */
+/* 3. OpenAI Key Status Banner (borderless tinted well inside card) */
 .otto-key-active-box {
   padding: 14px 16px;
   border-radius: 8px;
   background: #1b2230;
-  border: 1px solid #293241;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -393,7 +411,7 @@
   border: 1px solid #293241;
   color: #c5d0de;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .otto-btn-secondary:hover:not(:disabled) {
@@ -415,7 +433,7 @@
   border: 1px solid rgba(244, 63, 94, 0.32);
   color: #fb7185;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .otto-btn-danger:hover:not(:disabled) {
@@ -456,11 +474,11 @@
 }
 
 .otto-input-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #9aa7b8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #c5d0de;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -518,12 +536,12 @@
   color: #f3f5f8;
 }
 
-/* Security Note */
+/* Security Note (borderless tinted well inside card) */
 .otto-security-box {
   padding: 12px 14px;
   border-radius: 8px;
   background: #1b2230;
-  border: 1px solid #293241;
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -635,7 +653,7 @@
   color: #ffffff;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(234, 88, 12, 0.3);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
   white-space: nowrap;
 }
 
@@ -823,6 +841,20 @@
   background: #fff7ed;
   border-color: #f4512c;
   box-shadow: 0 0 0 1px rgba(244, 81, 44, 0.25);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-flag,
+.restart-app[data-theme="light"] .otto-lang-flag {
+  background: #f1f4f8;
+  border-color: #dce3ec;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option.lang-selected .otto-lang-flag,
+.restart-app[data-theme="light"] .otto-lang-option.lang-selected .otto-lang-flag {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #c2410c;
 }
 
 .restart-app:not([data-theme="dark"]) .otto-lang-name,

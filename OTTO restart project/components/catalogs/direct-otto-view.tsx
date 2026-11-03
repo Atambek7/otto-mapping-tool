@@ -70,6 +70,13 @@ export function DirectOttoView() {
     showToast(`✓ Синхронизировано: для ${count} товаров обновлены категории и атрибуты`);
   }
 
+  async function handleAssignNewEan(selectedIds?: string[]) {
+    const targetIds = selectedIds && selectedIds.length > 0 ? selectedIds : items.map((p) => p.id);
+    const assignedCount = await catalogDemoService.assignNewEansAsync(targetIds);
+    setRefreshTrigger((n) => n + 1);
+    showToast(`✓ Назначен новый EAN для ${assignedCount} товаров (сохранено в PostgreSQL OTTO Library)`);
+  }
+
   function handleTitleSave(id: string, newTitle: string) {
     catalogDemoService.updateProductTitle(id, newTitle);
     setRefreshTrigger((n) => n + 1);
@@ -107,8 +114,8 @@ export function DirectOttoView() {
       <div className="factory-header">
         <div className="factory-title-block">
           <h1>Напрямую из ОТТО</h1>
-          <p>
-            Товары каталога OTTO, требующие рестарта (3M / 12M) · {account}
+          <p className="tabular-nums">
+            Товары каталога OTTO, требующие рестарта 3M / 12M (аккаунт {account})
           </p>
         </div>
 
@@ -149,6 +156,7 @@ export function DirectOttoView() {
         onApplyAiAttributes={handleApplyAiAttributes}
         onApplyAiCategories={handleApplyAiCategories}
         onSyncFromOtto={handleSyncFromOtto}
+        onAssignNewEan={handleAssignNewEan}
         showToast={showToast}
       />
     </div>
