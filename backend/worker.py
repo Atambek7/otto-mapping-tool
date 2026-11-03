@@ -41,17 +41,9 @@ celery_app.conf.update(
             "task": "tasks.poll_otto_processing_items",
             "schedule": 120.0,  # runs every 2 minutes
         },
-        "recover-incomplete-availability-every-15-min": {
-            "task": "tasks.recover_incomplete_availability",
-            "schedule": 900.0,  # runs every 15 minutes
-        },
         "sync-order-stats-daily": {
             "task": "tasks.sync_order_stats",
             "schedule": crontab(hour=3, minute=0),  # runs every day at 03:00 UTC
-        },
-        "sync-availability-periodic": {
-            "task": "tasks_availability_sync.sync_published_availability",
-            "schedule": crontab(hour="*/6", minute=0),  # runs every 6 hours
         },
     },
 )

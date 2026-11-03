@@ -919,155 +919,47 @@ class TestCategoryMappingAndCrossAccountTransfer(unittest.TestCase):
         mock_client.update_quantities.assert_called_once()
         mock_client.update_product_delivery_information.assert_not_called()
 
-    def test_dispatch_otto_availability_batches(self):
+    def test_dispatch_otto_availability_batches_is_retired(self):
         from tasks import dispatch_otto_availability_batches
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
+        with patch("tasks.apply_otto_availability_task.apply_async") as enqueue, \
+             patch("redis.from_url") as redis_client:
+            dispatched = dispatch_otto_availability_batches(
+                item_ids=list(range(1, 251)), account_name="JV", plan_id=10, force=True,
+            )
+        self.assertEqual(dispatched, 0)
+        enqueue.assert_not_called()
+        redis_client.assert_not_called()
 
-        # 250 item IDs should be split into 3 batches (100, 100, 50)
-        item_ids = list(range(1, 251))
-        with patch("tasks.apply_otto_availability_task.apply_async") as mock_apply_async:
-            with patch("redis.from_url") as mock_redis_from_url:
-                mock_redis = MagicMock()
-                mock_redis.set.return_value = True  # Always acquired
-                mock_redis_from_url.return_value = mock_redis
-
-                dispatched = dispatch_otto_availability_batches(
-                    item_ids=item_ids,
-                    account_name="JV",
-                    plan_id=10,
-                    base_countdown=60,
-                    jitter_step=5,
-                )
-                self.assertEqual(dispatched, 3)
-                self.assertEqual(mock_apply_async.call_count, 3)
-                mock_redis.delete.assert_not_called()
-
-                # Batch 0: countdown = 60
-                call0 = mock_apply_async.call_args_list[0]
-                self.assertEqual(len(call0.kwargs.get("args", call0[1].get("args"))[0]), 100)
-                self.assertEqual(call0.kwargs.get("countdown", call0[1].get("countdown")), 60)
-
-                # Batch 1: countdown = 65
-                call1 = mock_apply_async.call_args_list[1]
-                self.assertEqual(len(call1.kwargs.get("args", call1[1].get("args"))[0]), 100)
-                self.assertEqual(call1.kwargs.get("countdown", call1[1].get("countdown")), 65)
-
-                # Batch 2: countdown = 70
-                call2 = mock_apply_async.call_args_list[2]
-                self.assertEqual(len(call2.kwargs.get("args", call2[1].get("args"))[0]), 50)
-                self.assertEqual(call2.kwargs.get("countdown", call2[1].get("countdown")), 70)
-
-        # Test force=True: should delete locks before acquiring
-        with patch("tasks.apply_otto_availability_task.apply_async"):
-            with patch("redis.from_url") as mock_redis_from_url:
-                mock_redis = MagicMock()
-                mock_redis.set.return_value = True
-                mock_redis_from_url.return_value = mock_redis
-
-                dispatched = dispatch_otto_availability_batches(
-                    item_ids=[1, 2],
-                    account_name="JV",
-                    force=True,
-                )
-                self.assertEqual(dispatched, 1)
-                self.assertEqual(mock_redis.delete.call_count, 2)
-                mock_redis.delete.assert_any_call("otto_avail_sched:JV:1")
-                mock_redis.delete.assert_any_call("otto_avail_sched:JV:2")
-
-    def test_apply_otto_availability_task_retry_and_exhaustion(self):
+    def test_legacy_availability_task_message_is_a_noop(self):
         from tasks import apply_otto_availability_task
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
+        with patch("tasks.SessionLocal") as session_factory, \
+             patch("tasks.OttoMarketClient") as client:
+            result = apply_otto_availability_task.run(item_ids=[1], account_name="JV")
+        self.assertEqual(result, {"status": "ignored_legacy_message", "writes": 0})
+        session_factory.assert_not_called()
+        client.assert_not_called()
 
-        # Mock items and DB session
-        mock_item = MagicMock()
-        mock_item.id = 1
-        mock_item.product_ean = "4071489823721"
-        mock_item.error_message = None
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_item]
-        mock_settings = MagicMock()
-        mock_settings.otto_client_id = "test_id"
-        mock_settings.otto_client_secret = "test_sec"
-        mock_db.query.return_value.filter.return_value.first.return_value = mock_settings
-
-        failed_res = {
-            "status": "failed",
-            "success": False,
-            "unknown_skus": ["4071489823721"],
-            "quantity_failed_skus": ["4071489823721"],
-            "delivery_failed_skus": [],
-            "error": "SKU unknown",
-        }
-
-        # 1. Test Retry when unknown SKU and retries < 6
-        with patch("database.SessionLocal", return_value=mock_db):
-            with patch("services.otto_client.OttoMarketClient"):
-                with patch("services.otto_availability.apply_otto_availability", return_value=failed_res):
-                    with patch.object(apply_otto_availability_task, "retry", side_effect=Exception("CeleryRetryTriggered")) as mock_retry:
-                        with patch.object(apply_otto_availability_task.request, "retries", 1):
-                            with self.assertRaises(Exception) as ctx:
-                                apply_otto_availability_task.run(
-                                    item_ids=[1],
-                                    account_name="JV",
-                                )
-                            self.assertIn("CeleryRetryTriggered", str(ctx.exception))
-                            mock_retry.assert_called_once()
-                            retry_kwargs = mock_retry.call_args.kwargs
-                            self.assertEqual(retry_kwargs["countdown"], 60)
-                            self.assertEqual(retry_kwargs["kwargs"]["pending_quantity_skus"], ["4071489823721"])
-                            self.assertEqual(retry_kwargs["kwargs"]["pending_delivery_skus"], [])
-
-        # 2. Test Exhaustion when retries >= 6 -> records error message
-        with patch("database.SessionLocal", return_value=mock_db):
-            with patch("services.otto_client.OttoMarketClient"):
-                with patch("services.otto_availability.apply_otto_availability", return_value=failed_res):
-                    with patch.object(apply_otto_availability_task.request, "retries", 6):
-                        with patch("redis.from_url"):
-                            res = apply_otto_availability_task.run(
-                                item_ids=[1],
-                                account_name="JV",
-                            )
-                            self.assertEqual(res["status"], "partial_or_failed")
-                            self.assertIn("Availability sync incomplete", mock_item.error_message)
-
-    def test_retry_availability_endpoint(self):
+    def test_retry_availability_endpoint_requires_configured_reviewer_and_reason(self):
         from routers.publish_pipeline import retry_availability_endpoint, RetryAvailabilityRequest
         from fastapi import HTTPException
-        from unittest.mock import patch, MagicMock
-        import models
-
-        mock_db = MagicMock()
-
-        # 1. Neither plan_id nor eans -> 400
-        with self.assertRaises(HTTPException) as ctx:
-            retry_availability_endpoint(RetryAvailabilityRequest(), db=mock_db)
-        self.assertEqual(ctx.exception.status_code, 400)
-
-        # 2. plan_id branch
-        mock_plan = MagicMock()
-        mock_plan.id = 42
-        mock_plan.account_name = models.AccountType.JV
-
-        mock_item1 = MagicMock()
-        mock_item1.id = 101
-        mock_item1.account_name = models.AccountType.JV
-
-        mock_db.query.return_value.filter.return_value.first.return_value = mock_plan
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_item1]
-
-        with patch("tasks.dispatch_otto_availability_batches", return_value=1) as mock_dispatch:
-            res = retry_availability_endpoint(RetryAvailabilityRequest(plan_id=42), db=mock_db)
-            self.assertTrue(res["success"])
-            self.assertEqual(res["dispatched_batches"], 1)
-            mock_dispatch.assert_called_once_with(
-                item_ids=[101],
-                account_name="JV",
-                plan_id=42,
-                base_countdown=0,
-                jitter_step=2,
-                force=True,
+        from unittest.mock import patch
+        req = RetryAvailabilityRequest(reason="reviewed failure", evidence_ref="ticket-1")
+        with patch.dict("os.environ", {"AVAILABILITY_REVIEW_TOKEN": "", "AVAILABILITY_REVIEWER_ID": ""}):
+            with self.assertRaises(HTTPException) as disabled:
+                retry_availability_endpoint(req, None, None)
+            self.assertEqual(disabled.exception.status_code, 503)
+        with patch.dict("os.environ", {"AVAILABILITY_REVIEW_TOKEN": "review", "AVAILABILITY_REVIEWER_ID": "operator"}):
+            with self.assertRaises(HTTPException) as missing_target:
+                retry_availability_endpoint(req, "review", None)
+            self.assertEqual(missing_target.exception.status_code, 400)
+            ambiguous_target = RetryAvailabilityRequest(
+                plan_id=42, eans=["sku"], reason="reviewed failure", evidence_ref="ticket-2",
             )
+            with self.assertRaises(HTTPException) as ambiguous:
+                retry_availability_endpoint(ambiguous_target, "review", None)
+            self.assertEqual(ambiguous.exception.status_code, 400)
 
     def test_otto_client_availability_fail_fast(self):
         from services.otto_client import OttoMarketClient
@@ -1091,7 +983,7 @@ class TestCategoryMappingAndCrossAccountTransfer(unittest.TestCase):
                 self.assertEqual(call_args.kwargs.get("timeout"), 10.0)
                 self.assertEqual(mock_sleep.call_count, 1)  # only 1 sleep between 2 attempts
 
-        # Test update_product_delivery_information timeout capped at 10.0s and retries capped at 2
+        # Delivery updates are sent once because a timeout can follow acceptance.
         with patch("requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 503
@@ -1100,10 +992,10 @@ class TestCategoryMappingAndCrossAccountTransfer(unittest.TestCase):
             with patch("time.sleep") as mock_sleep:
                 res = client.update_product_delivery_information([{"sku": "4071489823721", "shippingProfileId": "p-1"}])
                 self.assertEqual(res["status_code"], 503)
-                self.assertEqual(mock_post.call_count, 2)  # exactly 2 attempts, not 3
+                self.assertEqual(mock_post.call_count, 1)
                 call_args = mock_post.call_args_list[0]
                 self.assertEqual(call_args.kwargs.get("timeout"), 10.0)
-                self.assertEqual(mock_sleep.call_count, 1)
+                self.assertEqual(mock_sleep.call_count, 0)
 
         # Test update_quantities success on 200
         with patch("requests.post") as mock_post:

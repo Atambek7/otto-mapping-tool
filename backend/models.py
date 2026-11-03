@@ -1,7 +1,7 @@
 import enum
 import sqlalchemy as sa
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Text, ForeignKey, JSON, DateTime, UniqueConstraint, Enum, func
+from sqlalchemy import Column, Integer, String, Boolean, Text, ForeignKey, JSON, DateTime, UniqueConstraint, Enum, CheckConstraint, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -149,12 +149,93 @@ class PublishQueueItem(Base):
     error_message = Column(Text, nullable=True)
     missing_attributes = Column(JSON, default=list, nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
+    otto_submission_attempted_at = Column(DateTime(timezone=True), nullable=True)
     otto_task_href = Column(String, nullable=True)
     otto_task_failed_href = Column(String, nullable=True)
     poll_attempts = Column(Integer, default=0, nullable=False)
 
     plan = relationship("PublishPlan", back_populates="items")
 
+
+
+class InitialAvailabilityState(Base):
+    """Durable one-time availability setup state, independent of queue-item lifetime."""
+    __tablename__ = "initial_availability_states"
+    __table_args__ = (
+        UniqueConstraint("account_name", "product_ean", name="uq_initial_availability_account_ean"),
+        CheckConstraint("account_name IN ('JV', 'XL')", name="ck_initial_availability_account"),
+        CheckConstraint("stock_state IN ('pending', 'sending', 'confirmed', 'retryable_failed', 'failed', 'unknown', 'accepted')", name="ck_initial_availability_stock_state"),
+        CheckConstraint("delivery_state IN ('pending', 'sending', 'confirmed', 'retryable_failed', 'failed', 'unknown', 'accepted')", name="ck_initial_availability_delivery_state"),
+        CheckConstraint("next_attempt_trigger_kind IN ('automatic', 'manual')", name="ck_initial_availability_trigger_kind"),
+        CheckConstraint("stock_attempts >= 0 AND delivery_attempts >= 0 AND manual_retry_count >= 0", name="ck_initial_availability_attempt_counts"),
+    )
+    id = Column(Integer, primary_key=True)
+    account_name = Column(String(2), nullable=False)
+    product_ean = Column(String, nullable=False)
+    queue_item_id = Column(Integer, nullable=False)
+    plan_id = Column(Integer, nullable=True)
+    factory_id = Column(String, nullable=True)
+    factory_name = Column(String, nullable=True)
+    category_id = Column(String, nullable=True)
+    stock_state = Column(String(24), nullable=False)
+    delivery_state = Column(String(24), nullable=False)
+    stock_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    delivery_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    stock_next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    delivery_next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    stock_last_error = Column(Text, nullable=True)
+    delivery_last_error = Column(Text, nullable=True)
+    delivery_payload_json = Column(JSON, nullable=True)
+    dispatch_lease_until = Column(DateTime(timezone=True), nullable=True)
+    next_dispatch_at = Column(DateTime(timezone=True), nullable=True)
+    last_dispatch_error = Column(Text, nullable=True)
+    manual_retry_count = Column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_trigger_kind = Column(String(16), nullable=False, default="automatic", server_default="automatic")
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class InitialAvailabilityAttempt(Base):
+    """Append-only record of each individual stock or delivery HTTP attempt."""
+    __tablename__ = "initial_availability_attempts"
+    __table_args__ = (
+        UniqueConstraint("state_id", "operation", "attempt_number", name="uq_initial_availability_attempt"),
+        CheckConstraint("operation IN ('stock', 'delivery')", name="ck_initial_availability_attempt_operation"),
+        CheckConstraint("trigger_kind IN ('automatic', 'manual')", name="ck_initial_availability_attempt_trigger"),
+        CheckConstraint("outcome IN ('sending', 'confirmed', 'accepted', 'retryable_failed', 'failed', 'unknown')", name="ck_initial_availability_attempt_outcome"),
+        CheckConstraint("attempt_number > 0", name="ck_initial_availability_attempt_number"),
+    )
+    id = Column(Integer, primary_key=True)
+    state_id = Column(Integer, ForeignKey("initial_availability_states.id"), nullable=False, index=True)
+    operation = Column(String(16), nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    trigger_kind = Column(String(16), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    outcome = Column(String(24), nullable=False, default="sending")
+    status_code = Column(Integer, nullable=True)
+    error_summary = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class InitialAvailabilityReviewEvent(Base):
+    """Audited operator resolution of an unknown initial availability result."""
+    __tablename__ = "initial_availability_review_events"
+    __table_args__ = (
+        CheckConstraint("operation IN ('stock', 'delivery')", name="ck_initial_availability_review_operation"),
+        CheckConstraint("outcome IN ('APPLIED', 'NOT_APPLIED', 'UNRESOLVED', 'RETRY_AUTHORIZED', 'PAYLOAD_CORRECTED')", name="ck_initial_availability_review_outcome"),
+        CheckConstraint("account_name IN ('JV', 'XL')", name="ck_initial_availability_review_account"),
+    )
+    id = Column(Integer, primary_key=True)
+    state_id = Column(Integer, ForeignKey("initial_availability_states.id"), nullable=False, index=True)
+    account_name = Column(String(2), nullable=False)
+    product_ean = Column(String, nullable=False)
+    operation = Column(String(16), nullable=False)
+    outcome = Column(String(16), nullable=False)
+    actor_id = Column(String(128), nullable=False)
+    reason = Column(Text, nullable=False)
+    evidence_ref = Column(String(512), nullable=True)
+    payload_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 class OrderStat(Base):
     """
