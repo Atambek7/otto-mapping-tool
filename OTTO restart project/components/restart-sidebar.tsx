@@ -7,38 +7,42 @@ import {
   Clock3,
   Factory,
   House,
+  ScanSearch,
   Send,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
 import { ProductSwitcher } from "@/components/product-switcher";
+import { useTranslation } from "@/features/i18n";
 
 type NavigationItem = { href: string; label: string; icon: LucideIcon };
 type NavigationGroup = { label: string; items: NavigationItem[] };
 
-const groups: NavigationGroup[] = [
-  { label: "Обзор", items: [{ href: "/", label: "Добро пожаловать", icon: House }] },
-  {
-    label: "Каталоги 3/12M",
-    items: [
-      { href: "/afterbuy", label: "Товары Afterbuy", icon: Factory },
-      { href: "/direct-otto", label: "Товары напрямую из ОТТО", icon: Send },
-    ],
-  },
-  { label: "Данные", items: [{ href: "/library", label: "OTTO Library", icon: BookOpenText }] },
-];
-
-export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNavigate }: { desktopHidden?: boolean; mobileOpen?: boolean; onNavigate?: () => void }) {
+export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNavigate }: { desktopHidden?: boolean; mobileOpen?: boolean; onNavigate?: (href: string) => void }) {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const restartPath = pathname?.startsWith("/restart")
     ? pathname.slice("/restart".length) || "/"
     : pathname || "/";
 
+  const groups: NavigationGroup[] = [
+    { label: t("nav.sectionOverview"), items: [{ href: "/", label: t("nav.welcome"), icon: House }] },
+    {
+      label: t("nav.sectionCatalogs"),
+      items: [
+        { href: "/discover", label: t("nav.discover"), icon: ScanSearch },
+        { href: "/afterbuy", label: t("nav.afterbuy"), icon: Factory },
+        { href: "/direct-otto", label: t("nav.directOtto"), icon: Send },
+      ],
+    },
+    { label: t("nav.sectionData"), items: [{ href: "/library", label: t("nav.library"), icon: BookOpenText }] },
+  ];
+
   return (
     <aside id="restart-navigation" className={`restart-sidebar${desktopHidden ? " desktop-hidden" : ""}${mobileOpen ? " mobile-open" : ""}`}>
       <ProductSwitcher />
       <div className="sidebar-rule" />
-      <nav aria-label="Навигация OttoRestart" className="restart-nav">
+      <nav aria-label={t("nav.sectionOverview")} className="restart-nav">
         {groups.map((group) => (
           <section className="nav-group" key={group.label}>
             <h2>{group.label}</h2>
@@ -54,7 +58,10 @@ export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNa
                   className={`nav-link${active ? " active" : ""}`}
                   href={href}
                   key={href}
-                  onClick={onNavigate}
+                  onClick={(event) => {
+                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    onNavigate?.(href);
+                  }}
                 >
                   <Icon size={17} strokeWidth={1.8} />
                   <span>{label}</span>
@@ -71,15 +78,18 @@ export function RestartSidebar({ desktopHidden = false, mobileOpen = false, onNa
             aria-current={restartPath.startsWith("/settings") ? "page" : undefined}
             className={`nav-link${restartPath.startsWith("/settings") ? " active" : ""}`}
             href="/settings"
-            onClick={onNavigate}
+            onClick={(event) => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              onNavigate?.("/settings");
+            }}
           >
             <Settings2 size={17} strokeWidth={1.8} />
-            <span>Настройки</span>
+            <span>{t("nav.settings")}</span>
           </Link>
         </div>
       </nav>
       <div className="sidebar-bottom">
-        <div className="sidebar-footnote"><Clock3 size={14} /> Restart 3/12M</div>
+        <div className="sidebar-footnote"><Clock3 size={14} /> {t("nav.footerBrand")}</div>
       </div>
     </aside>
   );

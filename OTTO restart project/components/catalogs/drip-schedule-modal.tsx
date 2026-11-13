@@ -13,24 +13,41 @@ import {
   X,
 } from "lucide-react";
 import { useRestartAccount } from "@/features/state/restart-account";
+import type { CatalogProductItem } from "@/features/catalogs/types";
+import { RestartApiClient } from "@/features/api/client";
+import { isOttoRestartDemoMode } from "@/features/runtime-mode";
+import { useTranslation } from "@/features/i18n";
+
+const restartApi = new RestartApiClient();
 
 interface DripScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   factoryName?: string;
   totalProductsCount: number;
-  onScheduleCreated?: (days: number) => void;
+  products?: CatalogProductItem[];
+  selectionCount?: number;
+  onScheduleCreated?: (days: number, batchName?: string) => void;
 }
 
 const PRESET_DAYS = [3, 7, 14, 30];
 
+export function isDripCandidate(p: CatalogProductItem): boolean {
+  return (p.status === "READY" || p.status === "ERROR") && !!p.category.trim()
+    && (!p.operationStatus || ["DRAFT", "PREPARING", "QC_PENDING", "NEEDS_REVIEW", "READY"].includes(p.operationStatus));
+}
+
 export function DripScheduleModal({
   isOpen,
   onClose,
-  factoryName = "Каталог OTTO Restart",
+  factoryName,
   totalProductsCount,
+  products = [],
+  selectionCount,
   onScheduleCreated,
 }: DripScheduleModalProps) {
+  const { t } = useTranslation();
+  const resolvedFactoryName = factoryName || t("drip.defaultFactoryName");
   const { account } = useRestartAccount();
   const [days, setDays] = useState<number>(7);
   const [dailyTime, setDailyTime] = useState<string>("08:00");
@@ -40,7 +57,7 @@ export function DripScheduleModal({
 
   // Distribution calculation
   const distribution = useMemo(() => {
-    const total = Math.max(1, totalProductsCount);
+    const total = Math.max(0, totalProductsCount);
     const basePerDay = Math.floor(total / days);
     const remainder = total % days;
 
@@ -56,7 +73,7 @@ export function DripScheduleModal({
       return {
         dayNum: idx + 1,
         dateFormatted: dayLabel,
-        count: Math.max(1, count),
+        count,
       };
     });
   }, [totalProductsCount, days]);
@@ -67,13 +84,77 @@ export function DripScheduleModal({
 
   if (!isOpen) return null;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     setIsSubmitting(true);
-    setTimeout(() => {
+    const isDemo = isOttoRestartDemoMode("afterbuy");
+
+    if (isDemo) {
+      setTimeout(() => {
+        setIsSubmitting(false);
+        onScheduleCreated?.(days);
+        onClose();
+      }, 450);
+      return;
+    }
+
+    try {
+      const readyItems = products.filter(isDripCandidate);
+      if (readyItems.length === 0) {
+        alert(t("drip.noReadyItemsError"));
+        setIsSubmitting(false);
+        return;
+      }
+
+      const operationIds: string[] = [];
+      for (const item of readyItems) {
+        if (item.operationId) operationIds.push(item.operationId);
+        else operationIds.push((await restartApi.createOperation(account, item.id, `drip-operation-${crypto.randomUUID()}`)).id);
+      }
+      const tomorrow = new Date(Date.now() + 86400000);
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" }).format(tomorrow);
+      const batchName = `${resolvedFactoryName} · ${account} · ${days}д (${readyItems.length} тов.)`;
+      const timeVal = dailyTime.length === 5 ? `${dailyTime}:00` : dailyTime;
+
+      const idempotencyKey = `drip-create-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const batch = await restartApi.createDripBatch(
+        {
+          account,
+          name: batchName,
+          operationIds,
+          startDate: today,
+          dailyTime: timeVal,
+          timezone: "Europe/Berlin",
+          totalDays: days,
+        },
+        idempotencyKey
+      );
+
+      if (readyItems.some((item) => item.status === "ERROR" || item.operationStatus !== "READY")) {
+        setIsSubmitting(false);
+        alert("План сохранён как черновик. Подготовьте товары, исправьте ошибки и пройдите QC, затем запустите план в очереди.");
+        onClose();
+        return;
+      }
+
+      const startKey = `drip-start-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await restartApi.controlDripBatch(
+        batch.id,
+        account,
+        "start",
+        batch.version,
+        startKey
+      );
+
       setIsSubmitting(false);
-      onScheduleCreated?.(days);
+      onScheduleCreated?.(days, batch.name);
       onClose();
-    }, 450);
+    } catch (err) {
+      console.error("Drip schedule start failed:", err);
+      alert(
+        `Ошибка запуска Drip Feed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -81,7 +162,7 @@ export function DripScheduleModal({
       <div
         className="drip-modal-window"
         onClick={(e) => e.stopPropagation()}
-        aria-label="Настройка расписания Drip Feed"
+        aria-label={t("drip.scheduleTitle")}
       >
         {/* Header */}
         <div className="drip-modal-header">
@@ -91,11 +172,11 @@ export function DripScheduleModal({
             </div>
             <div>
               <div className="drip-title-row">
-                <h2 className="drip-title-h2">Настройка Drip Feed</h2>
+                <h2 className="drip-title-h2">{t("drip.scheduleTitle")}</h2>
                 <span className="drip-account-chip">{account} Möbel</span>
               </div>
               <p className="drip-subtitle">
-                Постепенная выгрузка товаров в OTTO · <strong>{factoryName}</strong>
+                {t("drip.subline", { factoryName: resolvedFactoryName })}
               </p>
             </div>
           </div>
@@ -104,7 +185,7 @@ export function DripScheduleModal({
             type="button"
             className="drip-close-btn"
             onClick={onClose}
-            aria-label="Закрыть модальное окно"
+            aria-label={t("common.close")}
           >
             <X size={16} />
           </button>
@@ -116,7 +197,7 @@ export function DripScheduleModal({
           <div className="drip-card-block">
             <div className="drip-card-header">
               <SlidersHorizontal size={15} className="text-orange-400" />
-              <span>Параметры расписания</span>
+              <span>{t("drip.paramsTitle")}</span>
             </div>
 
             <div className="drip-params-grid">
@@ -124,7 +205,7 @@ export function DripScheduleModal({
               <div className="drip-param-col">
                 <label className="drip-label">
                   <Calendar size={13} className="text-muted" />
-                  <span>Срок распределения</span>
+                  <span>{t("drip.durationDays")}</span>
                 </label>
                 <div className="drip-preset-chips">
                   {PRESET_DAYS.map((d) => {
@@ -137,7 +218,7 @@ export function DripScheduleModal({
                         className={`drip-preset-btn ${isActive ? "active" : ""}`}
                       >
                         <span className="preset-number">{d}</span>
-                        <span className="preset-unit">{d === 3 ? "дня" : "дней"}</span>
+                        <span className="preset-unit">{d === 3 ? t("drip.daysCount3") : t("drip.daysCountN")}</span>
                       </button>
                     );
                   })}
@@ -148,7 +229,7 @@ export function DripScheduleModal({
               <div className="drip-param-col">
                 <label className="drip-label">
                   <Clock size={13} className="text-muted" />
-                  <span>Ежедневное время старта</span>
+                  <span>{t("drip.dailyStartTime")}</span>
                 </label>
                 <div className="drip-time-input-box">
                   <input
@@ -164,10 +245,10 @@ export function DripScheduleModal({
           </div>
 
           {/* Section 2: Safeguards & Options */}
-          <div className="drip-card-block">
+          {isOttoRestartDemoMode("afterbuy") ? <div className="drip-card-block">
             <div className="drip-card-header">
               <ShieldCheck size={15} className="text-emerald-400" />
-              <span>Правила безопасности и исключения</span>
+              <span>{t("drip.safetyRules")}</span>
             </div>
 
             <div className="drip-toggles-stack">
@@ -183,10 +264,10 @@ export function DripScheduleModal({
                 </div>
                 <div className="drip-toggle-content">
                   <span className="drip-toggle-title">
-                    Исключить уже опубликованные в OTTO товары
+                    {t("drip.excludePublished")}
                   </span>
                   <p className="drip-toggle-desc">
-                    Товары со статусом «Опубликованы» будут пропущены и не продублируются в магазине
+                    {t("drip.excludePublishedDesc")}
                   </p>
                 </div>
               </div>
@@ -204,40 +285,43 @@ export function DripScheduleModal({
                 <div className="drip-toggle-content">
                   <div className="drip-toggle-title-row">
                     <span className="drip-toggle-title">
-                      Защита от пересечений категорий (Anti-collision)
+                      {t("drip.antiCollision")}
                     </span>
-                    <span className="drip-rec-badge">🛡️ Рекомендуется</span>
+                    <span className="drip-rec-badge">
+                      <ShieldCheck size={11} style={{ marginRight: 4, verticalAlign: "middle" }} />
+                      {t("drip.recommended")}
+                    </span>
                   </div>
                   <p className="drip-toggle-desc">
-                    Интеллектуально распределяет схожие позиции по разным дням для максимальной конверсии
+                    {t("drip.antiCollisionDesc")}
                   </p>
                 </div>
               </div>
             </div>
-          </div>
+          </div> : <p className="drip-subtitle">{selectionCount !== undefined ? `Выбрано товаров: ${selectionCount}. Подходят для плана: ${totalProductsCount}. Остальные исключены по статусу, категории или состоянию операции.` : "Учитываются подходящие товары текущей страницы."} Защита от пересечений категорий пока не подключена.</p>}
 
           {/* Section 3: Distribution Timeline & Rate */}
           <div className="drip-card-block">
             <div className="drip-card-header">
               <Layers size={15} className="text-amber-400" />
-              <span>План распределения товаров</span>
+              <span>{t("drip.distributionPlan")}</span>
             </div>
 
             {/* Metrics Strip */}
             <div className="drip-kpi-strip">
               <div className="drip-kpi-item">
-                <span className="drip-kpi-label">Всего товаров</span>
+                <span className="drip-kpi-label">{t("drip.totalProducts")}</span>
                 <strong className="drip-kpi-value text-orange">{totalProductsCount}</strong>
               </div>
               <div className="drip-kpi-item">
-                <span className="drip-kpi-label">В день в среднем</span>
+                <span className="drip-kpi-label">{t("drip.dailyAverage")}</span>
                 <strong className="drip-kpi-value text-emerald">
-                  ~{Math.round(totalProductsCount / days)} тов./день
+                  ~{Math.round(totalProductsCount / days)} {t("drip.itemsPerDayUnit")}
                 </strong>
               </div>
               <div className="drip-kpi-item">
-                <span className="drip-kpi-label">Период выгрузки</span>
-                <strong className="drip-kpi-value text-amber">{days} дней</strong>
+                <span className="drip-kpi-label">{t("drip.dischargePeriod")}</span>
+                <strong className="drip-kpi-value text-amber">{days} {days === 3 ? t("drip.daysCount3") : t("drip.daysCountN")}</strong>
               </div>
             </div>
 
@@ -255,7 +339,7 @@ export function DripScheduleModal({
                           style={{ height: `${heightPercent}%` }}
                         />
                       </div>
-                      <span className="drip-bar-day">Д {item.dayNum}</span>
+                      <span className="drip-bar-day">{t("drip.dayN", { day: item.dayNum })}</span>
                       <span className="drip-bar-date">{item.dateFormatted.split(",")[0]}</span>
                     </div>
                   );
@@ -268,7 +352,7 @@ export function DripScheduleModal({
         {/* Footer */}
         <div className="drip-modal-footer">
           <div className="drip-footer-summary">
-            <span>Итого: <strong>{totalProductsCount} товаров</strong> на <strong>{days} дней</strong></span>
+            <span>{t("drip.totalSummary", { total: totalProductsCount, days })}</span>
           </div>
 
           <div className="drip-footer-actions">
@@ -278,24 +362,24 @@ export function DripScheduleModal({
               onClick={onClose}
               disabled={isSubmitting}
             >
-              Отмена
+              {t("common.cancel")}
             </button>
 
             <button
               type="button"
               className="drip-btn-primary"
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || totalProductsCount === 0}
             >
               {isSubmitting ? (
                 <>
                   <Loader2 size={15} className="spin" />
-                  <span>Запуск расписания...</span>
+                  <span>{t("drip.startingSchedule")}</span>
                 </>
               ) : (
                 <>
                   <Play size={14} fill="currentColor" />
-                  <span>Запустить Drip Feed ({days} дней)</span>
+                  <span>{t("drip.startDripFeedDays", { days })}</span>
                 </>
               )}
             </button>

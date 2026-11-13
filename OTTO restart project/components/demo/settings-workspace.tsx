@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Globe,
+  Clock,
   User,
   Sparkles,
   CheckCircle2,
@@ -20,6 +21,8 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useRestartAccount } from "@/features/state/restart-account";
+import { useRestartTimezone, TIMEZONE_OPTIONS } from "@/features/state/restart-timezone";
+import { setAppLanguage, getAppLanguage } from "@/features/i18n";
 import "./settings.css";
 
 type LanguageType = "ru" | "en";
@@ -42,6 +45,10 @@ const TRANSLATIONS = {
     langRuDesc: "Русский язык интерфейса",
     langEnTitle: "English",
     langEnDesc: "English interface language",
+    tzCardTitle: "Часовой пояс",
+    tzCardDesc: "Выберите часовой пояс для отображения времени событий, логов и расписания Drip Feed",
+    tzPreviewLabel: "Текущее время в выбранном поясе:",
+    toastTzSaved: "Часовой пояс обновлен",
     profileTitle: "Профиль пользователя",
     profileDesc: "Данные текущей учетной записи в системе",
     activeStatus: "Активен",
@@ -98,6 +105,10 @@ const TRANSLATIONS = {
     langRuDesc: "Russian interface language",
     langEnTitle: "English",
     langEnDesc: "English interface language",
+    tzCardTitle: "Timezone",
+    tzCardDesc: "Select timezone for event history, operation logs, and Drip Feed schedule",
+    tzPreviewLabel: "Current time in selected timezone:",
+    toastTzSaved: "Timezone updated",
     profileTitle: "User Profile",
     profileDesc: "Current system account details",
     activeStatus: "Active",
@@ -149,6 +160,15 @@ const TRANSLATIONS = {
 export function DemoSettingsWorkspace() {
   const { account } = useRestartAccount();
 
+  // Timezone state
+  const { timezone, setTimezone, resolvedTimezone, detectedBrowserTz } = useRestartTimezone();
+  const [nowTime, setNowTime] = useState<Date>(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Language state
   const [lang, setLang] = useState<LanguageType>("ru");
 
@@ -168,10 +188,7 @@ export function DemoSettingsWorkspace() {
   // Load persisted language & key from localStorage
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem("otto_restart_lang");
-      if (savedLang === "en" || savedLang === "ru") {
-        setLang(savedLang);
-      }
+      setLang(getAppLanguage());
       const savedHasKey = localStorage.getItem("otto_restart_has_key");
       if (savedHasKey !== null) {
         setHasKey(savedHasKey === "true");
@@ -183,6 +200,15 @@ export function DemoSettingsWorkspace() {
     } catch {
       // localStorage not accessible
     }
+
+    const onLangChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<LanguageType>;
+      if (customEvent.detail === "ru" || customEvent.detail === "en") {
+        setLang(customEvent.detail);
+      }
+    };
+    window.addEventListener("otto_restart_lang_changed", onLangChanged);
+    return () => window.removeEventListener("otto_restart_lang_changed", onLangChanged);
   }, []);
 
   const t = TRANSLATIONS[lang];
@@ -194,11 +220,31 @@ export function DemoSettingsWorkspace() {
 
   function handleLanguageChange(newLang: LanguageType) {
     setLang(newLang);
+    setAppLanguage(newLang);
+  }
+
+  const liveTimeString = useMemo(() => {
     try {
-      localStorage.setItem("otto_restart_lang", newLang);
+      return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: resolvedTimezone,
+      }).format(nowTime);
     } catch {
-      // ignore
+      return nowTime.toLocaleTimeString();
     }
+  }, [nowTime, resolvedTimezone, lang]);
+
+  const selectedTzOption =
+    TIMEZONE_OPTIONS.find((opt) => opt.id === timezone) || TIMEZONE_OPTIONS[0];
+
+  function handleTimezoneChange(tzId: string) {
+    setTimezone(tzId);
+    showToast(t.toastTzSaved);
   }
 
   function handleCheckKey() {
@@ -264,9 +310,6 @@ export function DemoSettingsWorkspace() {
     <div className="otto-settings-container">
       {/* Page Header */}
       <div className="otto-settings-header">
-        <div className="otto-settings-eyebrow">
-          <span>{t.eyebrow}</span>
-        </div>
         <h1 className="otto-settings-title">{t.title}</h1>
         <p className="otto-settings-subtitle">{t.subtitle}</p>
       </div>
@@ -284,7 +327,7 @@ export function DemoSettingsWorkspace() {
             </div>
           </div>
           <span className="otto-status-badge badge-neutral">
-            {lang === "ru" ? "RU (РУССКИЙ)" : "EN (ENGLISH)"}
+            {lang === "ru" ? "RU (Русский)" : "EN (English)"}
           </span>
         </div>
 
@@ -297,13 +340,12 @@ export function DemoSettingsWorkspace() {
               onClick={() => handleLanguageChange("ru")}
             >
               <div className="otto-lang-content">
-                <span className="otto-lang-flag" role="img" aria-label="Russian">
-                  🇷🇺
+                <span className="otto-lang-flag" aria-hidden="true">
+                  RU
                 </span>
                 <div className="otto-lang-label-wrap">
                   <div className="otto-lang-name">
                     <span>{t.langRuTitle}</span>
-                    <span className="otto-lang-pill">RU</span>
                   </div>
                   <div className="otto-lang-subtext">{t.langRuDesc}</div>
                 </div>
@@ -320,13 +362,12 @@ export function DemoSettingsWorkspace() {
               onClick={() => handleLanguageChange("en")}
             >
               <div className="otto-lang-content">
-                <span className="otto-lang-flag" role="img" aria-label="English">
-                  🇬🇧
+                <span className="otto-lang-flag" aria-hidden="true">
+                  EN
                 </span>
                 <div className="otto-lang-label-wrap">
                   <div className="otto-lang-name">
                     <span>{t.langEnTitle}</span>
-                    <span className="otto-lang-pill">EN</span>
                   </div>
                   <div className="otto-lang-subtext">{t.langEnDesc}</div>
                 </div>
@@ -339,7 +380,74 @@ export function DemoSettingsWorkspace() {
         </div>
       </section>
 
-      {/* Card 2: User Profile Card */}
+      {/* Card 2: Timezone Selector Card */}
+      <section className="otto-settings-card" aria-labelledby="tz-card-title">
+        <div className="otto-card-header">
+          <div className="otto-card-header-left">
+            <div className="otto-card-icon-box icon-accent">
+              <Clock size={18} />
+            </div>
+            <div className="otto-card-title-wrap">
+              <h2 id="tz-card-title">{t.tzCardTitle}</h2>
+              <p>{t.tzCardDesc}</p>
+            </div>
+          </div>
+          <span className="otto-status-badge badge-neutral">
+            {selectedTzOption.badge} · {selectedTzOption.offsetName}
+          </span>
+        </div>
+
+        <div className="otto-card-body">
+          <div className="otto-tz-grid">
+            {TIMEZONE_OPTIONS.map((opt) => {
+              const isSelected = timezone === opt.id;
+              const subtext =
+                opt.id === "auto"
+                  ? `${opt.subtext} (${detectedBrowserTz})`
+                  : opt.subtext;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`otto-tz-option ${isSelected ? "tz-selected" : ""}`}
+                  onClick={() => handleTimezoneChange(opt.id)}
+                >
+                  <div className="otto-tz-content">
+                    <span className="otto-tz-badge" aria-hidden="true">
+                      {opt.badge}
+                    </span>
+                    <div className="otto-tz-label-wrap">
+                      <div className="otto-tz-name-row">
+                        <span className="otto-tz-name">{opt.name}</span>
+                        <span className="otto-tz-offset-pill">{opt.offsetName}</span>
+                      </div>
+                      <div className="otto-tz-subtext" title={subtext}>
+                        {subtext}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="otto-tz-radio">
+                    {isSelected && <Check size={12} strokeWidth={3} />}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="otto-tz-preview-bar">
+            <div className="otto-tz-preview-left">
+              <Clock size={15} style={{ color: "#ea580c" }} />
+              <span>{t.tzPreviewLabel}</span>
+              <strong className="otto-tz-preview-clock">{liveTimeString}</strong>
+            </div>
+            <span className="otto-status-badge badge-neutral">
+              {resolvedTimezone}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* Card 3: User Profile Card */}
       <section className="otto-settings-card" aria-labelledby="profile-card-title">
         <div className="otto-card-header">
           <div className="otto-card-header-left">
@@ -352,7 +460,7 @@ export function DemoSettingsWorkspace() {
             </div>
           </div>
           <span className="otto-status-badge badge-active">
-            <span className="otto-pulse-dot" />
+            <CheckCircle2 size={13} />
             <span>{t.activeStatus}</span>
           </span>
         </div>

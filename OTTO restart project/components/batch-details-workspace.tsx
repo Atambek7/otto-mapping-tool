@@ -27,7 +27,7 @@ export function BatchDetailsWorkspace({ batchId }: { batchId: string }) {
     setLoading(true); setError("");
     const api = client;
     if (!api) {
-      setError("API OttoRestart не настроен. Задайте NEXT_PUBLIC_RESTART_API_URL и перезапустите frontend.");
+      setError("Не удалось создать клиент OttoRestart. Проверьте BFF и конфигурацию авторизации.");
       setLoading(false);
       return;
     }

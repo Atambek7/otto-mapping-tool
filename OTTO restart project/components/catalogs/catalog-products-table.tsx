@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, useCallback } from "react";
+import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useRestartAccount } from "@/features/state/restart-account";
+import { useTranslation } from "@/features/i18n";
 import {
   calculateRestartPriceCents,
   formatPriceEur,
@@ -24,8 +25,13 @@ import {
 import type {
   CatalogProductItem,
   FactoryProductsMetrics,
+  CatalogServerFilters,
+  CatalogSyncResult,
 } from "@/features/catalogs/types";
+import { titleCodePointLength } from "@/features/catalogs/title-policy";
 import { ProductSelectionBar } from "./product-selection-bar";
+import { ProductionBulkActions } from "./production-bulk-actions";
+import type { CatalogBulkAction } from "@/features/catalogs/bulk-actions";
 import { ProductDrawer } from "./product-drawer";
 import {
   ImageHoverPreview,
@@ -38,7 +44,7 @@ import {
 } from "./inline-cells";
 import { DripFeedButton } from "./drip-feed-button";
 import { DripQueueModal } from "./drip-queue-modal";
-import { DripScheduleModal } from "./drip-schedule-modal";
+import { DripScheduleModal, isDripCandidate } from "./drip-schedule-modal";
 
 export type StatusFilterType =
   | ""
@@ -46,9 +52,12 @@ export type StatusFilterType =
   | "3M"
   | "12M"
   | "ERROR"
+  | "NO_ATTRIBUTES"
+  | "NO_CATEGORY"
   | "PUBLISHED";
 
 interface CatalogProductsTableProps {
+  demoMode?: boolean;
   sourceType: "AFTERBUY" | "DIRECT_OTTO";
   factoryId?: string;
   factoryName?: string;
@@ -59,14 +68,23 @@ interface CatalogProductsTableProps {
   onPriceSave: (id: string, newOldPriceCents: number) => void;
   onCategorySave: (id: string, newCategory: string) => void;
   onDrawerSave: (updated: CatalogProductItem) => void;
+  onAssignDemoEan?: (selectedIds: string[]) => void;
   onApplyAiTitles: (selectedIds?: string[]) => void;
   onApplyAiAttributes: (selectedIds?: string[]) => void;
   onApplyAiCategories: (selectedIds?: string[]) => void;
-  onSyncFromOtto: (selectedIds?: string[]) => void;
+  onSyncFromOtto: (
+    selectedIds: string[],
+    reportProgress: (current: number, total: number) => void,
+  ) => Promise<CatalogSyncResult>;
   showToast: (msg: string) => void;
+  serverPage?: { page: number; totalPages: number; total: number; over70Count: number; categories: string[] };
+  serverLoading?: boolean;
+  onServerFiltersChange?: (filters: CatalogServerFilters) => void;
+  onServerPageChange?: (page: number) => void;
 }
 
 export function CatalogProductsTable({
+  demoMode = false,
   sourceType,
   factoryId,
   factoryName,
@@ -77,12 +95,18 @@ export function CatalogProductsTable({
   onPriceSave,
   onCategorySave,
   onDrawerSave,
+  onAssignDemoEan,
   onApplyAiTitles,
   onApplyAiAttributes,
   onApplyAiCategories,
   onSyncFromOtto,
   showToast,
+  serverPage,
+  serverLoading = false,
+  onServerFiltersChange,
+  onServerPageChange,
 }: CatalogProductsTableProps) {
+  const { t } = useTranslation();
   const { account } = useRestartAccount();
   const [, startTransition] = useTransition();
 
@@ -98,8 +122,24 @@ export function CatalogProductsTable({
     dir: "asc" | "desc";
   }>({ col: null, dir: "asc" });
 
+  useEffect(() => {
+    if (demoMode || !onServerFiltersChange) return;
+    const timer = setTimeout(() => onServerFiltersChange({
+      query: search.trim(),
+      period: statusFilter === "3M" || statusFilter === "12M" ? statusFilter : undefined,
+      status: statusFilter && statusFilter !== "3M" && statusFilter !== "12M" ? statusFilter : undefined,
+      category: categoryFilter === "Без категории" ? "__EMPTY__" : categoryFilter || undefined,
+      titleOver70: onlyOver70,
+      sortBy: sort.col || undefined,
+      sortDir: sort.dir,
+    }), 250);
+    return () => clearTimeout(timer);
+  }, [demoMode, onServerFiltersChange, search, statusFilter, categoryFilter, onlyOver70, sort]);
+
   // Selection & UI states
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkAction, setBulkAction] = useState<CatalogBulkAction | null>(null);
+  useEffect(() => { setSelectedIds([]); }, [serverPage?.page, search, statusFilter, categoryFilter, onlyOver70, sort]);
   const [copiedEan, setCopiedEan] = useState<string | null>(null);
   const [selectedProductForDrawer, setSelectedProductForDrawer] =
     useState<CatalogProductItem | null>(null);
@@ -108,9 +148,11 @@ export function CatalogProductsTable({
   );
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isDripScheduleOpen, setIsDripScheduleOpen] = useState(false);
+  const [dripSelection, setDripSelection] = useState<CatalogProductItem[] | null>(null);
 
   // Unique categories list for combobox filter
   const categoryOptions = useMemo(() => {
+    if (!demoMode) return serverPage?.categories || [];
     const set = new Set<string>();
     items.forEach((p) => {
       if (p.category && p.category !== "Без категории") {
@@ -118,15 +160,22 @@ export function CatalogProductsTable({
       }
     });
     return Array.from(set).sort();
-  }, [items]);
+  }, [items, demoMode, serverPage?.categories]);
 
   // Count items with title > 70
   const over70Count = useMemo(() => {
-    return items.filter((p) => p.title.length > 70).length;
-  }, [items]);
+    return demoMode ? items.filter((p) => titleCodePointLength(p.title) > 70).length : serverPage?.over70Count || 0;
+  }, [items, demoMode, serverPage?.over70Count]);
+
+  const displayedStatus = useCallback((item: CatalogProductItem): "READY" | "3M" | "12M" | "ERROR" | "NO_ATTRIBUTES" | "NO_CATEGORY" | "PUBLISHED" | "UNKNOWN" => {
+    if (demoMode) return getProductComputedStatus(item);
+    if (["READY", "ERROR", "NO_ATTRIBUTES", "NO_CATEGORY", "PUBLISHED"].includes(item.status)) return item.status as "READY" | "ERROR" | "NO_ATTRIBUTES" | "NO_CATEGORY" | "PUBLISHED";
+    return "UNKNOWN";
+  }, [demoMode]);
 
   // Filter & Sort pipeline
   const filteredItems = useMemo(() => {
+    if (!demoMode) return items;
     return items.filter((product) => {
       // 1. Search text (name or EAN)
       if (search.trim()) {
@@ -137,7 +186,7 @@ export function CatalogProductsTable({
       }
 
       // 2. >70 filter
-      if (onlyOver70 && product.title.length <= 70) {
+      if (onlyOver70 && titleCodePointLength(product.title) <= 70) {
         return false;
       }
 
@@ -153,20 +202,23 @@ export function CatalogProductsTable({
 
       // 4. Status filter (the 5 target statuses)
       if (statusFilter) {
-        const computed = getProductComputedStatus(product);
+        const computed = displayedStatus(product);
         if (statusFilter === "3M" && product.period !== "3M") return false;
         if (statusFilter === "12M" && product.period !== "12M") return false;
         if (statusFilter === "READY" && computed !== "READY") return false;
         if (statusFilter === "ERROR" && computed !== "ERROR") return false;
+        if (statusFilter === "NO_ATTRIBUTES" && computed !== "NO_ATTRIBUTES") return false;
+        if (statusFilter === "NO_CATEGORY" && computed !== "NO_CATEGORY") return false;
         if (statusFilter === "PUBLISHED" && computed !== "PUBLISHED")
           return false;
       }
 
       return true;
     });
-  }, [items, search, onlyOver70, categoryFilter, statusFilter]);
+  }, [items, demoMode, displayedStatus, search, onlyOver70, categoryFilter, statusFilter]);
 
   const sortedItems = useMemo(() => {
+    if (!demoMode) return filteredItems;
     if (!sort.col) return filteredItems;
 
     return [...filteredItems].sort((a, b) => {
@@ -180,13 +232,13 @@ export function CatalogProductsTable({
       } else if (sort.col === "category") {
         comp = (a.category || "").localeCompare(b.category || "", "de");
       } else if (sort.col === "status") {
-        comp = getProductComputedStatus(a).localeCompare(
-          getProductComputedStatus(b)
+        comp = displayedStatus(a).localeCompare(
+          displayedStatus(b)
         );
       }
       return sort.dir === "asc" ? comp : -comp;
     });
-  }, [filteredItems, sort]);
+  }, [filteredItems, sort, demoMode, displayedStatus]);
 
   // Handle KPI Tile clicks
   function handleKpiTileClick(targetStatus: StatusFilterType) {
@@ -223,6 +275,7 @@ export function CatalogProductsTable({
     sortedItems.every((item) => selectedIds.includes(item.id));
 
   function toggleSelectAll() {
+    if (serverLoading) return;
     if (allFilteredSelected) {
       setSelectedIds([]);
     } else {
@@ -232,6 +285,7 @@ export function CatalogProductsTable({
 
   function toggleItemSelection(id: string, e: React.MouseEvent) {
     e.stopPropagation();
+    if (serverLoading) return;
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
@@ -250,6 +304,7 @@ export function CatalogProductsTable({
   const [drawerKey, setDrawerKey] = useState(0);
 
   function handleProductClick(product: CatalogProductItem) {
+    if (serverLoading) return;
     setDrawerKey((k) => k + 1);
     setSelectedProductForDrawer({ ...product });
   }
@@ -263,7 +318,7 @@ export function CatalogProductsTable({
     setImgPreview({
       url: product.imageUrl,
       name: product.title,
-      oldPrice: formatPriceEur(product.oldStandardPriceCents),
+      oldPrice: product.sourcePriceAvailable ? formatPriceEur(product.oldStandardPriceCents) : "Цена не подтверждена",
       ean: product.ean,
       category: product.category,
       rect: {
@@ -287,64 +342,64 @@ export function CatalogProductsTable({
         className="ottoflow-kpi-strip"
         aria-label="Сводка статусов каталога"
       >
-        {/* Tile 1: ВСЕ ТОВАРЫ */}
+        {/* Tile 1: Все товары */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("")}
           className={`ottoflow-kpi-tile ${statusFilter === "" ? "kpi-active" : ""}`}
         >
-          <span className="kpi-label">ВСЕ ТОВАРЫ</span>
-          <span className="kpi-value text-white">{metrics.total}</span>
+          <span className="kpi-label">{t("products.totalCandidates")}</span>
+          <span className="kpi-value text-white tabular-nums">{metrics.total}</span>
         </button>
 
-        {/* Tile 2: ГОТОВЫ */}
+        {/* Tile 2: Готовы */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("READY")}
           className={`ottoflow-kpi-tile ${statusFilter === "READY" ? "kpi-active border-emerald-500" : ""}`}
         >
-          <span className="kpi-label">ГОТОВЫ</span>
-          <span className="kpi-value text-emerald-400">{metrics.ready}</span>
+          <span className="kpi-label">{t("products.statusReady")}</span>
+          <span className="kpi-value text-emerald-400 tabular-nums">{metrics.ready}</span>
         </button>
 
-        {/* Tile 3: 3 МЕСЯЦА */}
+        {/* Tile 3: 3 месяца */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("3M")}
           className={`ottoflow-kpi-tile ${statusFilter === "3M" ? "kpi-active border-amber-500" : ""}`}
         >
-          <span className="kpi-label">3 МЕСЯЦА</span>
-          <span className="kpi-value text-amber-400">{metrics.count3m}</span>
+          <span className="kpi-label">{t("products.activeRestrictions3M")}</span>
+          <span className="kpi-value text-amber-400 tabular-nums">{metrics.count3m}</span>
         </button>
 
-        {/* Tile 4: 12 МЕСЯЦЕВ */}
+        {/* Tile 4: 12 месяцев */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("12M")}
           className={`ottoflow-kpi-tile ${statusFilter === "12M" ? "kpi-active border-orange-500" : ""}`}
         >
-          <span className="kpi-label">12 МЕСЯЦЕВ</span>
-          <span className="kpi-value text-orange-400">{metrics.count12m}</span>
+          <span className="kpi-label">{t("products.activeRestrictions12M")}</span>
+          <span className="kpi-value text-orange-400 tabular-nums">{metrics.count12m}</span>
         </button>
 
-        {/* Tile 5: ОШИБКИ */}
+        {/* Tile 5: Ошибки */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("ERROR")}
           className={`ottoflow-kpi-tile ${statusFilter === "ERROR" ? "kpi-active border-rose-500" : ""}`}
         >
-          <span className="kpi-label">ОШИБКИ</span>
-          <span className="kpi-value text-rose-400">{metrics.errors}</span>
+          <span className="kpi-label">{t("products.errors")}</span>
+          <span className="kpi-value text-rose-400 tabular-nums">{metrics.errors}</span>
         </button>
 
-        {/* Tile 6: ОПУБЛИКОВАНЫ */}
+        {/* Tile 6: Опубликованы */}
         <button
           type="button"
           onClick={() => handleKpiTileClick("PUBLISHED")}
           className={`ottoflow-kpi-tile ${statusFilter === "PUBLISHED" ? "kpi-active border-teal-500" : ""}`}
         >
-          <span className="kpi-label">ОПУБЛИКОВАНЫ</span>
-          <span className="kpi-value text-teal-400">{metrics.published}</span>
+          <span className="kpi-label">{t("products.published")}</span>
+          <span className="kpi-value text-teal-400 tabular-nums">{metrics.published}</span>
         </button>
       </section>
 
@@ -356,7 +411,7 @@ export function CatalogProductsTable({
           <input
             type="text"
             className="ottoflow-search-input"
-            placeholder="Поиск товаров по названию или EAN..."
+            placeholder={t("products.searchProducts")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -376,22 +431,22 @@ export function CatalogProductsTable({
         <div className="ottoflow-toolbar-actions">
           {/* Drip Feed Button */}
           <DripFeedButton
-            onClick={() => setIsDripScheduleOpen(true)}
+            onClick={() => { setDripSelection(null); setIsDripScheduleOpen(true); }}
           />
 
           {/* Drip Queue Button */}
-          <button
+          {demoMode ? <button
             type="button"
             className="ottoflow-action-btn btn-drip-queue"
             onClick={() => setIsQueueOpen(true)}
             title="Очередь выгрузки Drip Feed"
           >
             <Layers size={14} />
-            <span>Очередь Drip Feed</span>
-          </button>
+            <span>{t("products.dripQueue")}</span>
+          </button> : null}
 
           {/* AI Title Button */}
-          <button
+          {demoMode ? <button
             type="button"
             className="ottoflow-action-btn btn-ai-titles"
             onClick={() => {
@@ -401,19 +456,19 @@ export function CatalogProductsTable({
             title={
               selectedIds.length > 0
                 ? `Оптимизировать названия для ${selectedIds.length} выбранных товаров`
-                : "Оптимизировать названия товаров > 70 символов"
+                : t("products.aiTitle")
             }
           >
             <Sparkles size={14} className="text-amber-400" />
             <span>
               {selectedIds.length > 0
-                ? `ИИ-название (выбрано ${selectedIds.length})`
-                : "ИИ-название (>70 симв.)"}
+                ? `${t("products.aiTitle")} (${selectedIds.length})`
+                : t("products.aiTitle")}
             </span>
             {selectedIds.length === 0 && over70Count > 0 && (
               <span className="badge-counter-amber">{over70Count}</span>
             )}
-          </button>
+          </button> : null}
         </div>
       </div>
 
@@ -433,8 +488,8 @@ export function CatalogProductsTable({
                 />
               </th>
 
-              {/* Col 2: ФОТО */}
-              <th className="th-photo">ФОТО</th>
+              {/* Col 2: Фото */}
+              <th className="th-photo">{t("products.colPhoto")}</th>
 
               {/* Col 3: Название товара + >70 Filter Button */}
               <th className="th-name">
@@ -444,7 +499,7 @@ export function CatalogProductsTable({
                     onClick={() => toggleSort("name")}
                     title="Сортировать по названию"
                   >
-                    <span>Название товара</span>
+                    <span>{t("products.colTitle")}</span>
                     {sort.col === "name" && (
                       <span className="sort-arrow">
                         {sort.dir === "asc" ? "↑" : "↓"}
@@ -493,7 +548,7 @@ export function CatalogProductsTable({
                     className="th-sortable-label"
                     onClick={() => toggleSort("price")}
                   >
-                    <span>Цена</span>
+                    <span>{t("products.colPrice")}</span>
                     {sort.col === "price" && (
                       <span className="sort-arrow">
                         {sort.dir === "asc" ? "↑" : "↓"}
@@ -505,17 +560,17 @@ export function CatalogProductsTable({
                       type="button"
                       className={`price-sort-btn ${sort.col === "price" && sort.dir === "asc" ? "price-sort-active" : ""}`}
                       onClick={(e) => handlePriceSort("asc", e)}
-                      title="По возрастанию (дешевые сверху)"
+                      title="Min"
                     >
-                      ↑ Min
+                      ↑ {t("products.minPrice")}
                     </button>
                     <button
                       type="button"
                       className={`price-sort-btn ${sort.col === "price" && sort.dir === "desc" ? "price-sort-active" : ""}`}
                       onClick={(e) => handlePriceSort("desc", e)}
-                      title="По убыванию (дорогие сверху)"
+                      title="Max"
                     >
-                      ↓ Max
+                      ↓ {t("products.maxPrice")}
                     </button>
                   </div>
                 </div>
@@ -529,7 +584,7 @@ export function CatalogProductsTable({
                       className="th-sortable-label"
                       onClick={() => toggleSort("category")}
                     >
-                      <span>Категория</span>
+                      <span>{t("products.colCategory")}</span>
                     </span>
                     <button
                       type="button"
@@ -538,7 +593,7 @@ export function CatalogProductsTable({
                         e.stopPropagation();
                         toggleSort("category");
                       }}
-                      title="Сортировка категорий по алфавиту: A-Z"
+                      title="A-Z"
                     >
                       A-Z{" "}
                       {sort.col === "category"
@@ -555,9 +610,9 @@ export function CatalogProductsTable({
                       className="th-category-select"
                       value={categoryFilter}
                       onChange={(e) => setCategoryFilter(e.target.value)}
-                      aria-label="Фильтр по категории"
+                      aria-label={t("products.colCategory")}
                     >
-                      <option value="">Фильтр по категории...</option>
+                      <option value="">{t("products.filterCategoryPlaceholder")}</option>
                       <option value="Без категории">Без категории</option>
                       {categoryOptions.map((cat) => (
                         <option key={cat} value={cat}>
@@ -577,7 +632,7 @@ export function CatalogProductsTable({
                     className="th-sortable-label"
                     onClick={() => toggleSort("status")}
                   >
-                    <span>Статус</span>
+                    <span>{t("products.colStatus")}</span>
                     {sort.col === "status" && (
                       <span className="sort-arrow">
                         {sort.dir === "asc" ? "↑" : "↓"}
@@ -593,14 +648,14 @@ export function CatalogProductsTable({
                       onChange={(e) =>
                         setStatusFilter(e.target.value as StatusFilterType)
                       }
-                      aria-label="Фильтр по статусу"
+                      aria-label={t("products.colStatus")}
                     >
-                      <option value="">Все статусы</option>
-                      <option value="READY">Готово</option>
-                      <option value="3M">3 месяца</option>
-                      <option value="12M">12 месяцев</option>
-                      <option value="ERROR">Ошибки</option>
-                      <option value="PUBLISHED">Опубликованы</option>
+                      <option value="">{t("products.filterAllStatuses")}</option>
+                      <option value="READY">{t("products.statusReady")}</option>
+                      <option value="NO_ATTRIBUTES">Нет атрибутов</option>
+                      <option value="NO_CATEGORY">Нет категории</option>
+                      <option value="ERROR">{t("products.errors")}</option>
+                      <option value="PUBLISHED">{t("products.published")}</option>
                     </select>
                     <ChevronDown size={12} className="select-dropdown-chevron" />
                   </div>
@@ -635,10 +690,7 @@ export function CatalogProductsTable({
             ) : (
               sortedItems.map((product) => {
                 const isSelected = selectedIds.includes(product.id);
-                const computedStatus = getProductComputedStatus(product);
-                const titleLen = product.title.length;
-                const isOver70 = titleLen > 70;
-
+                const computedStatus = displayedStatus(product);
                 return (
                   <tr
                     key={product.id}
@@ -675,6 +727,9 @@ export function CatalogProductsTable({
                             alt=""
                             className="photo-thumb-img"
                             loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = "none";
+                            }}
                           />
                         ) : (
                           <span className="photo-placeholder">—</span>
@@ -693,6 +748,8 @@ export function CatalogProductsTable({
                         <div className="title-inline-edit-area">
                           <InlineTitleCell
                             title={product.title}
+                            titleOrigin={product.titleOrigin}
+                            readOnly={!demoMode}
                             onSave={(newTitle) =>
                               onTitleSave(product.id, newTitle)
                             }
@@ -709,19 +766,33 @@ export function CatalogProductsTable({
                       className="td-ean"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        type="button"
-                        className="ean-badge-btn"
-                        onClick={(e) => handleCopyEan(product.ean, e)}
-                        title="Нажмите, чтобы скопировать EAN"
-                      >
-                        <span className="ean-text">{product.ean}</span>
-                        {copiedEan === product.ean ? (
-                          <Check size={12} className="text-emerald-400" />
-                        ) : (
-                          <Copy size={12} className="ean-copy-icon" />
+                      <div className="ean-cell-stack">
+                        <button
+                          type="button"
+                          className={`ean-badge-btn ${product.hasNewEan ? "ean-badge-new" : ""}`}
+                          onClick={(e) => handleCopyEan(product.ean, e)}
+                          title={
+                            product.hasNewEan && product.sourceEan
+                              ? `Новый EAN: ${product.ean} (исходный Aftercool EAN: ${product.sourceEan}). Нажмите, чтобы скопировать.`
+                              : "Нажмите, чтобы скопировать EAN"
+                          }
+                        >
+                          <span className="ean-text tabular-nums">{product.ean}</span>
+                          {copiedEan === product.ean ? (
+                            <Check size={12} className="text-emerald-400" />
+                          ) : (
+                            <Copy size={12} className="ean-copy-icon" />
+                          )}
+                        </button>
+                        {product.hasNewEan && product.sourceEan && (
+                          <div className="ean-origin-row">
+                            <span className="ean-new-tag">Новый EAN</span>
+                            <span className="ean-origin-text tabular-nums" title={`Исходный Aftercool EAN: ${product.sourceEan}`}>
+                              ← {product.sourceEan}
+                            </span>
+                          </div>
                         )}
-                      </button>
+                      </div>
                     </td>
 
                     {/* Col 5: Цена — ручное редактирование без скидочной подписи */}
@@ -731,7 +802,9 @@ export function CatalogProductsTable({
                     >
                       <InlinePriceCell
                         oldStandardPriceCents={product.oldStandardPriceCents}
+                        priceAvailable={product.sourcePriceAvailable}
                         account={account}
+                        readOnly={!demoMode}
                         onSavePriceCents={(newCents) =>
                           onPriceSave(product.id, newCents)
                         }
@@ -745,6 +818,7 @@ export function CatalogProductsTable({
                     >
                       <InlineCategoryCell
                         category={product.category}
+                        readOnly={!demoMode}
                         isSyncedWithOtto={product.isSyncedWithOtto}
                         hasAiCategory={product.hasAiCategory}
                         categoriesList={categoryOptions.length > 0 ? categoryOptions : undefined}
@@ -762,19 +836,19 @@ export function CatalogProductsTable({
                       {computedStatus === "READY" && (
                         <span className="status-pill status-ready">
                           <Check size={12} />
-                          <span>Готово</span>
+                          <span>{t("products.statusReady")}</span>
                         </span>
                       )}
 
                       {computedStatus === "3M" && (
                         <span className="status-pill status-3m">
-                          <span>3 месяца</span>
+                          <span>{t("products.activeRestrictions3M")}</span>
                         </span>
                       )}
 
                       {computedStatus === "12M" && (
                         <span className="status-pill status-12m">
-                          <span>12 месяцев</span>
+                          <span>{t("products.activeRestrictions12M")}</span>
                         </span>
                       )}
 
@@ -783,21 +857,27 @@ export function CatalogProductsTable({
                           className="status-pill status-error"
                           title={
                             product.errorCode ||
-                            "Не заполнены обязательные атрибуты"
+                            t("products.statusError")
                           }
                         >
-                          <span>Ошибки</span>
+                          <span>{t("products.errors")}</span>
                         </span>
                       )}
+                      {computedStatus === "NO_ATTRIBUTES" && <span className="status-pill status-no-attributes">Нет атрибутов</span>}
+                      {computedStatus === "NO_CATEGORY" && <span className="status-pill status-no-category">Нет категории</span>}
 
                       {computedStatus === "PUBLISHED" && (
                         <span
                           className="status-pill status-published"
-                          title="Карточка опубликована в каталоге OTTO"
+                          title={t("products.statusPublished")}
                         >
                           <Check size={12} />
-                          <span>Опубликованы</span>
+                          <span>{t("products.published")}</span>
                         </span>
+                      )}
+
+                      {computedStatus === "UNKNOWN" && (
+                        <span className="status-pill status-no-category">Проверка статуса</span>
                       )}
                     </td>
                   </tr>
@@ -808,24 +888,44 @@ export function CatalogProductsTable({
         </table>
       </div>
 
+      {!demoMode && serverPage && <div className="catalog-pagination" role="navigation" aria-label="Страницы товаров">
+        <button type="button" className="catalog-action-btn" disabled={serverLoading || serverPage.page <= 1} onClick={() => onServerPageChange?.(serverPage.page - 1)}>Назад</button>
+        <span>{serverLoading ? "Загрузка…" : `Страница ${serverPage.page} из ${Math.max(1, serverPage.totalPages)} · всего ${serverPage.total}`}</span>
+        <button type="button" className="catalog-action-btn" disabled={serverLoading || serverPage.page >= serverPage.totalPages} onClick={() => onServerPageChange?.(serverPage.page + 1)}>Далее</button>
+      </div>}
+
       {/* 4. FLOATING SELECTION BAR (Photo 4) */}
       <ProductSelectionBar
+        demoMode={demoMode}
+        disabled={serverLoading}
+        onProductionAction={demoMode ? undefined : setBulkAction}
         selectedCount={selectedIds.length}
         totalCount={items.length}
         onClearSelection={() => setSelectedIds([])}
-        onSelectAll={() => setSelectedIds(items.map((i) => i.id))}
+        onDripFeed={() => {
+          setDripSelection(items.filter((item) => selectedIds.includes(item.id)));
+          setIsDripScheduleOpen(true);
+        }}
+        onSelectAll={() => { if (!serverLoading) setSelectedIds(sortedItems.map((i) => i.id)); }}
         onApplyDefaults={() => {
           showToast(
-            `✓ Применены стандартные параметры фабрики для ${selectedIds.length} товаров`
+            `DEMO: локальный preview стандартных параметров для ${selectedIds.length} товаров; данные не сохранены.`
           );
         }}
+        onAssignDemoEan={onAssignDemoEan ? () => {
+          onAssignDemoEan(selectedIds);
+          setSelectedIds([]);
+        } : undefined}
         onApplyAiTitles={() => {
           onApplyAiTitles(selectedIds);
           setSelectedIds([]);
         }}
-        onSyncFromOtto={() => {
-          onSyncFromOtto(selectedIds);
-          setSelectedIds([]);
+        onSyncFromOtto={async (reportProgress) => {
+          try {
+            await onSyncFromOtto(selectedIds, reportProgress);
+          } finally {
+            setSelectedIds([]);
+          }
         }}
         onApplyAiCategories={() => {
           onApplyAiCategories(selectedIds);
@@ -837,15 +937,29 @@ export function CatalogProductsTable({
         }}
       />
 
+      {!demoMode && bulkAction && selectedIds.length > 0 ? <ProductionBulkActions
+        action={bulkAction}
+        account={account}
+        products={items.filter((item) => selectedIds.includes(item.id))}
+        onClose={() => setBulkAction(null)}
+        onSaved={onRefresh}
+      /> : null}
+
       {/* 5. PRODUCT DRAWER (Full side panel) */}
       {selectedProductForDrawer && (
         <ProductDrawer
           key={`${selectedProductForDrawer.id}-${drawerKey}`}
           product={selectedProductForDrawer}
           onClose={() => setSelectedProductForDrawer(null)}
-          onSaveProduct={(updated: CatalogProductItem) => {
-            onDrawerSave(updated);
+          demoMode={demoMode}
+          onSyncProduct={async (id) => {
+            const result = await onSyncFromOtto([id], () => {});
+            if (!result.succeededIds.includes(id)) throw new Error(result.failures[0] || "Синхронизация не выполнена.");
           }}
+          onProductSaved={demoMode ? undefined : () => onRefresh()}
+          onSaveProduct={demoMode ? (updated: CatalogProductItem) => {
+            onDrawerSave(updated);
+          } : undefined}
         />
       )}
 
@@ -857,14 +971,17 @@ export function CatalogProductsTable({
         isOpen={isDripScheduleOpen}
         onClose={() => setIsDripScheduleOpen(false)}
         factoryName={factoryName}
-        totalProductsCount={items.length}
-        onScheduleCreated={(days) => {
-          showToast(`✓ Drip Feed запущен: план на ${days} дней успешно сформирован`);
+        totalProductsCount={demoMode ? (dripSelection ?? items).length : (dripSelection ?? items).filter(isDripCandidate).length}
+        products={dripSelection ?? items}
+        selectionCount={dripSelection?.length}
+        onScheduleCreated={(days, batchName) => {
+          showToast(`План Drip Feed (${batchName || "Batch"}) успешно запущен на ${days} дней!`);
         }}
       />
 
       {/* 8. DRIP FEED QUEUE MODAL */}
       <DripQueueModal
+        demoMode={demoMode}
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
         factoryId={factoryId || "direct-otto"}

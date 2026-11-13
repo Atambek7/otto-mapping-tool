@@ -1,11 +1,22 @@
 import type { RestartAccount } from "@/features/api/types";
+import { MAX_PREPARED_TITLE_CODEPOINTS, titleCodePointLength } from "./title-policy";
+import { getCsrfToken } from "@/features/auth/csrf-client";
 import { MOCK_FACTORIES, MOCK_CATALOG_PRODUCTS } from "./mock-data";
-import type { AfterbuyFactoryItem, CatalogProductItem, FactoryMetrics, FactoryProductsMetrics } from "./types";
+import type {
+  AfterbuyFactoryItem,
+  CatalogEanLinkRecord,
+  CatalogProductItem,
+  FactoryCompletionHistoryItem,
+  FactoryCompletionStatus,
+  FactoryMetrics,
+  FactoryProductsMetrics,
+} from "./types";
 
-// Pricing rule: JV -10 EUR (1000 cents), XL -15 EUR (1500 cents)
+// Apply the account discount to the verified higher source price, then set cents to 99.
 export function calculateRestartPriceCents(oldPriceCents: number, account: RestartAccount): number {
-  const discountCents = account === "JV" ? 1000 : 1500;
-  return Math.max(0, oldPriceCents - discountCents);
+  const discountCents = account === "JV" ? 1000 : 2000;
+  const discounted = oldPriceCents - discountCents;
+  return discounted > 0 ? Math.floor(discounted / 100) * 100 + 99 : 0;
 }
 
 export function formatPriceEur(cents: number): string {
@@ -16,7 +27,7 @@ export function formatPriceEur(cents: number): string {
 // Single Source of Truth for Computing Product Status in OTTO Restart
 export function getProductComputedStatus(
   item: CatalogProductItem
-): "READY" | "3M" | "12M" | "ERROR" | "PUBLISHED" {
+): "READY" | "3M" | "12M" | "ERROR" | "PUBLISHED" | "UNKNOWN" {
   // 1. Published: ONLY if explicitly marked as PUBLISHED in Restart
   if (item.status === "PUBLISHED") {
     return "PUBLISHED";
@@ -29,11 +40,11 @@ export function getProductComputedStatus(
       item.category !== "None"
   );
   const attrCount = Object.keys(item.attributes || {}).length;
-  const isTitleOver70 = item.title.trim().length > 70;
+  const isTitleOver70 = titleCodePointLength(item.title.trim()) > MAX_PREPARED_TITLE_CODEPOINTS;
 
   // 2. Error logic (OttoFlow parity):
   // If item is explicitly marked ERROR, or missing mandatory category, or missing attributes,
-  // or title exceeds 70 characters (which OTTO strictly rejects with error 602016)
+  // or the title exceeds OttoRestart's internal prepared-title limit.
   if (
     item.status === "ERROR" ||
     item.status === "NO_CATEGORY" ||
@@ -62,13 +73,15 @@ export function getProductComputedStatus(
     return "READY";
   }
 
-  // 6. Fallback to period
-  return item.period === "12M" ? "12M" : "3M";
+  // A period hint alone is not evidence of an OTTO restriction.
+  return "UNKNOWN";
 }
 
 export class CatalogDemoService {
   private factories: AfterbuyFactoryItem[] = [...MOCK_FACTORIES];
   private products: CatalogProductItem[] = [...MOCK_CATALOG_PRODUCTS];
+  private eanLinks: CatalogEanLinkRecord[] = [];
+  private nextDemoEanNumber = new Map<RestartAccount, number>([["JV", 1], ["XL", 1]]);
 
   calculateRestartPriceCents(oldPriceCents: number, account: RestartAccount): number {
     return calculateRestartPriceCents(oldPriceCents, account);
@@ -103,6 +116,86 @@ export class CatalogDemoService {
     };
 
     return { items, metrics };
+  }
+
+  async getFactoriesAsync(
+    account: RestartAccount,
+    search = "",
+    statusFilter = "ALL",
+    sortByNew = false
+  ): Promise<{
+    items: AfterbuyFactoryItem[];
+    metrics: FactoryMetrics & {
+      completeCount: number;
+      notCompleteCount: number;
+      unknownCount: number;
+      totalNewCandidates: number;
+    };
+  }> {
+    void account;
+    void search;
+    void statusFilter;
+    void sortByNew;
+    throw new Error("NOT_IMPLEMENTED: verified factory data is not connected.");
+  }
+
+  async getFactoryCompletionHistoryAsync(
+    account: RestartAccount,
+    factoryId: string
+  ): Promise<FactoryCompletionHistoryItem[]> {
+    void account;
+    void factoryId;
+    throw new Error("NOT_IMPLEMENTED: verified factory history is not connected.");
+  }
+
+  async completeFactoryAsync(
+    account: RestartAccount,
+    factoryId: string
+  ): Promise<{ success: boolean; message?: string }> {
+    void account;
+    void factoryId;
+    return { success: false, message: "NOT_IMPLEMENTED: factory completion is unavailable." };
+  }
+
+  async pasteImportContentAsync(
+    account: RestartAccount,
+    rawText: string,
+    filename = "manual_import.txt",
+    dryRun = false
+  ): Promise<any> {
+    const csrfToken = await getCsrfToken();
+    const res = await fetch("/restart/api/backend/imports/paste", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({
+        account,
+        raw_text: rawText,
+        filename,
+        dry_run: dryRun,
+      }),
+    });
+    return res.json();
+  }
+
+  async uploadImportFileAsync(
+    account: RestartAccount,
+    file: File,
+    dryRun = false
+  ): Promise<any> {
+    const csrfToken = await getCsrfToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(
+      `/restart/api/backend/imports/upload?account=${account}&dry_run=${dryRun ? "true" : "false"}`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: formData,
+      }
+    );
+    return res.json();
   }
 
   getFactoryById(factoryId: string, account: RestartAccount): AfterbuyFactoryItem | undefined {
@@ -148,7 +241,7 @@ export class CatalogDemoService {
           oldStandardPriceCents: 99999 + idx * 25000,
           period: is3m ? ("3M" as const) : ("12M" as const),
           errorCode: is3m ? ("602016 - Nonseller" as const) : ("602016 - LOW_PERFORMER" as const),
-          status: title.length > 70 ? ("ERROR" as const) : ("READY" as const),
+          status: titleCodePointLength(title) > MAX_PREPARED_TITLE_CODEPOINTS ? ("ERROR" as const) : ("READY" as const),
           existsInOtto: true,
           attributes: { material: "Stoff / Holz", color: "Grau", width: "200 cm", height: "85 cm", depth: "90 cm" },
         };
@@ -179,7 +272,7 @@ export class CatalogDemoService {
       published: factoryProducts.filter((p) => getProductComputedStatus(p) === "PUBLISHED").length,
       count3m: factoryProducts.filter((p) => p.period === "3M").length,
       count12m: factoryProducts.filter((p) => p.period === "12M").length,
-      needsAi: factoryProducts.filter((p) => p.title.length > 70).length,
+      needsAi: factoryProducts.filter((p) => titleCodePointLength(p.title) > MAX_PREPARED_TITLE_CODEPOINTS).length,
       noCategory: factoryProducts.filter((p) => !p.category || p.category === "Без категории").length,
       publishedOrExists: factoryProducts.filter((p) => p.existsInOtto).length,
     };
@@ -221,12 +314,74 @@ export class CatalogDemoService {
       published: allDirect.filter((p) => getProductComputedStatus(p) === "PUBLISHED").length,
       count3m: allDirect.filter((p) => p.period === "3M").length,
       count12m: allDirect.filter((p) => p.period === "12M").length,
-      needsAi: allDirect.filter((p) => p.title.length > 70).length,
+      needsAi: allDirect.filter((p) => titleCodePointLength(p.title) > MAX_PREPARED_TITLE_CODEPOINTS).length,
       noCategory: allDirect.filter((p) => !p.category || p.category === "Без категории").length,
       publishedOrExists: allDirect.filter((p) => p.existsInOtto).length,
     };
 
     return { items: directItems, metrics };
+  }
+
+  /** Local-only placeholder assignment for the catalog DEMO views. */
+  assignDemoEans(account: RestartAccount, productIds: string[]): { assignedCount: number; alreadyAssignedCount: number } {
+    const selected = new Set(productIds);
+    const matching = this.products.filter((product) => product.account === account && selected.has(product.id));
+    const alreadyAssignedCount = matching.filter((product) => Boolean(product.hasNewEan || product.newEan)).length;
+    let nextNumber = this.nextDemoEanNumber.get(account) ?? 1;
+    let assignedCount = 0;
+    const assignedAt = new Date().toISOString();
+    const newLinks: CatalogEanLinkRecord[] = [];
+
+    this.products = this.products.map((product) => {
+      if (product.account !== account || !selected.has(product.id) || product.hasNewEan || product.newEan) return product;
+      const sourceEan = product.sourceEan ?? product.ean;
+      const sequence = String(nextNumber).padStart(4, "0");
+      const demoEan = `DEMO-NEW-${account}-${sequence}`;
+      nextNumber += 1;
+      assignedCount += 1;
+      newLinks.push({
+        id: `DEMO-EAN-LINK-${account}-${sequence}`,
+        productId: product.id,
+        account,
+        factoryId: product.factoryId,
+        factoryName: product.factoryName,
+        title: product.title,
+        sourceEan,
+        newEan: demoEan,
+        period: product.period,
+        assignedAt,
+      });
+      return {
+        ...product,
+        ean: demoEan,
+        sourceEan,
+        newEan: demoEan,
+        hasNewEan: true,
+        eanAssignedAt: assignedAt,
+      };
+    });
+
+    this.nextDemoEanNumber.set(account, nextNumber);
+    this.eanLinks = [
+      ...newLinks,
+      ...this.eanLinks.filter((link) => !selected.has(link.productId) || link.account !== account),
+    ];
+    return { assignedCount, alreadyAssignedCount };
+  }
+
+  getEanLinks(account: RestartAccount, query = ""): CatalogEanLinkRecord[] {
+    let list = this.eanLinks.filter((item) => item.account === account);
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter(
+        (item) =>
+          item.sourceEan.toLowerCase().includes(q) ||
+          item.newEan.toLowerCase().includes(q) ||
+          item.title.toLowerCase().includes(q) ||
+          (item.factoryName || "").toLowerCase().includes(q)
+      );
+    }
+    return list;
   }
 
   // Interactive demo action: Apply AI Title rewriting to <= 70 chars
@@ -441,7 +596,7 @@ export class CatalogDemoService {
     this.products = this.products.map((p) => {
       if (p.id === productId) {
         found = true;
-        const isOver70 = newTitle.trim().length > 70;
+        const isOver70 = titleCodePointLength(newTitle.trim()) > MAX_PREPARED_TITLE_CODEPOINTS;
         const hasCat = Boolean(p.category && p.category.trim() !== "" && p.category !== "Без категории" && p.category !== "None");
         const hasAttrs = Object.keys(p.attributes || {}).length > 0;
         const newStatus = isOver70 ? "ERROR" : (hasCat && hasAttrs ? "READY" : p.status);
@@ -479,7 +634,7 @@ export class CatalogDemoService {
       if (p.id === productId) {
         found = true;
         const hasCat = Boolean(newCategory && newCategory.trim() !== "" && newCategory !== "Без категории" && newCategory !== "None");
-        const isOver70 = p.title.trim().length > 70;
+        const isOver70 = titleCodePointLength(p.title.trim()) > MAX_PREPARED_TITLE_CODEPOINTS;
         const hasAttrs = Object.keys(p.attributes || {}).length > 0;
         const newStatus = (!hasCat || isOver70) ? "ERROR" : (hasAttrs ? "READY" : p.status);
         return {

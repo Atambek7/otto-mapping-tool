@@ -1,6 +1,7 @@
 "use client";
 
 import { useRestartAccount } from "@/features/state/restart-account";
+import { useTranslation } from "@/features/i18n";
 import { WelcomeHero } from "./welcome-hero";
 import { FeatureGrid } from "./feature-grid";
 import { QuickStartSteps } from "./quick-start-steps";
@@ -10,26 +11,23 @@ import "./welcome.css";
 
 export function WelcomePage() {
   const { account } = useRestartAccount();
+  const { t } = useTranslation();
 
   return (
     <div className="welcome-page">
       {/* SECTION A — Welcome Header */}
       <header className="welcome-header">
         <div className="welcome-header-left">
-          <div className="welcome-eyebrow">
-            <span>OTTO Restart 3/12M</span>
-          </div>
-
-          <h1 className="welcome-title">Добро пожаловать!</h1>
+          <h1 className="welcome-title">{t("welcome.heroTitle")}</h1>
 
           <p className="welcome-subtitle">
-            Инструмент подготовки и повторного запуска в продажу товаров OTTO, снятых после 3 или 12 месяцев.
+            {t("welcome.heroSubtitle")}
           </p>
         </div>
 
         <div className="welcome-header-actions">
           <span className="welcome-account-pill">
-            Аккаунт: <strong>{account}</strong>
+            {t("topbar.account")}: <strong>{account}</strong>
           </span>
         </div>
       </header>

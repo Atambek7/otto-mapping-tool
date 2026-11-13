@@ -26,6 +26,11 @@ interface ImageHoverPreviewProps {
 export function ImageHoverPreview({ preview }: ImageHoverPreviewProps) {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [preview?.url]);
 
   useEffect(() => {
     setMounted(true);
@@ -95,14 +100,27 @@ export function ImageHoverPreview({ preview }: ImageHoverPreviewProps) {
       <div className="hover-preview-card">
         <div
           className="hover-preview-image-wrap"
-          style={{ width: `${imageSize}px`, height: `${imageSize}px` }}
+          style={{
+            width: `${imageSize}px`,
+            height: `${imageSize}px`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
         >
-          <img
-            src={preview.url}
-            alt={preview.name || "Превью товара"}
-            className="hover-preview-img"
-            loading="eager"
-          />
+          {!imgError ? (
+            <img
+              src={preview.url}
+              alt={preview.name || "Превью товара"}
+              className="hover-preview-img"
+              loading="eager"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <div style={{ color: "var(--color-ink-muted, #718096)", fontSize: "12px", textAlign: "center", padding: "12px" }}>
+              Фото недоступно
+            </div>
+          )}
         </div>
 
         <div className="hover-preview-info">

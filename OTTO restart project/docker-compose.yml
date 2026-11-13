@@ -1,39 +1,209 @@
 services:
   restart_db:
     image: postgres:15-alpine
-    container_name: otto_restart_db
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-otto_restart_db}
       POSTGRES_USER: ${POSTGRES_USER:-restart_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-restart_secure_pass}
-    ports:
-      - "127.0.0.1:5435:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a URL-safe random value}
     volumes:
+      # Keep the existing OttoRestart data volume; never use `down -v` here.
       - otto_restart_postgres_data:/var/lib/postgresql/data
+    networks:
+      - ottorestart
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-restart_user} -d ${POSTGRES_DB:-otto_restart_db}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 60s
+
+  restart_redis:
+    image: redis:7-alpine
+    profiles: ["workers", "scheduler"]
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - ottorestart
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    stop_grace_period: 30s
 
   restart_backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: otto_restart_backend
     restart: unless-stopped
-    volumes:
-      - ./backend:/app
-    ports:
-      - "127.0.0.1:3301:3301"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - OTTORESTART_DATABASE_URL=postgresql://restart_user:restart_secure_pass@restart_db:5432/otto_restart_db
-      - OTTORESTART_ALLOWED_ORIGINS=http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
+    environment: &restart_backend_environment
+      PYTHONUNBUFFERED: "1"
+      OTTORESTART_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-restart_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a URL-safe random value}@restart_db:5432/${POSTGRES_DB:-otto_restart_db}"
+      OTTORESTART_MIGRATION_DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-restart_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a URL-safe random value}@restart_db:5432/${POSTGRES_DB:-otto_restart_db}"
+      OTTORESTART_ALLOWED_ORIGINS: ${OTTORESTART_ALLOWED_ORIGINS:?Set the exact HTTPS OttoRestart origin}
+      OTTORESTART_MODE: ${OTTORESTART_MODE:-LEGACY_READ_ONLY}
+      OTTORESTART_INTERNAL_AUTH_SECRET: ${OTTORESTART_INTERNAL_AUTH_SECRET:?Set OTTORESTART_INTERNAL_AUTH_SECRET}
+      OTTORESTART_OPERATOR_ID: ${OTTORESTART_OPERATOR_ID:-}
+      OTTORESTART_OPERATOR_IDS: ${OTTORESTART_OPERATOR_IDS:-}
+      OTTORESTART_OPERATOR_ACCOUNTS: ${OTTORESTART_OPERATOR_ACCOUNTS:-JV,XL}
+      OTTORESTART_AFTERCOOL_M2M_KEY_HASH: ${OTTORESTART_AFTERCOOL_M2M_KEY_HASH:-}
+      OTTORESTART_AFTERCOOL_ALLOWED_ACCOUNTS: ${OTTORESTART_AFTERCOOL_ALLOWED_ACCOUNTS:-}
+      OTTORESTART_LOCAL_WRITES_ENABLED: ${OTTORESTART_LOCAL_WRITES_ENABLED:-true}
+      OTTORESTART_OTTO_READ_ENABLED: ${OTTORESTART_OTTO_READ_ENABLED:-false}
+      OTTORESTART_AFTERCOOL_READ_ENABLED: ${OTTORESTART_AFTERCOOL_READ_ENABLED:-false}
+      OTTORESTART_OPENAI_ENABLED: ${OTTORESTART_OPENAI_ENABLED:-false}
+      OTTORESTART_PRODUCT_WRITE_ENABLED: ${OTTORESTART_PRODUCT_WRITE_ENABLED:-false}
+      OTTORESTART_AVAILABILITY_WRITE_ENABLED: ${OTTORESTART_AVAILABILITY_WRITE_ENABLED:-false}
+      OTTORESTART_DISCOVERY_SCHEDULE_ENABLED: ${OTTORESTART_DISCOVERY_SCHEDULE_ENABLED:-false}
+      OTTORESTART_GTIN_APPROVED_EVIDENCE_TYPES: ${OTTORESTART_GTIN_APPROVED_EVIDENCE_TYPES:-}
+      OTTORESTART_OTTO_JV_CLIENT_ID: ${OTTORESTART_OTTO_JV_CLIENT_ID:-}
+      OTTORESTART_OTTO_JV_CLIENT_SECRET: ${OTTORESTART_OTTO_JV_CLIENT_SECRET:-}
+      OTTORESTART_OTTO_XL_CLIENT_ID: ${OTTORESTART_OTTO_XL_CLIENT_ID:-}
+      OTTORESTART_OTTO_XL_CLIENT_SECRET: ${OTTORESTART_OTTO_XL_CLIENT_SECRET:-}
+      OTTORESTART_AFTERCOOL_BASE_URL: ${OTTORESTART_AFTERCOOL_BASE_URL:-https://aftercool.de}
+      OTTORESTART_AFTERCOOL_USERNAME: ${OTTORESTART_AFTERCOOL_USERNAME:-}
+      OTTORESTART_AFTERCOOL_PASSWORD: ${OTTORESTART_AFTERCOOL_PASSWORD:-}
+      OTTORESTART_OPENAI_API_KEY: ${OTTORESTART_OPENAI_API_KEY:-${GPT_API_KEY:-}}
+      OTTORESTART_OPENAI_MODEL: ${OTTORESTART_OPENAI_MODEL:-}
     depends_on:
       restart_db:
         condition: service_healthy
+    networks:
+      ottorestart:
+        aliases:
+          # The running standalone preview uses this stable backend hostname.
+          - otto_restart_backend
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3301/api/restart/health', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 40s
+
+  restart_frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_OTTORESTART_MODE: ${OTTORESTART_MODE:-LEGACY_READ_ONLY}
+        NEXT_PUBLIC_OTTORESTART_DEMO_TABS: ${NEXT_PUBLIC_OTTORESTART_DEMO_TABS:-}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      HOSTNAME: 0.0.0.0
+      NEXT_TELEMETRY_DISABLED: "1"
+      OTTORESTART_BACKEND_URL: http://restart_backend:3301
+      OTTORESTART_AUTH_USERS_B64: ${OTTORESTART_AUTH_USERS_B64:-}
+      OTTORESTART_AUTH_USER: ${OTTORESTART_AUTH_USER:-}
+      OTTORESTART_AUTH_PASSWORD: ${OTTORESTART_AUTH_PASSWORD:-}
+      OTTORESTART_AUTH_SECRET: ${OTTORESTART_AUTH_SECRET:?Set OTTORESTART_AUTH_SECRET}
+      OTTORESTART_INTERNAL_AUTH_SECRET: ${OTTORESTART_INTERNAL_AUTH_SECRET:?Set OTTORESTART_INTERNAL_AUTH_SECRET}
+      OTTORESTART_OPERATOR_ID: ${OTTORESTART_OPERATOR_ID:-}
+      OTTORESTART_OPERATOR_IDS: ${OTTORESTART_OPERATOR_IDS:-}
+      OTTORESTART_OPERATOR_ACCOUNTS: ${OTTORESTART_OPERATOR_ACCOUNTS:-JV,XL}
+      OTTORESTART_ALLOWED_ORIGINS: ${OTTORESTART_ALLOWED_ORIGINS:?Set the exact HTTPS OttoRestart origin}
+    depends_on:
+      restart_backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${OTTORESTART_FRONTEND_PORT:-3002}:3001"
+    networks:
+      - ottorestart
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/restart/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 40s
+
+  restart_worker:
+    profiles: ["workers"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *restart_backend_environment
+      OTTORESTART_OPENAI_API_KEY: ""
+      OTTORESTART_CELERY_ENABLED: "true"
+      OTTORESTART_CELERY_BROKER_URL: redis://restart_redis:6379/0
+      OTTORESTART_MANUAL_IMPORTS_AFTER: ${OTTORESTART_MANUAL_IMPORTS_AFTER:-}
+      OTTORESTART_WORKER_ID: restart-celery-worker
+    command: ["celery", "-A", "jobs.celery_app:app", "worker", "--loglevel=INFO", "--concurrency=1", "--without-gossip", "--without-mingle"]
+    depends_on:
+      restart_db:
+        condition: service_healthy
+      restart_redis:
+        condition: service_healthy
+    networks:
+      - ottorestart
+    stop_grace_period: 90s
+
+  restart_dispatcher:
+    profiles: ["workers"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *restart_backend_environment
+      OTTORESTART_OPENAI_API_KEY: ""
+      OTTORESTART_CELERY_ENABLED: "true"
+      OTTORESTART_CELERY_BROKER_URL: redis://restart_redis:6379/0
+      OTTORESTART_MANUAL_IMPORTS_AFTER: ${OTTORESTART_MANUAL_IMPORTS_AFTER:-}
+      OTTORESTART_DISPATCH_INTERVAL_SECONDS: ${OTTORESTART_DISPATCH_INTERVAL_SECONDS:-2}
+    command: ["python", "-m", "jobs.dispatcher_loop"]
+    depends_on:
+      restart_db:
+        condition: service_healthy
+      restart_redis:
+        condition: service_healthy
+    networks:
+      - ottorestart
+    stop_grace_period: 30s
+
+  restart_beat:
+    profiles: ["scheduler"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *restart_backend_environment
+      OTTORESTART_OPENAI_API_KEY: ""
+      OTTORESTART_CELERY_ENABLED: "true"
+      OTTORESTART_CELERY_BROKER_URL: redis://restart_redis:6379/0
+      OTTORESTART_MANUAL_IMPORTS_AFTER: ${OTTORESTART_MANUAL_IMPORTS_AFTER:-}
+      OTTORESTART_DISCOVERY_SCHEDULE_ENABLED: ${OTTORESTART_DISCOVERY_SCHEDULE_ENABLED:-false}
+    command: ["celery", "-A", "jobs.celery_app:app", "beat", "--loglevel=INFO", "--schedule=/tmp/otto-restart-celerybeat-schedule"]
+    depends_on:
+      restart_db:
+        condition: service_healthy
+      restart_redis:
+        condition: service_healthy
+    networks:
+      - ottorestart
+    stop_grace_period: 30s
+
+networks:
+  ottorestart:
+    external: true
+    name: ottorestartproject_ottorestart
 
 volumes:
   otto_restart_postgres_data:
+    external: true
+    name: ottorestartproject_otto_restart_postgres_data

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { CalendarClock, CircleSlash, Clock3, FlaskConical } from "lucide-react";
 import { ApiState } from "@/components/api-state";
 import { WorkflowStepper } from "@/components/workflow-stepper";
+import { ProductionDripWorkspace } from "@/components/restart-queue/production-drip-workspace";
+import { getOttoRestartMode } from "@/features/runtime-mode";
 import { useRestartAccount } from "@/features/state/restart-account";
 import { QueueWorkspace } from "@/components/restart-queue/queue-workspace";
 
@@ -18,7 +20,7 @@ function SchedulerPanel() {
   </div>;
 }
 
-export function QueueSchedulerWorkspace() {
+function DemoQueueSchedulerWorkspace() {
   const [tab, setTab] = useState<QueueTab>("queue");
   return <section className="page-section queue-scheduler-page">
     <div className="page-heading"><div><div className="eyebrow">ПУБЛИКАЦИЯ И РАСПИСАНИЕ</div><h1>Очередь и планировщик</h1><p>Проверка только в локальном dry-run. Публикация и фоновые запуски отключены.</p></div><span className="phase-chip"><span /> DEMO · локальная симуляция</span></div>
@@ -28,5 +30,15 @@ export function QueueSchedulerWorkspace() {
       <button type="button" role="tab" aria-selected={tab === "scheduler"} onClick={() => setTab("scheduler")}>Планировщик</button>
     </div>
     {tab === "queue" ? <QueueWorkspace compact /> : <SchedulerPanel />}
+  </section>;
+}
+
+export function QueueSchedulerWorkspace() {
+  const mode = getOttoRestartMode();
+  if (mode === "PRODUCTION") return <ProductionDripWorkspace />;
+  if (mode === "DEMO") return <DemoQueueSchedulerWorkspace />;
+  return <section className="page-section queue-scheduler-page">
+    <div className="page-heading"><div><div className="eyebrow">OTTORESTART · DRIP FEED</div><h1>Очередь и расписание</h1></div></div>
+    <ApiState kind="unavailable" title="Очередь недоступна в текущем режиме" description={`Режим ${mode} не читает production batches и не переключается на DEMO.`} />
   </section>;
 }
