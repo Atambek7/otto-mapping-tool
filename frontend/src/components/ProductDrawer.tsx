@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { X, Check, Save, Wand2, AlertTriangle, Pencil, Loader2, Sparkles } from "lucide-react";
+import { X, Check, Save, Wand2, AlertTriangle, Pencil, Loader2, Sparkles, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CategoryAutocomplete } from "@/components/CategoryAutocomplete";
@@ -17,6 +17,30 @@ import { cn } from "@/lib/utils";
 import { parsePositivePrice, getAftercoolPrice } from "@/lib/prices";
 
 const schemaCache = new Map<string, any[]>();
+const COMMON_CATEGORY_ATTRIBUTES = ["marke", "farbe", "material", "lieferzeit", "zolltarifnummer"];
+
+function reconcileAttributesWithSchema(current: Record<string, string>, schema: any[]) {
+  const allowedNames = new Map<string, string>();
+  for (const attr of schema) {
+    if (attr.name) allowedNames.set(attr.name.trim().toLocaleLowerCase(), attr.name.trim());
+  }
+  for (const name of COMMON_CATEGORY_ATTRIBUTES) {
+    if (!allowedNames.has(name)) {
+      allowedNames.set(name, name.charAt(0).toUpperCase() + name.slice(1));
+    }
+  }
+
+  const compatible: Record<string, string> = {};
+  let discardedCount = 0;
+  for (const [name, rawValue] of Object.entries(current)) {
+    const value = String(rawValue || "").trim();
+    if (!value || value.toLowerCase() === "null") continue;
+    const canonicalName = allowedNames.get(name.trim().toLocaleLowerCase());
+    if (canonicalName) compatible[canonicalName] = value;
+    else discardedCount++;
+  }
+  return { attributes: compatible, preservedCount: Object.keys(compatible).length, discardedCount };
+}
 
 interface ProductDrawerProps {
   product: any;
@@ -58,7 +82,10 @@ function ProductDrawerComponent({
   const [categoryName, setCategoryName] = useState(initialCategoryName || "");
   const [attributes, setAttributes] = useState<Record<string, string>>({});
   const attributesRef = useRef<Record<string, string>>({});
-  const isUserCategoryChangeRef = useRef(false);
+  const categoryRef = useRef(category);
+  const userChangedCategoryRef = useRef(false);
+  const userEditedAttributesRef = useRef(false);
+  const pendingCategoryReconcileRef = useRef<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [isAnimationDone, setIsAnimationDone] = useState(false);
@@ -100,6 +127,7 @@ function ProductDrawerComponent({
   const [lastError, setLastError] = useState<string>("");
   const [schema, setSchema] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isLoadingSchema, setIsLoadingSchema] = useState(false);
   const [isPredictingCategory, setIsPredictingCategory] = useState(false);
   const [isExtractingAttributes, setIsExtractingAttributes] = useState(false);
   const [isSyncingOkb, setIsSyncingOkb] = useState(false);
@@ -110,6 +138,7 @@ function ProductDrawerComponent({
   const [titleDraft, setTitleDraft] = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
   const [showAllOptional, setShowAllOptional] = useState(false);
+  const [attributeSearch, setAttributeSearch] = useState("");
 
   const row = product?.row || {};
   const ean = product?.ean || row.EAN || product?.product_ean || "";
@@ -121,6 +150,7 @@ function ProductDrawerComponent({
 
   useEffect(() => {
     if (initialCategory && !category) {
+      categoryRef.current = initialCategory;
       setCategory(initialCategory);
     }
     if (initialCategoryName && !categoryName) {
@@ -134,7 +164,10 @@ function ProductDrawerComponent({
     let cancelled = false;
 
     // Reset state immediately so previous product's data doesn't flash or leak
-    isUserCategoryChangeRef.current = false;
+    userChangedCategoryRef.current = false;
+    userEditedAttributesRef.current = false;
+    pendingCategoryReconcileRef.current = null;
+    categoryRef.current = initialCategory || "";
     setCategory(initialCategory || "");
     setCategoryName(initialCategoryName || "");
     setAttributes({});
@@ -153,12 +186,11 @@ function ProductDrawerComponent({
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          if (data.category_id) {
-            setCategory(data.category_id);
-            setCategoryName(data.category_name || data.category_id);
-          } else {
-            setCategory(initialCategory || "");
-            setCategoryName(initialCategoryName || "");
+          if (!userChangedCategoryRef.current) {
+            const loadedCategory = data.category_id || initialCategory || "";
+            categoryRef.current = loadedCategory;
+            setCategory(loadedCategory);
+            setCategoryName(data.category_name || loadedCategory || initialCategoryName || "");
           }
           if (data.product_name && data.product_name.trim() !== "Без названия" && data.product_name.toLowerCase() !== "null") {
             setDbName(data.product_name.trim());
@@ -178,13 +210,28 @@ function ProductDrawerComponent({
               }
             }
           }
-          setAttributes(cleanAttrs);
-          attributesRef.current = cleanAttrs;
+          let nextAttributes = cleanAttrs;
+          if (userChangedCategoryRef.current) {
+            const currentSchema = schemaCache.get(categoryRef.current);
+            if (currentSchema?.length) {
+              nextAttributes = reconcileAttributesWithSchema(nextAttributes, currentSchema).attributes;
+            }
+            if (userEditedAttributesRef.current) {
+              const editedAttributes = currentSchema?.length
+                ? reconcileAttributesWithSchema(attributesRef.current, currentSchema).attributes
+                : attributesRef.current;
+              nextAttributes = { ...nextAttributes, ...editedAttributes };
+            }
+          }
+          setAttributes(nextAttributes);
+          attributesRef.current = nextAttributes;
 
-          if (data.ai_attributes && Array.isArray(data.ai_attributes)) {
-            setAiFilledAttrs(new Set(data.ai_attributes));
-          } else {
-            setAiFilledAttrs(new Set());
+          if (!userChangedCategoryRef.current) {
+            if (data.ai_attributes && Array.isArray(data.ai_attributes)) {
+              setAiFilledAttrs(new Set(data.ai_attributes));
+            } else {
+              setAiFilledAttrs(new Set());
+            }
           }
           
           if (data.missing_attributes && Array.isArray(data.missing_attributes)) {
@@ -199,26 +246,32 @@ function ProductDrawerComponent({
             setLastError("");
           }
         } else {
-          setCategory(initialCategory || "");
-          setCategoryName(initialCategoryName || "");
-          setAttributes({});
-          attributesRef.current = {};
-          setAiFilledAttrs(new Set());
-          setMissingAttributes([]);
-          setLastError("");
+          if (!userChangedCategoryRef.current) {
+            categoryRef.current = initialCategory || "";
+            setCategory(initialCategory || "");
+            setCategoryName(initialCategoryName || "");
+            setAttributes({});
+            attributesRef.current = {};
+            setAiFilledAttrs(new Set());
+            setMissingAttributes([]);
+            setLastError("");
+          }
           setDbName(null);
           setDbPrice(null);
         }
       } catch (e) {
         console.error("Failed to load existing mapping", e);
         if (!cancelled) {
-          setCategory(initialCategory || "");
-          setCategoryName(initialCategoryName || "");
-          setAttributes({});
-          attributesRef.current = {};
-          setAiFilledAttrs(new Set());
-          setMissingAttributes([]);
-          setLastError("");
+          if (!userChangedCategoryRef.current) {
+            categoryRef.current = initialCategory || "";
+            setCategory(initialCategory || "");
+            setCategoryName(initialCategoryName || "");
+            setAttributes({});
+            attributesRef.current = {};
+            setAiFilledAttrs(new Set());
+            setMissingAttributes([]);
+            setLastError("");
+          }
           setDbName(null);
           setDbPrice(null);
         }
@@ -236,85 +289,72 @@ function ProductDrawerComponent({
 
   // 2. Fetch Category Schema when category changes
   useEffect(() => {
-    if (!category) {
+    const selectedCategory = category;
+    let cancelled = false;
+    setAttributeSearch("");
+    if (!selectedCategory) {
       setSchema([]);
-      return;
+      setIsLoadingSchema(false);
+      return () => {
+        cancelled = true;
+      };
     }
+
     const loadSchema = async () => {
       let loadedSchema: any[] = [];
-      if (schemaCache.has(category)) {
-        loadedSchema = schemaCache.get(category)!;
-        setSchema(loadedSchema);
+      if (schemaCache.has(selectedCategory)) {
+        loadedSchema = schemaCache.get(selectedCategory)!;
+        setIsLoadingSchema(false);
       } else {
-        setLoading(true);
+        setIsLoadingSchema(true);
+        setSchema([]);
         try {
-          const res = await fetchWithAuth(`/mapping/categories/${encodeURIComponent(category)}/attributes`);
+          const res = await fetchWithAuth(`/mapping/categories/${encodeURIComponent(selectedCategory)}/attributes`);
           if (res.ok) {
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
-              schemaCache.set(category, data);
+              schemaCache.set(selectedCategory, data);
             }
-            loadedSchema = data;
-            setSchema(data);
+            loadedSchema = Array.isArray(data) ? data : [];
           }
         } catch (e) {
           console.error("Failed to load schema", e);
         } finally {
-          setLoading(false);
+          if (!cancelled) setIsLoadingSchema(false);
         }
       }
 
-      // Smart Attribute Preservation:
-      // Reconcile current attributes with new schema ONLY when user changes category manually
-      if (isUserCategoryChangeRef.current) {
-        isUserCategoryChangeRef.current = false;
-        if (Array.isArray(loadedSchema) && loadedSchema.length > 0) {
-          const allowedLowerMap = new Map<string, string>();
-          for (const s of loadedSchema) {
-            if (s.name) {
-              allowedLowerMap.set(s.name.trim().toLowerCase(), s.name.trim());
-            }
-          }
-          for (const u of ["marke", "farbe", "material", "lieferzeit", "zolltarifnummer"]) {
-            if (!allowedLowerMap.has(u)) {
-              allowedLowerMap.set(u, u.charAt(0).toUpperCase() + u.slice(1));
-            }
-          }
+      if (cancelled) return;
+      setSchema(loadedSchema);
 
-          const current = attributesRef.current || {};
-          if (Object.keys(current).length > 0) {
-            const surviving: Record<string, string> = {};
-            let preservedCount = 0;
-            let discardedCount = 0;
+      // Reconcile only the latest manually selected category and its loaded schema.
+      if (
+        loadedSchema.length > 0 &&
+        userChangedCategoryRef.current &&
+        pendingCategoryReconcileRef.current === selectedCategory
+      ) {
+        const result = reconcileAttributesWithSchema(attributesRef.current || {}, loadedSchema);
+        attributesRef.current = result.attributes;
+        setAttributes(result.attributes);
+        pendingCategoryReconcileRef.current = null;
 
-            for (const [k, v] of Object.entries(current)) {
-              if (!v || !String(v).trim()) continue;
-              const kLower = k.trim().toLowerCase();
-              if (allowedLowerMap.has(kLower)) {
-                const canonicalKey = allowedLowerMap.get(kLower)!;
-                surviving[canonicalKey] = String(v).trim();
-                preservedCount++;
-              } else {
-                discardedCount++;
-              }
-            }
-
-            attributesRef.current = surviving;
-            setAttributes({ ...surviving });
-
-            if (preservedCount > 0 && discardedCount > 0) {
-              toast.info(`Категория обновлена: сохранено ${preservedCount} общих атрибутов, отсеяно ${discardedCount} несовместимых.`);
-            } else if (preservedCount > 0) {
-              toast.info(`Категория обновлена: все ${preservedCount} совместимых атрибутов сохранены.`);
-            }
-          }
+        if (result.preservedCount > 0 && result.discardedCount > 0) {
+          toast.info(`Категория обновлена: сохранено ${result.preservedCount} общих атрибутов, отсеяно ${result.discardedCount} несовместимых.`);
+        } else if (result.preservedCount > 0) {
+          toast.info(`Категория обновлена: все ${result.preservedCount} совместимых атрибутов сохранены.`);
+        } else if (result.discardedCount > 0) {
+          toast.info("Для новой категории общих атрибутов не найдено. Проверьте поля перед сохранением.");
         }
       }
     };
     loadSchema();
+    return () => {
+      cancelled = true;
+    };
   }, [category]);
 
   const handleAttrChange = useCallback((name: string, val: string, isNumeric?: boolean) => {
+    userEditedAttributesRef.current = true;
     let cleanVal = val;
     if (isNumeric || /(breite|höhe|tiefe|länge|maße|abmessung|gewicht|stärke|durchmesser)/i.test(name)) {
       if (cleanVal) {
@@ -366,6 +406,29 @@ function ProductDrawerComponent({
     return { filledOptionalAttrs: filled, emptyOptionalAttrs: empty };
   }, [sortedSchema, attributes]);
 
+  const filteredAttributeSchema = useMemo(() => {
+    const query = attributeSearch.trim().toLocaleLowerCase();
+    if (!query) return [];
+
+    return sortedSchema.filter((attr: any) => {
+      const optionText = Array.isArray(attr.options)
+        ? attr.options.map((option: any) => {
+            if (typeof option === "string" || typeof option === "number") return String(option);
+            return option && typeof option === "object" ? Object.values(option).join(" ") : "";
+          }).join(" ")
+        : "";
+      const searchableText = [
+        attr.name,
+        attr.unit,
+        attr.type,
+        attr.description,
+        attributes[attr.name],
+        optionText,
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      return searchableText.includes(query);
+    });
+  }, [sortedSchema, attributeSearch, attributes]);
+
   const handlePredictCategory = async () => {
     setIsPredictingCategory(true);
     try {
@@ -377,11 +440,11 @@ function ProductDrawerComponent({
         const data = await res.json();
         if (data.category_id) {
           if (data.category_id !== category) {
+            categoryRef.current = data.category_id;
+            userChangedCategoryRef.current = true;
+            pendingCategoryReconcileRef.current = data.category_id;
             setCategory(data.category_id);
             setCategoryName(data.category_name || data.category_id);
-            setAttributes({});
-            attributesRef.current = {};
-            setAiFilledAttrs(new Set());
             setMissingAttributes([]);
             setLastError("");
           }
@@ -445,6 +508,7 @@ function ProductDrawerComponent({
                 actuallyFilled.push(k);
               }
             }
+            if (actuallyFilled.length > 0) userEditedAttributesRef.current = true;
             attributesRef.current = next;
             setAiFilledAttrs(old => new Set([...old, ...actuallyFilled]));
             return next;
@@ -503,9 +567,12 @@ function ProductDrawerComponent({
             if (fetchdata.product_name) setDbName(fetchdata.product_name);
             let newCatId = "";
             let newCatName = "";
+            userChangedCategoryRef.current = true;
+            pendingCategoryReconcileRef.current = null;
             if (fetchdata.category_id) {
               newCatId = fetchdata.category_id;
               newCatName = fetchdata.category_name || fetchdata.category_id;
+              categoryRef.current = newCatId;
               setCategory(newCatId);
               setCategoryName(newCatName);
             }
@@ -519,6 +586,7 @@ function ProductDrawerComponent({
             }
             setAttributes(cleanAttrs);
             attributesRef.current = cleanAttrs;
+            userEditedAttributesRef.current = true;
 
             if (fetchdata.ai_attributes && Array.isArray(fetchdata.ai_attributes)) {
               setAiFilledAttrs(new Set(fetchdata.ai_attributes));
@@ -676,28 +744,26 @@ function ProductDrawerComponent({
       // 2. Assign Attributes — read back the real status from server
       const currentAttrs = attributesRef.current;
       let realStatus = "Need Attributes";
-      if (Object.keys(currentAttrs).length > 0) {
-        const attrRes = await fetchWithAuth("/mapping/attributes", {
-          method: "POST",
-          body: JSON.stringify({
-            product_ean: ean,
-            attributes: currentAttrs,
-            account,
-            ai_attributes: Array.from(aiFilledAttrs)
-          }),
-        });
-        if (attrRes.ok) {
-          const attrData = await attrRes.json();
-          realStatus = (attrData.errors && attrData.errors.length > 0) ? "Error" : "Ready";
-          if (realStatus === "Ready") {
-            setLastError("");
-            setMissingAttributes([]);
-          }
-        } else {
-          const err = await attrRes.json().catch(() => ({}));
-          toast.error(err.detail || "Не удалось сохранить атрибуты");
-          return;
+      const attrRes = await fetchWithAuth("/mapping/attributes", {
+        method: "POST",
+        body: JSON.stringify({
+          product_ean: ean,
+          attributes: currentAttrs,
+          account,
+          ai_attributes: Array.from(aiFilledAttrs)
+        }),
+      });
+      if (attrRes.ok) {
+        const attrData = await attrRes.json();
+        realStatus = (attrData.errors && attrData.errors.length > 0) ? "Error" : "Ready";
+        if (realStatus === "Ready") {
+          setLastError("");
+          setMissingAttributes([]);
         }
+      } else {
+        const err = await attrRes.json().catch(() => ({}));
+        toast.error(err.detail || "Не удалось сохранить атрибуты");
+        return;
       }
 
       toast.success("Маппинг сохранён");
@@ -944,7 +1010,9 @@ function ProductDrawerComponent({
             initialName={categoryName}
             onChange={(id, name) => {
               if (id !== category) {
-                isUserCategoryChangeRef.current = true;
+                categoryRef.current = id;
+                userChangedCategoryRef.current = true;
+                pendingCategoryReconcileRef.current = id;
                 setCategory(id);
                 setCategoryName(name);
               }
@@ -989,6 +1057,85 @@ function ProductDrawerComponent({
               {t("product_drawer.loading_schema")}
             </div>
           ) : (
+            <>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <Input
+                  type="search"
+                  value={attributeSearch}
+                  onChange={(event) => setAttributeSearch(event.target.value)}
+                  placeholder={t("product_drawer.search_all_attributes")}
+                  className="h-9 text-xs rounded-lg pl-9 pr-9 border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0B0F19] dark:text-slate-200"
+                  aria-label={t("product_drawer.search_all_attributes")}
+                />
+                {attributeSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setAttributeSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                    aria-label={t("product_drawer.clear_search")}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {attributeSearch.trim() ? (
+                <div className="space-y-3">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                    {t("product_drawer.attribute_search_results", {
+                      count: filteredAttributeSchema.length,
+                      total: schema.length,
+                    })}
+                  </div>
+                  {filteredAttributeSchema.length > 0 ? (
+                    <div className="space-y-4">
+                      {filteredAttributeSchema.map((attr: any) => {
+                        const isAiFilled = aiFilledAttrs.has(attr.name);
+                        const isNum = attr.type === "number" || !!attr.unit;
+                        const isFilled = !!attributes[attr.name]?.trim();
+                        return (
+                          <div key={attr.name} className="space-y-1.5">
+                            <label className={cn(
+                              "text-xs font-medium flex items-center gap-1",
+                              attr.required
+                                ? "text-slate-700 dark:text-slate-300"
+                                : "text-slate-500 dark:text-slate-400"
+                            )}>
+                              {attr.name}
+                              {attr.unit && (
+                                <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                                  {attr.unit}
+                                </span>
+                              )}
+                              {attr.required && <span className="text-red-500 text-[10px]">★</span>}
+                              {isAiFilled && (
+                                <span className="ml-1 text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full font-semibold tracking-wide">✦ AI</span>
+                              )}
+                              {isFilled && (
+                                <span className="ml-auto text-[10px] text-emerald-500 font-normal">✓ {t("product_drawer.filled")}</span>
+                              )}
+                            </label>
+                            <AttributeCombobox
+                              name={attr.name}
+                              value={attributes[attr.name] || ""}
+                              options={attr.options}
+                              placeholder={attr.required ? undefined : t("product_drawer.leave_empty")}
+                              onChange={(v) => handleAttrChange(attr.name, v, isNum)}
+                              dimmed={!attr.required && !isFilled}
+                              isAiFilled={isAiFilled}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-400 dark:text-slate-500 p-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center">
+                      {t("product_drawer.no_attribute_matches")}
+                    </div>
+                  )}
+                </div>
+              ) : (
             <div className="space-y-4">
               {/* Required attributes (HIGH relevance) */}
               {requiredAttrs.map((attr: any) => {
@@ -1120,6 +1267,8 @@ function ProductDrawerComponent({
                 </div>
               )}
             </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1140,7 +1289,7 @@ function ProductDrawerComponent({
       <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-card">
         <Button
           onClick={handleSave}
-          disabled={loading || !category || isClosing}
+          disabled={loading || isLoadingSchema || !category || isClosing}
           className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-xs h-10"
         >
           <Save className="w-4 h-4 mr-2" />

@@ -544,3 +544,272 @@ async def get_published_products_api_alias(
         include_raw_payload=include_raw_payload,
         db=db,
     )
+
+
+def _load_factory_names_map() -> Dict[str, str]:
+    """
+    Returns a dict mapping factory_id -> factory_name from Redis cache.
+    """
+    if not redis_client:
+        return {}
+    try:
+        raw = redis_client.get("aftercool_factories_cache") or redis_client.get("aftercool_factories_last_good")
+        if not raw:
+            return {}
+        data = json.loads(raw)
+        result = {}
+        items = []
+        if isinstance(data, dict):
+            if "items" in data and isinstance(data["items"], list):
+                items = data["items"]
+            else:
+                for v in data.values():
+                    if isinstance(v, list):
+                        items.extend(v)
+        elif isinstance(data, list):
+            items = data
+        for f in items:
+            if isinstance(f, dict):
+                fid = str(f.get("id") or "").strip()
+                name = str(f.get("name") or "").strip()
+                if fid and name:
+                    result[fid] = name
+        return result
+    except Exception as ex:
+        logger.warning(f"Error loading factory names map: {ex}")
+        return {}
+
+
+async def build_drip_factories_response(
+    include_existing: bool = True,
+    only_paired: bool = False,
+    factory_name: Optional[str] = None,
+    factory_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> Dict[str, List[Dict[str, Optional[str]]]]:
+    """
+    Builds the mapping of Drip Feed factories to paired JV & XL published EANs.
+    """
+    cache_key = f"omt:drip_factories_cache:{include_existing}:{only_paired}:{factory_name or ''}:{factory_id or ''}"
+    if redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    from collections import defaultdict
+    from services.aftercool_twin import _normalize_name, _normalize_title
+    from services.queue_reconciliation import load_observations
+
+    # 1. Load factory names cache
+    fac_names_cache = _load_factory_names_map()
+
+    # 2. Query PublishPlan rows for OTTO_API executor type
+    plans_query = db.query(models.PublishPlan).filter(
+        models.PublishPlan.executor_type == models.ExecutorType.OTTO_API
+    )
+
+    clean_target_fid = str(factory_id).strip() if factory_id else None
+    target_norm_name = _normalize_name(factory_name) if factory_name else None
+
+    # If factory_id is given, check if we can resolve its twin factory name
+    twin_norm_from_fid = None
+    if clean_target_fid:
+        if clean_target_fid in fac_names_cache:
+            twin_norm_from_fid = _normalize_name(fac_names_cache[clean_target_fid])
+        else:
+            plan_match = plans_query.filter(models.PublishPlan.factory_id == clean_target_fid).first()
+            if plan_match and plan_match.factory_name and str(plan_match.factory_name).strip() != clean_target_fid:
+                twin_norm_from_fid = _normalize_name(str(plan_match.factory_name).strip())
+
+    plans = plans_query.all()
+    if not plans:
+        return {}
+
+    plan_map = {}
+    display_names = {}
+    plan_norm_names = {}
+
+    for p in plans:
+        fid = str(p.factory_id).strip()
+        fname = fac_names_cache.get(fid)
+        if not fname and p.factory_name and str(p.factory_name).strip() != fid:
+            fname = str(p.factory_name).strip()
+        if not fname:
+            fname = f"Factory_{fid}"
+
+        norm = _normalize_name(fname)
+
+        # Apply factory_name filter if requested
+        if target_norm_name and target_norm_name != norm and target_norm_name not in norm:
+            continue
+
+        # Apply factory_id filter if requested
+        if clean_target_fid:
+            if twin_norm_from_fid:
+                if norm != twin_norm_from_fid:
+                    continue
+            else:
+                if fid != clean_target_fid:
+                    continue
+
+        plan_map[p.id] = p
+        plan_norm_names[p.id] = norm
+        if norm not in display_names or display_names[norm].startswith("Factory_"):
+            display_names[norm] = fname
+
+    if not plan_map:
+        return {}
+
+    # 3. Query queue items for matched plans
+    queue_items = db.query(models.PublishQueueItem).filter(
+        models.PublishQueueItem.plan_id.in_(list(plan_map.keys()))
+    ).all()
+
+    # 4. Optional load_observations for existing items in OTTO
+    obs_map = {}
+    if include_existing:
+        jv_items = [i for i in queue_items if (i.account_name.value if hasattr(i.account_name, "value") else str(i.account_name)) == "JV"]
+        xl_items = [i for i in queue_items if (i.account_name.value if hasattr(i.account_name, "value") else str(i.account_name)) == "XL"]
+        obs_map.update(load_observations("JV", jv_items))
+        obs_map.update(load_observations("XL", xl_items))
+
+    # 5. Group published EANs by factory norm and account
+    fac_eans = defaultdict(lambda: {"JV": set(), "XL": set()})
+
+    for it in queue_items:
+        acc = it.account_name.value if hasattr(it.account_name, "value") else str(it.account_name)
+        norm = plan_norm_names.get(it.plan_id)
+        if not norm:
+            continue
+        is_published = (it.status == models.QueueItemStatus.PUBLISHED)
+        is_existing = (include_existing and it.id in obs_map and obs_map[it.id].get("exists") is True)
+        if is_published or is_existing:
+            fac_eans[norm][acc].add(it.product_ean)
+
+    all_needed_eans = list(set().union(*(v["JV"] | v["XL"] for v in fac_eans.values())))
+
+    # 6. Bulk load ProductMapping metadata (image_url, product_name) for pairing
+    mappings = {}
+    for i in range(0, len(all_needed_eans), 2000):
+        chunk = all_needed_eans[i:i+2000]
+        rows = db.query(
+            models.ProductMapping.product_ean,
+            models.ProductMapping.account_name,
+            models.ProductMapping.image_url,
+            models.ProductMapping.product_name
+        ).filter(models.ProductMapping.product_ean.in_(chunk)).all()
+        for row in rows:
+            acc_str = row.account_name.value if hasattr(row.account_name, "value") else str(row.account_name)
+            mappings[(acc_str, row.product_ean)] = row
+
+    # 7. Pair JV & XL EANs
+    result = {}
+    for norm, acc_dict in sorted(fac_eans.items(), key=lambda x: display_names.get(x[0], x[0])):
+        fname = display_names.get(norm, norm)
+        jv_set = set(acc_dict["JV"])
+        xl_set = set(acc_dict["XL"])
+        pairs = []
+
+        # Step 1: Identical EAN
+        for e in sorted(jv_set & xl_set):
+            pairs.append({"jv": e, "xl": e})
+            jv_set.remove(e)
+            xl_set.remove(e)
+
+        # Step 2: Image URL match
+        xl_by_img = {}
+        for e in sorted(xl_set):
+            m = mappings.get(("XL", e))
+            if m and m.image_url and m.image_url.strip():
+                xl_by_img.setdefault(m.image_url.strip(), []).append(e)
+
+        for e in sorted(list(jv_set)):
+            m = mappings.get(("JV", e))
+            if m and m.image_url and m.image_url.strip() in xl_by_img and xl_by_img[m.image_url.strip()]:
+                xe = xl_by_img[m.image_url.strip()].pop(0)
+                pairs.append({"jv": e, "xl": xe})
+                jv_set.remove(e)
+                xl_set.remove(xe)
+
+        # Step 3: Normalized title match
+        xl_by_title = {}
+        for e in sorted(xl_set):
+            m = mappings.get(("XL", e))
+            if m and m.product_name and m.product_name.strip():
+                xl_by_title.setdefault(_normalize_title(m.product_name), []).append(e)
+
+        for e in sorted(list(jv_set)):
+            m = mappings.get(("JV", e))
+            if m and m.product_name and m.product_name.strip():
+                nt = _normalize_title(m.product_name)
+                if nt in xl_by_title and xl_by_title[nt]:
+                    xe = xl_by_title[nt].pop(0)
+                    pairs.append({"jv": e, "xl": xe})
+                    jv_set.remove(e)
+                    xl_set.remove(xe)
+
+        # Step 4: Unmatched items (if not only_paired)
+        if not only_paired:
+            for e in sorted(jv_set):
+                pairs.append({"jv": e, "xl": None})
+            for e in sorted(xl_set):
+                pairs.append({"jv": None, "xl": e})
+
+        if pairs or not only_paired:
+            result[fname] = pairs
+
+    if redis_client:
+        try:
+            redis_client.set(cache_key, json.dumps(result), ex=180)
+        except Exception:
+            pass
+
+    return result
+
+
+# Standard path: /export/drip-factories
+@router.get("/export/drip-factories")
+@router.get("/drip-factories", include_in_schema=False)
+async def get_drip_factories_export(
+    include_existing: bool = Query(True, description="Include items confirmed in OTTO via observations"),
+    only_paired: bool = Query(False, description="Return only pairs where both JV and XL are present"),
+    factory_name: Optional[str] = Query(None, description="Filter by factory name"),
+    factory_id: Optional[str] = Query(None, description="Filter by factory ID (JV or XL)"),
+    auth_data: dict = Depends(verify_external_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns Drip Feed factories and their published EANs mapped as JV & XL pairs.
+    """
+    return await build_drip_factories_response(
+        include_existing=include_existing,
+        only_paired=only_paired,
+        factory_name=factory_name,
+        factory_id=factory_id,
+        db=db,
+    )
+
+
+# Alias path: /api/drip-factories (for external service convenience)
+@router.get("/api/drip-factories")
+async def get_drip_factories_api_alias(
+    include_existing: bool = Query(True, description="Include items confirmed in OTTO via observations"),
+    only_paired: bool = Query(False, description="Return only pairs where both JV and XL are present"),
+    factory_name: Optional[str] = Query(None, description="Filter by factory name"),
+    factory_id: Optional[str] = Query(None, description="Filter by factory ID (JV or XL)"),
+    auth_data: dict = Depends(verify_external_auth),
+    db: Session = Depends(get_db),
+):
+    """
+    Alias route for /export/drip-factories.
+    """
+    return await build_drip_factories_response(
+        include_existing=include_existing,
+        only_paired=only_paired,
+        factory_name=factory_name,
+        factory_id=factory_id,
+        db=db,
+    )

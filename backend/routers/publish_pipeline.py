@@ -2,7 +2,9 @@ from datetime import datetime, timezone, date, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import os
+import secrets
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -437,6 +439,67 @@ async def create_pipeline_plan(
     }
 
 
+@router.get("/drip-factories")
+def list_drip_factories(
+    account_name: models.AccountType = Query(...),
+    db: Session = Depends(get_db),
+):
+    """List factories with stored evidence of an OTTO Drip Feed submission.
+
+    Some older failures have no retained submission evidence and are not counted.
+    """
+    from sqlalchemy import or_
+    evidence = or_(models.PublishQueueItem.otto_submission_attempted_at.isnot(None),
+                   (models.PublishQueueItem.otto_task_href.isnot(None)) &
+                   (models.PublishQueueItem.otto_task_href != ""),
+                   models.PublishQueueItem.published_at.isnot(None))
+    rows = (db.query(models.PublishPlan.factory_id,
+                     func.max(models.PublishPlan.factory_name).label('factory_name'),
+                     func.count(func.distinct(models.PublishQueueItem.id)).label('submission_items'),
+                     func.max(models.PublishQueueItem.otto_submission_attempted_at).label('last_attempt_at'))
+            .join(models.PublishQueueItem, models.PublishQueueItem.plan_id == models.PublishPlan.id)
+            .filter(models.PublishPlan.account_name == account_name,
+                    models.PublishQueueItem.account_name == account_name,
+                    models.PublishPlan.executor_type == models.ExecutorType.OTTO_API,
+                    evidence)
+            .group_by(models.PublishPlan.factory_id)
+            .order_by(models.PublishPlan.factory_id).all())
+    availability_rows = (db.query(
+        models.InitialAvailabilityState.factory_id,
+        func.count(models.InitialAvailabilityState.id).label("total"),
+        func.sum(case((
+            (models.InitialAvailabilityState.stock_state == "confirmed") &
+            (models.InitialAvailabilityState.delivery_state == "confirmed"), 1
+        ), else_=0)).label("confirmed"),
+        func.sum(case((
+            models.InitialAvailabilityState.stock_state.in_(["pending", "retryable_failed"]) |
+            models.InitialAvailabilityState.delivery_state.in_(["pending", "retryable_failed"]), 1
+        ), else_=0)).label("pending"),
+        func.sum(case((
+            models.InitialAvailabilityState.stock_state.in_(["sending", "failed", "unknown", "accepted"]) |
+            models.InitialAvailabilityState.delivery_state.in_(["sending", "failed", "unknown", "accepted"]), 1
+        ), else_=0)).label("needs_review"),
+    ).filter(models.InitialAvailabilityState.account_name == account_name.value)
+      .group_by(models.InitialAvailabilityState.factory_id).all())
+    availability_by_factory = {
+        row.factory_id: {"total": int(row.total or 0), "confirmed": int(row.confirmed or 0),
+                         "pending": int(row.pending or 0), "needs_review": int(row.needs_review or 0)}
+        for row in availability_rows
+    }
+    factories = [{
+        'id': row.factory_id,
+        'name': row.factory_name or row.factory_id,
+        'submission_items': int(row.submission_items or 0),
+        'last_attempt_at': row.last_attempt_at.isoformat() if row.last_attempt_at else None,
+        'initial_availability': availability_by_factory.get(
+            row.factory_id, {"total": 0, "confirmed": 0, "pending": 0, "needs_review": 0}
+        ),
+    } for row in rows]
+    return {'account': account_name.value, 'count': len(factories),
+            'factories': factories, 'history_complete': False,
+            'evidence_note': 'Stored attempt markers, task links, or queue publication timestamps; this is not proof of current ONLINE status.'}
+
+
 @router.get("/plans")
 def list_pipeline_plans(
     account_name: models.AccountType = Query(..., description="Target account: JV or XL"),
@@ -786,85 +849,260 @@ class RetryAvailabilityRequest(BaseModel):
     eans: Optional[List[str]] = None
     plan_id: Optional[int] = None
     account_name: Optional[models.AccountType] = None
+    reason: str = Field(min_length=5, max_length=1000)
+    evidence_ref: str = Field(min_length=1, max_length=512)
+
+
+class AvailabilityReviewRequest(BaseModel):
+    account_name: models.AccountType
+    operation: str = Field(pattern=r"^(stock|delivery)$")
+    outcome: str = Field(pattern=r"^(APPLIED|NOT_APPLIED|UNRESOLVED)$")
+    reason: str = Field(min_length=5, max_length=1000)
+    evidence_ref: str = Field(min_length=1, max_length=512)
+
+
+class DeliveryPayloadCorrectionRequest(BaseModel):
+    account_name: models.AccountType
+    shipping_profile_id: str = Field(min_length=36, max_length=36)
+    processing_time: str = Field(pattern=r"^(37|56)$")
+    reason: str = Field(min_length=5, max_length=1000)
+    evidence_ref: str = Field(min_length=1, max_length=512)
+
+
+def require_availability_reviewer(token: Optional[str]) -> str:
+    expected = os.environ.get("AVAILABILITY_REVIEW_TOKEN", "").strip()
+    actor = os.environ.get("AVAILABILITY_REVIEWER_ID", "").strip()
+    if not expected or not actor:
+        raise HTTPException(status_code=503, detail="Availability review is not configured.")
+    if not token or not secrets.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid reviewer token.")
+    return actor
 
 
 @router.post("/retry-availability")
 def retry_availability_endpoint(
     req: RetryAvailabilityRequest,
+    x_availability_review_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """
-    Manual recovery endpoint to trigger Availability (Stock=20 and Shipping Profile)
-    sync for a given plan_id or list of EANs.
-    Batches items into chunks of 100 and triggers Celery tasks immediately (countdown=0).
-    """
-    from tasks import dispatch_otto_availability_batches
+    """Authorize a retry only for an explicitly rejected step after correction."""
+    actor = require_availability_reviewer(x_availability_review_token)
 
+    if req.plan_id is not None and req.eans:
+        raise HTTPException(status_code=400, detail="Provide either plan_id or eans, not both.")
     if not req.plan_id and not req.eans:
         raise HTTPException(status_code=400, detail="Either plan_id or eans must be provided.")
-
     if req.plan_id:
         plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == req.plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail=f"Plan {req.plan_id} not found.")
-
-        query = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.plan_id == req.plan_id)
-        if req.account_name:
-            query = query.filter(models.PublishQueueItem.account_name == req.account_name)
-        items = query.all()
-        if not items:
-            raise HTTPException(status_code=404, detail=f"No items found for plan {req.plan_id}.")
-
-        acc_str = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
-        dispatched = dispatch_otto_availability_batches(
-            item_ids=[it.id for it in items],
-            account_name=acc_str,
-            plan_id=plan.id,
-            base_countdown=0,
-            jitter_step=2,
-            force=True,
+        account = plan.account_name
+        if req.account_name and req.account_name != account:
+            raise HTTPException(status_code=404, detail="Plan not found in the requested account.")
+        query = db.query(models.InitialAvailabilityState).filter_by(
+            plan_id=plan.id, account_name=account.value
         )
-        return {
-            "success": True,
-            "message": f"Dispatched {dispatched} availability batch(es) for plan {req.plan_id}.",
-            "dispatched_batches": dispatched,
-            "total_items": len(items),
-            "account_name": acc_str,
-        }
-
-    # eans branch
-    query = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.product_ean.in_(req.eans))
-    if req.account_name:
-        query = query.filter(models.PublishQueueItem.account_name == req.account_name)
-    items = query.all()
-    if not items:
-        raise HTTPException(
-            status_code=404,
-            detail="No publish queue items found matching the provided EANs."
+    else:
+        if not req.account_name:
+            raise HTTPException(status_code=400, detail="account_name is required with EANs.")
+        account = req.account_name
+        query = db.query(models.InitialAvailabilityState).filter(
+            models.InitialAvailabilityState.account_name == account.value,
+            models.InitialAvailabilityState.product_ean.in_(req.eans or []),
         )
 
-    # Group by account
-    from collections import defaultdict
-    items_by_acc = defaultdict(list)
-    for it in items:
-        acc_str = it.account_name.value if hasattr(it.account_name, "value") else str(it.account_name)
-        items_by_acc[acc_str].append(it)
+    states = query.with_for_update().all()
+    now = datetime.now(timezone.utc)
+    retried = []
+    for state in states:
+        changed = False
+        for operation in ("stock", "delivery"):
+            state_name = f"{operation}_state"
+            if getattr(state, state_name) != "failed":
+                continue
+            setattr(state, state_name, "pending")
+            setattr(state, f"{operation}_next_attempt_at", None)
+            setattr(state, f"{operation}_last_error", None)
+            db.add(models.InitialAvailabilityReviewEvent(
+                state_id=state.id, account_name=state.account_name,
+                product_ean=state.product_ean, operation=operation,
+                outcome="RETRY_AUTHORIZED", actor_id=actor,
+                reason=req.reason.strip(), evidence_ref=req.evidence_ref.strip(),
+            ))
+            changed = True
+        if changed:
+            state.manual_retry_count += 1
+            state.next_attempt_trigger_kind = "manual"
+            state.next_dispatch_at = now
+            state.dispatch_lease_until = None
+            retried.append(state.id)
+    db.commit()
 
-    total_dispatched = 0
-    for acc_str, acc_items in items_by_acc.items():
-        total_dispatched += dispatch_otto_availability_batches(
-            item_ids=[it.id for it in acc_items],
-            account_name=acc_str,
-            plan_id=acc_items[0].plan_id if acc_items else None,
-            base_countdown=0,
-            jitter_step=2,
-            force=True,
-        )
+    dispatched = 0
+    if retried:
+        try:
+            from tasks import dispatch_pending_initial_availability
+            dispatched = dispatch_pending_initial_availability(limit=min(500, len(retried)))
+        except Exception:
+            logger.exception("Manual availability retry remains in the database outbox")
+    return {"success": True, "account_name": account.value,
+            "authorized_state_ids": retried, "authorized_count": len(retried),
+            "dispatched_count": dispatched,
+            "skipped_count": len(states) - len(retried)}
 
+
+@router.get("/initial-availability")
+def list_initial_availability(
+    account_name: models.AccountType = Query(...),
+    factory_id: Optional[str] = Query(None),
+    plan_id: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.InitialAvailabilityState).filter_by(account_name=account_name.value)
+    if factory_id:
+        query = query.filter(models.InitialAvailabilityState.factory_id == factory_id)
+    if plan_id:
+        query = query.filter(models.InitialAvailabilityState.plan_id == plan_id)
+    rows = query.order_by(models.InitialAvailabilityState.updated_at.desc())\
+        .offset(offset).limit(limit).all()
     return {
-        "success": True,
-        "message": f"Dispatched {total_dispatched} availability batch(es) for {len(items)} items.",
-        "dispatched_batches": total_dispatched,
-        "total_items": len(items),
+        "account": account_name.value,
+        "items": [{
+            "id": row.id, "ean": row.product_ean, "plan_id": row.plan_id,
+            "factory_id": row.factory_id, "factory_name": row.factory_name,
+            "stock_state": row.stock_state, "delivery_state": row.delivery_state,
+            "stock_attempts": row.stock_attempts, "delivery_attempts": row.delivery_attempts,
+            "stock_last_error": row.stock_last_error,
+            "delivery_last_error": row.delivery_last_error,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        } for row in rows],
+        "limit": limit, "offset": offset,
     }
+
+
+@router.get("/initial-availability/{state_id}/history")
+def initial_availability_history(
+    state_id: int,
+    account_name: models.AccountType = Query(...),
+    db: Session = Depends(get_db),
+):
+    state = db.query(models.InitialAvailabilityState).filter_by(
+        id=state_id, account_name=account_name.value
+    ).first()
+    if not state:
+        raise HTTPException(status_code=404, detail="Availability state not found.")
+    attempts = db.query(models.InitialAvailabilityAttempt).filter_by(state_id=state_id)\
+        .order_by(models.InitialAvailabilityAttempt.id).all()
+    reviews = db.query(models.InitialAvailabilityReviewEvent).filter_by(state_id=state_id)\
+        .order_by(models.InitialAvailabilityReviewEvent.id).all()
+    return {
+        "account": state.account_name, "ean": state.product_ean,
+        "attempts": [{"operation": row.operation, "attempt": row.attempt_number,
+                      "trigger": row.trigger_kind, "outcome": row.outcome,
+                      "status_code": row.status_code, "error": row.error_summary,
+                      "started_at": row.started_at.isoformat() if row.started_at else None,
+                      "completed_at": row.completed_at.isoformat() if row.completed_at else None}
+                     for row in attempts],
+        "reviews": [{"operation": row.operation, "outcome": row.outcome,
+                     "actor_id": row.actor_id, "reason": row.reason,
+                     "evidence_ref": row.evidence_ref,
+                     "payload_hash": row.payload_hash,
+                     "created_at": row.created_at.isoformat() if row.created_at else None}
+                    for row in reviews],
+    }
+
+
+@router.post("/initial-availability/{state_id}/delivery-correction")
+def correct_initial_delivery_payload(
+    state_id: int,
+    req: DeliveryPayloadCorrectionRequest,
+    x_availability_review_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    actor = require_availability_reviewer(x_availability_review_token)
+    state = db.query(models.InitialAvailabilityState).filter_by(
+        id=state_id, account_name=req.account_name.value
+    ).with_for_update().first()
+    if not state:
+        raise HTTPException(status_code=404, detail="Availability state not found.")
+    if state.delivery_state != "failed":
+        raise HTTPException(status_code=409, detail="Delivery payload can be corrected only after a confirmed rejection or reviewed NOT_APPLIED outcome.")
+
+    from services.otto_availability import OTTO_SHIPPING_PROFILES
+    profile_key = "CHINA_8_12_WEEKS" if req.processing_time == "56" else "EUROPE_4_8_WEEKS"
+    allowed_profile = OTTO_SHIPPING_PROFILES[req.account_name.value][profile_key]
+    if not secrets.compare_digest(req.shipping_profile_id, allowed_profile):
+        raise HTTPException(status_code=422, detail="Shipping profile does not match the selected account and processing-time policy.")
+
+    payload = {"sku": state.product_ean, "shippingProfileId": req.shipping_profile_id,
+               "processingTime": req.processing_time}
+    from services.initial_availability import _payload_hash
+    state.delivery_payload_json = payload
+    state.delivery_state = "pending"
+    state.delivery_last_error = None
+    state.delivery_next_attempt_at = None
+    state.manual_retry_count += 1
+    state.next_attempt_trigger_kind = "manual"
+    state.next_dispatch_at = datetime.now(timezone.utc)
+    state.dispatch_lease_until = None
+    db.add(models.InitialAvailabilityReviewEvent(
+        state_id=state.id, account_name=state.account_name,
+        product_ean=state.product_ean, operation="delivery",
+        outcome="PAYLOAD_CORRECTED", actor_id=actor,
+        reason=req.reason.strip(), evidence_ref=req.evidence_ref.strip(),
+        payload_hash=_payload_hash(payload),
+    ))
+    db.commit()
+    dispatched = 0
+    try:
+        from tasks import dispatch_pending_initial_availability
+        dispatched = dispatch_pending_initial_availability(limit=1)
+    except Exception:
+        logger.exception("Corrected initial delivery payload remains in the database outbox")
+    return {"success": True, "state_id": state.id, "delivery_state": state.delivery_state,
+            "dispatched_count": dispatched}
+
+
+@router.post("/initial-availability/{state_id}/review")
+def review_initial_availability(
+    state_id: int,
+    req: AvailabilityReviewRequest,
+    x_availability_review_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    actor = require_availability_reviewer(x_availability_review_token)
+    state = db.query(models.InitialAvailabilityState).filter_by(
+        id=state_id, account_name=req.account_name.value
+    ).with_for_update().first()
+    if not state:
+        raise HTTPException(status_code=404, detail="Availability state not found.")
+    current = getattr(state, f"{req.operation}_state")
+    if current not in {"unknown", "accepted", "sending"}:
+        raise HTTPException(status_code=409, detail=f"State {current} does not require outcome reconciliation.")
+
+    if req.outcome == "APPLIED":
+        new_state = "confirmed"
+        last_error = None
+    elif req.outcome == "NOT_APPLIED":
+        new_state = "failed"
+        last_error = "Operator reviewed evidence and confirmed the operation was not applied."
+    else:
+        new_state = "accepted" if current == "accepted" else "unknown"
+        last_error = "Outcome remains unresolved after operator review."
+    setattr(state, f"{req.operation}_state", new_state)
+    setattr(state, f"{req.operation}_last_error", last_error)
+    setattr(state, f"{req.operation}_next_attempt_at", None)
+    state.dispatch_lease_until = None
+    state.next_dispatch_at = None
+    db.add(models.InitialAvailabilityReviewEvent(
+        state_id=state.id, account_name=state.account_name,
+        product_ean=state.product_ean, operation=req.operation,
+        outcome=req.outcome, actor_id=actor, reason=req.reason.strip(),
+        evidence_ref=req.evidence_ref.strip(),
+    ))
+    db.commit()
+    return {"success": True, "state_id": state.id, "operation": req.operation,
+            "state": new_state}
 
