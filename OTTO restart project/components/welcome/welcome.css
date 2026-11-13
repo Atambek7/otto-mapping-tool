@@ -1,6 +1,5 @@
-/* =========================================================
-   OTTO Restart 3/12M — Welcome Page Design System & Styles
-   ========================================================= */
+/* Hallmark · mode: redesign · depth: full · scope: app · genre: modern-minimal · theme: brand-custom · modes: light+dark · posture: restrained · v2.0.0 */
+/* critique: operational launchpad workspace using surface ladder and explicit property transitions */
 
 .welcome-page {
   display: flex;
@@ -539,8 +538,8 @@
   flex-direction: column;
   justify-content: space-between;
   gap: 14px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.09);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-short) var(--ease-out), transform var(--dur-short) var(--ease-out);
   text-decoration: none;
   color: inherit;
 }
@@ -655,8 +654,8 @@
   flex-direction: column;
   text-decoration: none;
   color: inherit;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.09);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-short) var(--ease-out), transform var(--dur-short) var(--ease-out);
 }
 
 .screen-nav-card:hover {
@@ -814,12 +813,12 @@
   display: grid;
   grid-template-columns: 2.2fr 0.9fr 1.3fr 1fr;
   padding: 4px 6px;
-  font-size: 8px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-muted);
+  border-bottom: 1px solid var(--color-rule);
 }
 
 .ill-table-row {
@@ -944,10 +943,10 @@
 }
 
 .ill-qc-sub {
-  font-size: 8.5px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: none;
 }
 
 .ill-qc-checklist {
@@ -1232,7 +1231,7 @@
 .tip-close-btn {
   background: transparent;
   border: none;
-  color: var(--muted);
+  color: var(--color-muted);
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -1240,18 +1239,18 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
 }
 
 .tip-close-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--ink);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
 }
 
 .tip-main-text {
   font-size: 13px;
   line-height: 1.6;
-  color: var(--ink-secondary);
+  color: var(--color-ink-2);
   margin: 0;
 }
 
@@ -1261,13 +1260,13 @@
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--color-paper-3);
+  border: none;
 }
 
 .restart-app[data-theme="light"] .tip-checklist {
-  background: rgba(255, 255, 255, 0.65);
-  border-color: rgba(184, 106, 47, 0.18);
+  background: var(--color-paper-3);
+  border: none;
 }
 
 .tip-check-item {
@@ -1275,17 +1274,17 @@
   align-items: center;
   gap: 9px;
   font-size: 12px;
-  font-weight: 550;
-  color: var(--ink);
+  font-weight: 500;
+  color: var(--color-ink);
 }
 
 .tip-check-icon {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  background: rgba(34, 197, 94, 0.18);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.4);
+  background: var(--status-ready-bg);
+  color: var(--status-ready-ink);
+  border: 1px solid var(--status-ready-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1301,17 +1300,17 @@
   border-radius: 9px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(var(--accent-rgb), 0.16);
-  color: var(--accent);
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent-border);
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: background-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), transform var(--dur-micro) var(--ease-out);
 }
 
 .tip-cta-btn:hover {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
   transform: translateY(-1px);
 }
 
@@ -1322,13 +1321,13 @@
   gap: 7px;
   padding: 7px 12px;
   border-radius: 8px;
-  background: rgba(var(--accent-rgb), 0.1);
-  border: 1px solid rgba(var(--accent-rgb), 0.25);
-  color: var(--accent);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
 }
 
 .tip-collapsed-pill:hover {

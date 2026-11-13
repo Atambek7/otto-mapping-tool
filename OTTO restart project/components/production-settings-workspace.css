@@ -1,0 +1,15 @@
+.production-settings { max-width: 960px; width: 100%; padding-top: 12px; }
+.production-settings-heading { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
+.production-settings-heading .catalog-action-btn { flex-shrink: 0; }
+.production-settings .catalog-action-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid #3b4758; border-radius: 8px; background: #1b2230; color: #c5d0de; cursor: pointer; font: inherit; font-size: 12px; }
+.production-settings-field { display: grid; gap: 10px; font-size: 13px; color: #c5d0de; }
+.production-settings-field select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #3b4758; border-radius: 8px; background: #1b2230; color: #f3f5f8; font: inherit; }
+.production-settings-note { margin: 0; color: #9aa7b8; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.production-settings-account { display: flex; align-items: center; gap: 18px; color: #f3f5f8; font-size: 15px; }
+.production-settings-values { display: grid; gap: 0; margin: 0; font-size: 13px; }
+.production-settings-values > div { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 1.6fr); gap: 20px; padding: 13px 0; border-bottom: 1px solid #293241; }
+.production-settings-values > div:last-child { border-bottom: 0; }
+.production-settings-values dt { color: #9aa7b8; }
+.production-settings-values dd { margin: 0; color: #f3f5f8; overflow-wrap: anywhere; line-height: 1.6; }
+.production-settings-status { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; color: #c5d0de; font-size: 13px; }
+@media (max-width: 600px) { .production-settings-values > div { grid-template-columns: 1fr; gap: 6px; } .production-settings-heading { align-items: flex-start; } }

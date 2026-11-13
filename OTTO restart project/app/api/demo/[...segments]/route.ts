@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { DemoReviewService, ReviewProblem } from "@/features/review/demo-service";
 import { DemoQueueService } from "@/features/queue/demo-queue-service";
 import { DemoWorkspaceService } from "@/features/demo/service";
+import { SESSION_COOKIE as AUTH_COOKIE, verifySessionToken } from "@/features/auth/session";
+import { verifyCsrf } from "@/features/auth/csrf";
 import type { RestartAccount, RestartPeriod } from "@/features/api/types";
 import type { ReviewAction, ReviewPatch } from "@/features/review/types";
 
@@ -26,16 +28,18 @@ function isReviewProblem(cause: unknown): cause is { status: number; code: strin
 type Context = { params: Promise<{ segments: string[] }> };
 async function handle(request: NextRequest, context: Context) {
   try {
+    const authSessionToken = request.cookies.get(AUTH_COOKIE)?.value;
+    const authSession = await verifySessionToken(authSessionToken);
+    if (!authSession) {
+      throw new ReviewProblem(401, "UNAUTHORIZED", "Для доступа требуется авторизация в OttoRestart.");
+    }
+
     const { segments } = await context.params;
     const account = request.nextUrl.searchParams.get("account");
     if (account !== "JV" && account !== "XL") throw new ReviewProblem(422, "VALIDATION_ERROR", "Укажите аккаунт JV или XL.");
     const scopedAccount: RestartAccount = account;
     if (request.method !== "GET") {
-      const origin = request.headers.get("origin");
-      const host = request.headers.get("host");
-      let originHost = "";
-      try { originHost = origin ? new URL(origin).host : ""; } catch { /* Invalid/null origins cannot write. */ }
-      if (!originHost || originHost !== host || request.headers.get("x-ottorestart-demo") !== "1" || !request.headers.get("content-type")?.startsWith("application/json")) throw new ReviewProblem(403, "FORBIDDEN", "Демо-действия доступны только из интерфейса OttoRestart на том же адресе.");
+      if (!verifyCsrf(request) || request.headers.get("x-ottorestart-demo") !== "1" || !request.headers.get("content-type")?.startsWith("application/json")) throw new ReviewProblem(403, "FORBIDDEN", "Демо-действия доступны только из авторизованного интерфейса OttoRestart.");
     }
     for (const [key, value] of sessions) if (Date.now() - value.touched > TTL) sessions.delete(key);
     let sessionId = request.cookies.get(COOKIE)?.value;

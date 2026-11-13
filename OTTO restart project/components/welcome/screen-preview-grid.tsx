@@ -118,10 +118,10 @@ function CandidatesIllustration() {
     <div className="screen-illustration ill-candidates" aria-hidden="true">
       <div className="ill-mini-table">
         <div className="ill-table-head">
-          <span>ТОВАР</span>
-          <span>ПЕРИОД</span>
-          <span>RESTART</span>
-          <span>СТАТУС</span>
+          <span>Товар</span>
+          <span>Период</span>
+          <span>Цена</span>
+          <span>Статус</span>
         </div>
 
         <div className="ill-table-row">
@@ -132,11 +132,9 @@ function CandidatesIllustration() {
           <div>
             <span className="pill-3m-mini">3M</span>
           </div>
-          <span className="ill-price-val">
-            839 €<small>-10€</small>
-          </span>
+          <span className="ill-price-val">839,99 €</span>
           <div>
-            <span className="ill-status-pill green">Готов</span>
+            <span className="ill-status-pill green">Готово</span>
           </div>
         </div>
 
@@ -148,9 +146,7 @@ function CandidatesIllustration() {
           <div>
             <span className="pill-12m-mini">12M</span>
           </div>
-          <span className="ill-price-val">
-            1 184 €<small>-15€</small>
-          </span>
+          <span className="ill-price-val">1 184,99 €</span>
           <div>
             <span className="ill-status-pill amber">ИИ-назв.</span>
           </div>
@@ -227,17 +223,15 @@ function QueueIllustration() {
 
         <div className="ill-timeline-blocks">
           <div className="ill-slot done" title="Партия #14 — Отправлено">
-            <span className="slot-dot green" />
-            <span className="slot-label">Партия #14 (25)</span>
+            <span className="slot-label">День 1 (25)</span>
           </div>
 
           <div className="ill-slot active" title="Drip Feed #15 — В процессе">
-            <span className="slot-dot pulse" />
-            <span className="slot-label">Drip Feed #15</span>
+            <span className="slot-label">Drip Feed День 2</span>
           </div>
 
           <div className="ill-slot pending" title="Партия #16 — Запланировано">
-            <span className="slot-label">Партия #16</span>
+            <span className="slot-label">День 3</span>
           </div>
         </div>
       </div>

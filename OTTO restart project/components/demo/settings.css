@@ -1,3 +1,4 @@
+/* hallmark:v2.0.0 | mode:app | preset:editorial-studio | fonts:Montserrat,JetBrains Mono | accent:#F4512C */
 /* ============================================================================
    OTTO Restart 3/12M — Settings Workspace Styles (OttoFlow UI/UX Pattern)
    Strictly following the OttoFlow 3-card layout in OttoRestart Brand Palette
@@ -181,7 +182,7 @@
   background: #1b2230;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
 }
 
@@ -203,8 +204,25 @@
 }
 
 .otto-lang-flag {
-  font-size: 26px;
-  line-height: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #141923;
+  border: 1px solid #293241;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #f3f5f8;
+  flex-shrink: 0;
+}
+
+.otto-lang-option.lang-selected .otto-lang-flag {
+  background: rgba(255, 90, 54, 0.16);
+  border-color: rgba(255, 90, 54, 0.35);
+  color: #ff704d;
 }
 
 .otto-lang-label-wrap {
@@ -247,7 +265,7 @@
   justify-content: center;
   flex-shrink: 0;
   color: transparent;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .otto-lang-option.lang-selected .otto-lang-radio {
@@ -325,12 +343,12 @@
   line-height: 1.45;
 }
 
-/* 3. OpenAI Key Status Banner */
+/* 3. OpenAI Key Status Banner (borderless tinted well inside card) */
 .otto-key-active-box {
   padding: 14px 16px;
   border-radius: 8px;
   background: #1b2230;
-  border: 1px solid #293241;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -393,7 +411,7 @@
   border: 1px solid #293241;
   color: #c5d0de;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .otto-btn-secondary:hover:not(:disabled) {
@@ -415,7 +433,7 @@
   border: 1px solid rgba(244, 63, 94, 0.32);
   color: #fb7185;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .otto-btn-danger:hover:not(:disabled) {
@@ -456,11 +474,11 @@
 }
 
 .otto-input-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #9aa7b8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #c5d0de;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -518,12 +536,12 @@
   color: #f3f5f8;
 }
 
-/* Security Note */
+/* Security Note (borderless tinted well inside card) */
 .otto-security-box {
   padding: 12px 14px;
   border-radius: 8px;
   background: #1b2230;
-  border: 1px solid #293241;
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -635,7 +653,7 @@
   color: #ffffff;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(234, 88, 12, 0.3);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
   white-space: nowrap;
 }
 
@@ -823,6 +841,20 @@
   background: #fff7ed;
   border-color: #f4512c;
   box-shadow: 0 0 0 1px rgba(244, 81, 44, 0.25);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-flag,
+.restart-app[data-theme="light"] .otto-lang-flag {
+  background: #f1f4f8;
+  border-color: #dce3ec;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-lang-option.lang-selected .otto-lang-flag,
+.restart-app[data-theme="light"] .otto-lang-option.lang-selected .otto-lang-flag {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #c2410c;
 }
 
 .restart-app:not([data-theme="dark"]) .otto-lang-name,
@@ -1054,3 +1086,240 @@
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
 
+/* ==========================================================================
+   Settings: Timezone Selector Card
+   ========================================================================== */
+
+.otto-tz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .otto-tz-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.otto-tz-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid #293241;
+  background: #1b2230;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.otto-tz-option:hover {
+  border-color: #3b4758;
+  background: #232b3e;
+}
+
+.otto-tz-option.tz-selected {
+  border-color: #ff5a36;
+  background: rgba(255, 90, 54, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 90, 54, 0.25);
+}
+
+.otto-tz-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.otto-tz-badge {
+  width: 46px;
+  height: 36px;
+  border-radius: 8px;
+  background: #141923;
+  border: 1px solid #293241;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: #f3f5f8;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
+.otto-tz-option.tz-selected .otto-tz-badge {
+  background: rgba(255, 90, 54, 0.16);
+  border-color: rgba(255, 90, 54, 0.35);
+  color: #ff704d;
+}
+
+.otto-tz-label-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.otto-tz-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.otto-tz-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f5f8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.otto-tz-offset-pill {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #141923;
+  color: #ea580c;
+  border: 1px solid #293241;
+  white-space: nowrap;
+}
+
+.otto-tz-option.tz-selected .otto-tz-offset-pill {
+  border-color: rgba(255, 90, 54, 0.35);
+  background: rgba(255, 90, 54, 0.12);
+  color: #ff704d;
+}
+
+.otto-tz-subtext {
+  font-size: 11px;
+  color: #9aa7b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.otto-tz-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #293241;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  margin-left: 8px;
+}
+
+.otto-tz-option.tz-selected .otto-tz-radio {
+  background: #ff5a36;
+  border-color: #ff5a36;
+  color: #ffffff;
+}
+
+.otto-tz-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 90, 54, 0.05);
+  border: 1px solid rgba(255, 90, 54, 0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.otto-tz-preview-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+}
+
+.otto-tz-preview-clock {
+  color: #ff5a36;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Light Theme Adaptations for Timezone */
+.restart-app:not([data-theme="dark"]) .otto-tz-option,
+.restart-app[data-theme="light"] .otto-tz-option {
+  background: #ffffff;
+  border-color: #dce3ec;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-option:hover,
+.restart-app[data-theme="light"] .otto-tz-option:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-option.tz-selected,
+.restart-app[data-theme="light"] .otto-tz-option.tz-selected {
+  background: #fff7ed;
+  border-color: #f4512c;
+  box-shadow: 0 0 0 1px rgba(244, 81, 44, 0.25);
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-badge,
+.restart-app[data-theme="light"] .otto-tz-badge {
+  background: #f1f4f8;
+  border-color: #dce3ec;
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-option.tz-selected .otto-tz-badge,
+.restart-app[data-theme="light"] .otto-tz-option.tz-selected .otto-tz-badge {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #c2410c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-name,
+.restart-app[data-theme="light"] .otto-tz-name {
+  color: #172033;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-offset-pill,
+.restart-app[data-theme="light"] .otto-tz-offset-pill {
+  background: #f1f5f9;
+  border-color: #dce3ec;
+  color: #c2410c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-subtext,
+.restart-app[data-theme="light"] .otto-tz-subtext {
+  color: #64748b;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-radio,
+.restart-app[data-theme="light"] .otto-tz-radio {
+  border-color: #cbd5e1;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-option.tz-selected .otto-tz-radio,
+.restart-app[data-theme="light"] .otto-tz-option.tz-selected .otto-tz-radio {
+  background: #f4512c;
+  border-color: #f4512c;
+}
+
+.restart-app:not([data-theme="dark"]) .otto-tz-preview-bar,
+.restart-app[data-theme="light"] .otto-tz-preview-bar {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #334155;
+}

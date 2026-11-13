@@ -1,0 +1,68 @@
+.restart-route-loading {
+  min-height: min(360px, 45vh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted, #8b9bb4);
+  font-size: 13px;
+}
+
+.restart-route-loading-spinner {
+  width: 17px;
+  height: 17px;
+  border: 2px solid rgba(255, 86, 47, 0.25);
+  border-top-color: #ff562f;
+  border-radius: 50%;
+  animation: restart-route-spin 0.7s linear infinite;
+}
+
+.restart-route-progress {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.restart-route-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 36%;
+  border-radius: 0 3px 3px 0;
+  background: #ff562f;
+  box-shadow: 0 0 9px rgba(255, 86, 47, 0.55);
+  animation: restart-route-progress 1.15s ease-in-out infinite;
+}
+
+.restart-route-progress-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes restart-route-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes restart-route-progress {
+  0% { transform: translateX(-110%); }
+  55% { transform: translateX(125%); }
+  100% { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .restart-route-loading-spinner,
+  .restart-route-progress-bar {
+    animation-duration: 2.5s;
+  }
+}

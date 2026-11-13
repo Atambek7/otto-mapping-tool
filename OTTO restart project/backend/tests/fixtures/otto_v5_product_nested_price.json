@@ -1,0 +1,24 @@
+{
+  "productVariations": [
+    {
+      "productReference": "4260606059116",
+      "sku": "4260606059116",
+      "ean": "4260606059116",
+      "productDescription": {
+        "category": "Skulptur",
+        "productLine": "Moderne Skulptur Dekofigur Hund für den Garten",
+        "attributes": [
+          {"name": "Material", "values": ["Kunststoff"]}
+        ]
+      },
+      "pricing": {
+        "standardPrice": {"amount": 4159, "currency": "EUR"},
+        "vat": "FULL",
+        "msrp": {"amount": 5200, "currency": "EUR"}
+      }
+    }
+  ],
+  "links": [
+    {"rel": "self", "href": "/v5/products?sku=4260606059116&page=0&limit=10"}
+  ]
+}

@@ -1,0 +1,183 @@
+/* Hallmark · mode: redesign · depth: full · scope: app · genre: modern-minimal · theme: brand-custom · modes: light+dark · posture: restrained · v2.0.0 */
+/* critique: unifies three fragmented stylesheets into one token-driven operational surface ladder with strict light/dark parity */
+
+:root,
+.restart-app,
+.restart-app[data-theme="light"] {
+  color-scheme: light;
+
+  /* Typography */
+  --font-sans: var(--font-montserrat), "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
+  /* App Screen Fixed Type Scale (1.15 ratio) */
+  --text-xs: 0.75rem;     /* 12px — captions, badges, table meta */
+  --text-sm: 0.8125rem;   /* 13px — table cells, secondary controls, nav links */
+  --text-base: 0.875rem;  /* 14px — default app body & inputs */
+  --text-md: 1rem;        /* 16px — card titles, section heads */
+  --text-lg: 1.25rem;     /* 20px — modal heads, KPI figures */
+  --text-xl: 1.5rem;      /* 24px — page titles (h1) */
+  --text-2xl: 1.75rem;    /* 28px — primary hero / stat display */
+
+  /* Spacing Scale (craft.md § 3) */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+  --space-2xl: 64px;
+
+  /* Concentric Radii & Control Heights */
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --control-sm: 32px;
+  --control-md: 38px;
+  --control-lg: 42px;
+
+  /* Motion Tokens (craft.md § 5) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+
+  /* Surface Ladder — Light Mode (Warm Alabaster) */
+  --color-paper: #F7F8FA;
+  --color-paper-2: #FFFFFF;
+  --color-paper-3: #F1F4F8;
+  --color-paper-hover: #F8FAFC;
+  --color-rule: #DCE3EC;
+  --color-rule-subtle: #E8EEF5;
+
+  /* Ink Hierarchy — Light Mode */
+  --color-ink: #172033;
+  --color-ink-2: #475569;
+  --color-muted: #64748B;
+
+  /* Primary Brand Signal — Light Mode */
+  --color-accent: #F4512C;
+  --color-accent-hover: #E64320;
+  --color-accent-soft: #FFF7ED;
+  --color-accent-border: #FED7AA;
+  --color-accent-ink: #FFFFFF;
+  --color-focus: #F4512C;
+
+  /* Semantic Status Tokens — Light Mode (WCAG AA >= 4.5:1) */
+  --status-ready-bg: #DCFCE7;
+  --status-ready-border: #BBF7D0;
+  --status-ready-ink: #15803D;
+
+  --status-3m-bg: #FEF3C7;
+  --status-3m-border: #FDE68A;
+  --status-3m-ink: #B45309;
+
+  --status-12m-bg: #FFEDD5;
+  --status-12m-border: #FED7AA;
+  --status-12m-ink: #C2410C;
+
+  --status-error-bg: #FFE4E6;
+  --status-error-border: #FECDD3;
+  --status-error-ink: #BE123C;
+
+  --status-pub-bg: #CFFAFE;
+  --status-pub-border: #A5F3FC;
+  --status-pub-ink: #0E7490;
+
+  /* Legacy alias mappings so existing rules resolve cleanly */
+  --canvas: var(--color-paper);
+  --surface: var(--color-paper-2);
+  --surface-muted: var(--color-paper-3);
+  --surface-raised: var(--color-paper-hover);
+  --ink: var(--color-ink);
+  --ink-secondary: var(--color-ink-2);
+  --muted: var(--color-muted);
+  --line: var(--color-rule);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-accent-hover);
+  --accent-soft: var(--color-accent-soft);
+  --accent-rgb: 244, 81, 44;
+  --success: var(--status-ready-ink);
+  --warning: var(--status-3m-ink);
+  --error: var(--status-error-ink);
+  --sidebar: var(--color-paper-2);
+  --sidebar-text: var(--color-ink);
+  --sidebar-muted: var(--color-muted);
+  --shadow: 0 1px 2px rgba(23, 32, 51, 0.05);
+  --shadow-card: 0 1px 2px rgba(23, 32, 51, 0.05);
+  --shadow-overlay: 0 16px 40px rgba(23, 32, 51, 0.14);
+}
+
+.restart-app[data-theme="dark"],
+.catalog-hover-preview[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surface Ladder — Dark Mode (Inferno Slate, +3% L steps, no shadows) */
+  --color-paper: #0D1016;
+  --color-paper-2: #141923;
+  --color-paper-3: #1B2230;
+  --color-paper-hover: #182030;
+  --color-rule: #293241;
+  --color-rule-subtle: rgba(255, 255, 255, 0.05);
+
+  /* Ink Hierarchy — Dark Mode */
+  --color-ink: #F3F5F8;
+  --color-ink-2: #9AA7B8;
+  --color-muted: #64748B;
+
+  /* Primary Brand Signal — Dark Mode */
+  --color-accent: #FF5A36;
+  --color-accent-hover: #FF704D;
+  --color-accent-soft: rgba(255, 90, 54, 0.10);
+  --color-accent-border: rgba(255, 90, 54, 0.35);
+  --color-accent-ink: #FFFFFF;
+  --color-focus: #FF5A36;
+
+  /* Semantic Status Tokens — Dark Mode */
+  --status-ready-bg: rgba(16, 185, 129, 0.12);
+  --status-ready-border: rgba(16, 185, 129, 0.28);
+  --status-ready-ink: #34D399;
+
+  --status-3m-bg: rgba(245, 158, 11, 0.12);
+  --status-3m-border: rgba(245, 158, 11, 0.28);
+  --status-3m-ink: #FBBF24;
+
+  --status-12m-bg: rgba(249, 115, 22, 0.12);
+  --status-12m-border: rgba(249, 115, 22, 0.28);
+  --status-12m-ink: #FB923C;
+
+  --status-error-bg: rgba(244, 63, 94, 0.12);
+  --status-error-border: rgba(244, 63, 94, 0.30);
+  --status-error-ink: #FB7185;
+
+  --status-pub-bg: rgba(6, 182, 212, 0.12);
+  --status-pub-border: rgba(6, 182, 212, 0.28);
+  --status-pub-ink: #38BDF8;
+
+  /* Legacy alias mappings */
+  --canvas: var(--color-paper);
+  --surface: var(--color-paper-2);
+  --surface-muted: var(--color-paper-3);
+  --surface-raised: var(--color-paper-hover);
+  --ink: var(--color-ink);
+  --ink-secondary: var(--color-ink-2);
+  --muted: var(--color-muted);
+  --line: var(--color-rule);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-accent-hover);
+  --accent-soft: var(--color-accent-soft);
+  --accent-rgb: 255, 90, 54;
+  --success: var(--status-ready-ink);
+  --warning: var(--status-3m-ink);
+  --error: var(--status-error-ink);
+  --sidebar: var(--color-paper-2);
+  --sidebar-text: var(--color-ink);
+  --sidebar-muted: var(--color-ink-2);
+  --shadow: none;
+  --shadow-card: none;
+  --shadow-overlay: 0 20px 50px rgba(0, 0, 0, 0.65);
+}

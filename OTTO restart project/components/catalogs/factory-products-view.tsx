@@ -1,111 +1,61 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, RefreshCw } from "lucide-react";
-import { useRestartAccount } from "@/features/state/restart-account";
-import { catalogDemoService, formatPriceEur } from "@/features/catalogs/service";
-import type { CatalogProductItem } from "@/features/catalogs/types";
+import { catalogDemoService } from "@/features/catalogs/service";
+import { ApiState } from "@/components/api-state";
 import { CatalogProductsTable } from "./catalog-products-table";
+import { useCatalogProducts } from "@/features/catalogs/use-catalog-products";
+import { useTranslation } from "@/features/i18n";
 
 export function FactoryProductsView({ factoryId }: { factoryId: string }) {
-  const { account } = useRestartAccount();
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const { t } = useTranslation();
+  const {
+    account,
+    isDemo,
+    hasLoaded,
+    serverData,
+    setServerPage,
+    updateServerFilters,
+    items,
+    metrics,
+    loading,
+    error,
+    toastMessage,
+    showToast,
+    onRefresh,
+    handleAssignEans,
+    handleApplyAiTitles,
+    handleTitleSave,
+    handlePriceSave,
+    handleCategorySave,
+    handleDrawerSave,
+    handleSyncFromOtto,
+  } = useCatalogProducts({ factoryId, source: "AFTERBUY" });
 
-  const factory = useMemo(
-    () => catalogDemoService.getFactoryById(factoryId, account),
-    [factoryId, account]
-  );
+  const factory = isDemo ? catalogDemoService.getFactoryById(factoryId, account) : undefined;
+  const factoryName = factory ? factory.name : items[0]?.factoryName || `Фабрика #${factoryId}`;
 
-  const { items, metrics } = useMemo(
-    () =>
-      catalogDemoService.getProductsByFactory(
-        factoryId,
-        account,
-        "",
-        "",
-        ""
-      ),
-    [factoryId, account, refreshTrigger]
-  );
-
-  function showToast(msg: string) {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+  if (loading && !hasLoaded) {
+    return <ApiState kind="loading" label={t("common.loading")} />;
   }
 
-  function handleApplyAiTitles(selectedIds?: string[]) {
-    let targetIds: string[] = [];
-    if (selectedIds && selectedIds.length > 0) {
-      targetIds = selectedIds;
-    } else {
-      const longTitles = items.filter((p) => p.title.length > 70);
-      targetIds = longTitles.map((p) => p.id);
-    }
-
-    if (targetIds.length === 0) {
-      showToast("Все названия уже соответствуют стандарту OTTO (≤ 70 симв.)");
-      return;
-    }
-
-    const count = catalogDemoService.applyAiTitles(targetIds);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ ИИ оптимизировал названия для ${count} товаров (≤ 70 символов)`);
+  if (error && !hasLoaded) {
+    return (
+      <ApiState
+        kind="error"
+        title={t("common.error")}
+        description={error}
+        onRetry={onRefresh}
+      />
+    );
   }
-
-  function handleApplyAiAttributes(selectedIds?: string[]) {
-    const targetIds = selectedIds && selectedIds.length > 0 ? selectedIds : items.map((p) => p.id);
-    const count = catalogDemoService.applyAiAttributes(targetIds);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ ИИ сформировал атрибуты (материал, цвет, габариты) для ${count} товаров`);
-  }
-
-  function handleApplyAiCategories(selectedIds?: string[]) {
-    const targetIds = selectedIds && selectedIds.length > 0 ? selectedIds : items.map((p) => p.id);
-    const count = catalogDemoService.applyAiCategories(targetIds);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ ИИ присвоил точные категории каталога OTTO для ${count} товаров`);
-  }
-
-  function handleSyncFromOtto(selectedIds?: string[]) {
-    const targetIds = selectedIds && selectedIds.length > 0 ? selectedIds : items.map((p) => p.id);
-    const count = catalogDemoService.syncFromOtto(targetIds);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ Синхронизировано с ОТТО: для ${count} товаров подтянуты категории и характеристики`);
-  }
-
-  function handleTitleSave(id: string, newTitle: string) {
-    catalogDemoService.updateProductTitle(id, newTitle);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ Название товара обновлено (${newTitle.length}/70 симв.)`);
-  }
-
-  function handlePriceSave(id: string, newOldPriceCents: number) {
-    catalogDemoService.updateProductPrice(id, newOldPriceCents);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ Цена обновлена: ${formatPriceEur(newOldPriceCents)}`);
-  }
-
-  function handleCategorySave(id: string, newCategory: string) {
-    catalogDemoService.updateProductCategory(id, newCategory);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ Категория обновлена: ${newCategory}`);
-  }
-
-  function handleDrawerSave(updated: CatalogProductItem) {
-    catalogDemoService.updateProduct(updated);
-    setRefreshTrigger((n) => n + 1);
-    showToast(`✓ Изменения карточки сохранены`);
-  }
-
-  const factoryName = factory ? factory.name : `Фабрика #${factoryId}`;
 
   return (
     <div className="catalog-page">
       {/* Breadcrumb */}
-      <nav className="catalog-breadcrumb" aria-label="Хлебные крошки">
-        <Link href="/afterbuy">Фабрики</Link>
+      <nav className="catalog-breadcrumb" aria-label={t("products.breadcrumbFactories")}>
+        <Link href="/afterbuy">{t("products.breadcrumbFactories")}</Link>
         <span className="breadcrumb-separator">/</span>
         <span className="current">{factoryName}</span>
       </nav>
@@ -116,15 +66,15 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
           <Link
             href="/afterbuy"
             className="back-circle-btn"
-            title="Назад к списку фабрик"
-            aria-label="Назад к списку фабрик"
+            title={t("common.back")}
+            aria-label={t("common.back")}
           >
             <ArrowLeft size={18} />
           </Link>
           <div className="factory-title-block">
             <h1>{factoryName}</h1>
-            <p>
-              {metrics.total} товаров 3/12M в каталоге · {account}
+            <p className="tabular-nums">
+              {metrics.total} {t("factories.products312M")} ({t("topbar.account")} {account})
             </p>
           </div>
         </div>
@@ -133,11 +83,11 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
           <button
             type="button"
             className="catalog-action-btn"
-            onClick={() => setRefreshTrigger((n) => n + 1)}
-            title="Обновить данные каталога"
+            onClick={onRefresh}
+            title={t("common.refresh")}
           >
             <RefreshCw size={14} />
-            <span>Обновить</span>
+            <span>{t("common.refresh")}</span>
           </button>
         </div>
       </div>
@@ -150,23 +100,31 @@ export function FactoryProductsView({ factoryId }: { factoryId: string }) {
         </div>
       )}
 
-      {/* Unified Catalog Products Table with OttoFlow UX & Hallmark Design */}
+      {/* Unified Catalog Products Table */}
+      {error && <ApiState kind="error" title={t("common.error")} description={error} onRetry={onRefresh} />}
       <CatalogProductsTable
+        key={account}
+        demoMode={isDemo}
         sourceType="AFTERBUY"
         factoryId={factoryId}
         factoryName={factoryName}
         items={items}
         metrics={metrics}
-        onRefresh={() => setRefreshTrigger((n) => n + 1)}
+        onRefresh={onRefresh}
         onTitleSave={handleTitleSave}
         onPriceSave={handlePriceSave}
         onCategorySave={handleCategorySave}
         onDrawerSave={handleDrawerSave}
+        onAssignDemoEan={handleAssignEans}
         onApplyAiTitles={handleApplyAiTitles}
-        onApplyAiAttributes={handleApplyAiAttributes}
-        onApplyAiCategories={handleApplyAiCategories}
+        onApplyAiAttributes={() => showToast("Атрибуты проверены по снимку OTTO.")}
+        onApplyAiCategories={() => showToast("Категории проверены по каталогу OTTO.")}
         onSyncFromOtto={handleSyncFromOtto}
         showToast={showToast}
+        serverPage={!isDemo && hasLoaded && serverData ? { ...serverData.page, over70Count: serverData.metrics?.over70Count ?? 0, categories: serverData.metrics?.categories ?? [] } : undefined}
+        serverLoading={loading || Boolean(error)}
+        onServerFiltersChange={updateServerFilters}
+        onServerPageChange={setServerPage}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import type { RestartAccount } from "@/features/api/types";
 import { catalogDemoService, formatPriceEur } from "./service";
+import { MAX_PREPARED_TITLE_CODEPOINTS, titleCodePointLength } from "./title-policy";
 import type { CatalogProductItem } from "./types";
 
 export interface DripPlan {
@@ -201,32 +202,10 @@ export class DripFeedService {
     };
   }
 
-  // Trigger publication now for pending items in active plan
+  // Legacy demo compatibility: a local timer cannot confirm OTTO publication.
   triggerNow(planId: number): boolean {
-    const items = this.itemsByPlan.get(planId);
-    if (!items) return false;
-
-    let modified = false;
-    const nowIso = new Date().toISOString();
-
-    for (const item of items) {
-      if (item.status === "pending" && item.scheduled_day <= 1) {
-        item.status = "published";
-        item.published_at = nowIso;
-        item.attempts += 1;
-        modified = true;
-      }
-    }
-
-    // Find plan and recalculate
-    for (const [, plans] of this.plansByFactory.entries()) {
-      const plan = plans.find((p) => p.id === planId);
-      if (plan) {
-        this.recalculatePlanProgress(plan, items);
-        break;
-      }
-    }
-    return modified;
+    void planId;
+    return false;
   }
 
   // Retry failed items
@@ -280,7 +259,7 @@ export class DripFeedService {
           );
           item.image_url = product.imageUrl;
           item.originalProduct = product;
-          if (product.title.length <= 70 && product.category) {
+          if (titleCodePointLength(product.title) <= MAX_PREPARED_TITLE_CODEPOINTS && product.category) {
             if (item.status === "failed" && !item.otto_product_exists) {
               item.status = "pending";
               item.error_message = undefined;

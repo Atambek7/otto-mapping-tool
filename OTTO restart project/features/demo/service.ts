@@ -32,7 +32,7 @@ export class DemoWorkspaceService {
   private now() { return this.clock().toISOString(); }
   private defaultSettings(account: RestartAccount): DemoSettings {
     return { account, defaultPeriod: "12M", maximumDemoBatchItems: 100, strictAttributeChecks: true,
-      restartPublishEnabled: false, priceRule: { source: "DEMO STANDARD PRICE", JV: "−10.00 EUR", XL: "−15.00 EUR" }, updatedAt: this.now(), demoOnly: true };
+      restartPublishEnabled: false, priceRule: { source: "DEMO STANDARD PRICE", JV: "−10.00 EUR", XL: "−20.00 EUR" }, updatedAt: this.now(), demoOnly: true };
   }
   private event(account: RestartAccount, eventType: string, entityType: string, entityId: string, summary: string) {
     this.events.unshift({ id: this.createId(), account, eventType, entityType, entityId, summary, createdAt: this.now(), demoOnly: true });

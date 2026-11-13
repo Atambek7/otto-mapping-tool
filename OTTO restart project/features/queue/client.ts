@@ -1,4 +1,5 @@
 import type { RestartAccount } from "../api/types";
+import { getCsrfToken } from "@/features/auth/csrf-client";
 import type { DemoQueueEntry, DemoQueueSnapshot, DemoQueueTask } from "./types";
 
 export class DemoQueueClientError extends Error {
@@ -12,9 +13,11 @@ export class DemoQueueClient {
     for (const [key, value] of Object.entries(query)) params.set(key, value);
     let response: Response;
     try {
+      const headers = new Headers({ "Content-Type": "application/json", "X-OttoRestart-Demo": "1" });
+      if (method !== "GET") headers.set("X-CSRF-Token", await getCsrfToken());
       response = await fetch(`/restart/api/demo/${path}?${params}`, {
         method, credentials: "same-origin", cache: "no-store",
-        headers: { "Content-Type": "application/json", "X-OttoRestart-Demo": "1" },
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
