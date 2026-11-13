@@ -10,7 +10,9 @@ import {
   ArrowUpRight,
   ChevronRight,
   Package,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -57,6 +59,40 @@ const FactoryCardComponent = ({
   const { t } = useTranslation();
   const isValidation = variant === "validation";
   const hoverTimer = React.useRef<NodeJS.Timeout | null>(null);
+  const [copiedFactoryId, setCopiedFactoryId] = React.useState<string | null>(null);
+
+  const handleCopyFactoryId = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      try {
+        const input = document.createElement("textarea");
+        input.value = id;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        let copied = false;
+        try {
+          input.select();
+          copied = document.execCommand("copy");
+        } finally {
+          input.remove();
+        }
+        if (!copied) return;
+      } catch {
+        return;
+      }
+    }
+
+    setCopiedFactoryId(id);
+    window.setTimeout(() => {
+      setCopiedFactoryId((current) => current === id ? null : current);
+    }, 1500);
+  };
 
   const handleMouseEnter = () => {
     if (isCached || isValidation) return;
@@ -161,9 +197,17 @@ const FactoryCardComponent = ({
               >
                 {name}
               </h3>
-              <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 truncate">
-                ID: {id}
-              </p>
+              <button
+                type="button"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={handleCopyFactoryId}
+                className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-copy"
+                aria-label={copiedFactoryId === id ? `ID фабрики ${id} скопирован` : `Скопировать ID фабрики ${id}`}
+                title={copiedFactoryId === id ? "Скопировано" : "Нажмите, чтобы скопировать ID"}
+              >
+                <span>ID: {id}</span>
+                {copiedFactoryId === id ? <Check className="w-3 h-3 shrink-0" aria-hidden="true" /> : <Copy className="w-3 h-3 shrink-0 opacity-70" aria-hidden="true" />}
+              </button>
             </div>
           </div>
         </div>
@@ -254,9 +298,17 @@ const FactoryCardComponent = ({
               </span>
             )}
           </div>
-          <p className="text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
-            ID: {id}
-          </p>
+          <button
+            type="button"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={handleCopyFactoryId}
+            className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 dark:text-slate-500 mt-0.5 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-copy"
+            aria-label={copiedFactoryId === id ? `ID фабрики ${id} скопирован` : `Скопировать ID фабрики ${id}`}
+            title={copiedFactoryId === id ? "Скопировано" : "Нажмите, чтобы скопировать ID"}
+          >
+            <span>ID: {id}</span>
+            {copiedFactoryId === id ? <Check className="w-3 h-3 shrink-0" aria-hidden="true" /> : <Copy className="w-3 h-3 shrink-0 opacity-70" aria-hidden="true" />}
+          </button>
         </div>
       </div>
 

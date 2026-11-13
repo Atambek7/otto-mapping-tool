@@ -51,6 +51,15 @@ def process_scheduled_publish_tick(self, target_plan_id: int = None):
     try:
         now_utc = datetime.now(timezone.utc)
 
+        # The database row is the outbox. This path runs on the existing
+        # Drip Feed minute tick, so a Redis outage after publication cannot
+        # lose the one-time stock/delivery setup.
+        try:
+            dispatch_pending_initial_availability()
+        except Exception as dispatch_err:
+            import logging
+            logging.warning("Initial availability outbox dispatch deferred: %s", dispatch_err)
+
         # 1. Fetch pending items for active plans
         query = (
             db.query(models.PublishQueueItem)
@@ -198,255 +207,76 @@ def process_scheduled_publish_tick(self, target_plan_id: int = None):
 OTTO_AVAILABILITY_BATCH_SIZE = int(os.environ.get("OTTO_AVAILABILITY_BATCH_SIZE", "100"))
 
 
-@shared_task(bind=True, max_retries=10, acks_late=True, name="tasks.apply_otto_availability_task")
+@shared_task(bind=True, max_retries=0, acks_late=True, name="tasks.apply_otto_availability_task")
 def apply_otto_availability_task(
     self,
-    item_ids: list[int],
-    account_name: str,
+    item_ids: list[int] | None = None,
+    account_name: str | None = None,
     plan_id: int | None = None,
     pending_quantity_skus: list[str] | None = None,
     pending_delivery_skus: list[str] | None = None,
     aftercool_product_map: dict | None = None,
+    state_id: int | None = None,
+    trigger_kind: str = "automatic",
 ):
-    """
-    Celery task to reliably synchronize Stock (=20) and Shipping Profile in OTTO
-    after catalog publication.
+    """Process one durable initial-availability state.
 
-    Features:
-    - Runs in chunks/batches (up to 100 SKUs).
-    - Checks structured responses for Stock and Delivery.
-    - Isolates only unindexed SKUs for retry.
-    - If Stock succeeded and Delivery failed with unknown SKU, retry ONLY retries Delivery.
-    - Max 6 retries with 60s countdown (7 attempts total).
-    - Updates PublishQueueItem.error_message if retries exhausted.
+    Old queued messages still carry item IDs and lack ``state_id``. They are
+    deliberately acknowledged without touching OTTO or publication records.
     """
     import logging
-    from database import SessionLocal
-    import models
     from services.otto_client import OttoMarketClient
-    from services.otto_availability import apply_otto_availability
-    import redis
+    from services.initial_availability import (
+        claim_step, classify_response, finalize_dispatch, finish_step, mark_not_runnable,
+    )
+
+    if state_id is None:
+        logging.warning("Ignoring legacy availability task without durable state_id; items=%s", item_ids)
+        return {"status": "ignored_legacy_message", "writes": 0}
 
     db = SessionLocal()
     try:
-        items = db.query(models.PublishQueueItem).filter(models.PublishQueueItem.id.in_(item_ids)).all()
-        if not items:
-            logging.info(f"[apply_otto_availability_task] No items found for IDs {item_ids}")
-            return {"status": "empty", "dispatched": 0}
-
-        acc_str = str(account_name).upper()
-        settings = (
-            db.query(models.AccountSettings)
-            .filter(models.AccountSettings.account_name == acc_str)
-            .first()
-        )
+        state = db.query(models.InitialAvailabilityState).filter_by(id=state_id).first()
+        if not state:
+            return {"status": "missing_state", "writes": 0}
+        acc_str = state.account_name
+        if account_name and str(account_name).upper() != acc_str:
+            return {"status": "account_mismatch", "writes": 0}
+        settings = db.query(models.AccountSettings).filter_by(account_name=acc_str).first()
         if not settings or not settings.otto_client_id or not settings.otto_client_secret:
             err = f"Missing OTTO API credentials for account {acc_str}"
-            logging.error(f"[apply_otto_availability_task] {err}")
-            for it in items:
-                it.error_message = f"Availability sync error: {err}"
-            db.commit()
+            mark_not_runnable(db, state_id, "stock", err)
+            mark_not_runnable(db, state_id, "delivery", err)
             return {"status": "credentials_error", "error": err}
-
-        client = OttoMarketClient(
-            client_id=settings.otto_client_id,
-            client_secret=settings.otto_client_secret,
-        )
-
-        plan = None
-        if plan_id:
-            plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == plan_id).first()
-        elif items and items[0].plan_id:
-            plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == items[0].plan_id).first()
-
-        res = apply_otto_availability(
-            client=client,
-            items=items,
-            account_name=acc_str,
-            db=db,
-            plan=plan,
-            aftercool_product_map=aftercool_product_map,
-            target_quantity_skus=pending_quantity_skus,
-            target_delivery_skus=pending_delivery_skus,
-        )
-
-        qty_failed = res.get("quantity_failed_skus", [])
-        deliv_failed = res.get("delivery_failed_skus", [])
-        unknown_skus = res.get("unknown_skus", [])
-
-        if not qty_failed and not deliv_failed:
-            logging.info(
-                f"[apply_otto_availability_task] Successfully synced availability for "
-                f"{len(items)} items ({acc_str})."
-            )
-            # Clear Redis deduplication locks
-            redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        client = OttoMarketClient(settings.otto_client_id, settings.otto_client_secret)
+        sent = []
+        for operation in ("stock", "delivery"):
+            claimed = claim_step(db, state_id, operation, trigger_kind=trigger_kind)
+            if not claimed:
+                continue
+            attempt_id, payload = claimed
+            sent.append(operation)
             try:
-                r = redis.from_url(redis_url)
-                for it_id in item_ids:
-                    r.delete(f"otto_avail_sched:{acc_str}:{it_id}")
-            except Exception:
-                pass
-            return {"status": "success", "synced_items": len(items)}
+                response = (client.update_initial_quantity_once(state.product_ean)
+                            if operation == "stock"
+                            else client.update_initial_delivery_once(payload))
+                finish_step(db, state_id, operation, attempt_id,
+                            classify_response(response, state.product_ean), response=response)
+            except Exception as exc:
+                finish_step(db, state_id, operation, attempt_id, "unknown", error=str(exc))
 
-        # Check for transient API status codes (429 or 5xx) in quantities or delivery
-        is_transient_error = False
-        qty_res_data = res.get("quantities_res") or {}
-        deliv_res_data = res.get("delivery_res") or {}
-        qty_code = qty_res_data.get("status_code", 200)
-        deliv_code = deliv_res_data.get("status_code", 200)
-        if any(code in (429, 500, 502, 503, 504) for code in (qty_code, deliv_code)):
-            is_transient_error = True
-
-        # If there are unknown SKUs or transient network/server errors and retries remain, retry ONLY the failed SKUs
-        if (unknown_skus or is_transient_error) and self.request.retries < self.max_retries:
-            attempt_num = self.request.retries + 1
-            reason = f"{len(unknown_skus)} unknown SKUs" if unknown_skus else f"transient API status (qty:{qty_code}, deliv:{deliv_code})"
-            retry_delay = min(300, 60 + (self.request.retries * 30))
-            logging.warning(
-                f"[apply_otto_availability_task] Otto retryable condition ({reason}). "
-                f"Retrying in {retry_delay}s (attempt {attempt_num}/{self.max_retries})."
-            )
-            raise self.retry(
-                countdown=retry_delay,
-                kwargs={
-                    "pending_quantity_skus": qty_failed,
-                    "pending_delivery_skus": deliv_failed,
-                    "aftercool_product_map": aftercool_product_map,
-                }
-            )
-
-        # Either retries exhausted or non-retryable error
-        err_msg = res.get("error") or "Unknown error syncing availability"
-        logging.error(
-            f"[apply_otto_availability_task] Availability sync failed for {acc_str} after "
-            f"{self.request.retries} retries: {err_msg}"
-        )
-        from sqlalchemy.sql import func
-        failed_skus_set = set(qty_failed + deliv_failed)
-        for it in items:
-            if it.product_ean in failed_skus_set:
-                it.status = models.QueueItemStatus.FAILED
-                it.error_message = f"Availability sync incomplete: OTTO Availability error: {err_msg}"[:500]
-                if m := db.query(models.ProductMapping).filter(
-                    models.ProductMapping.product_ean == it.product_ean,
-                    models.ProductMapping.account_name == it.account_name
-                ).first():
-                    m.status = "Error"
-                    m.last_error = it.error_message
-            else:
-                it.status = models.QueueItemStatus.PUBLISHED
-                it.error_message = None
-                if m := db.query(models.ProductMapping).filter(
-                    models.ProductMapping.product_ean == it.product_ean,
-                    models.ProductMapping.account_name == it.account_name
-                ).first():
-                    m.status = "Published"
-                    m.last_error = None
-                    if not m.published_at:
-                        m.published_at = func.now()
-        db.commit()
-
-        # Clean up locks
-        redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-        try:
-            r = redis.from_url(redis_url)
-            for it_id in item_ids:
-                r.delete(f"otto_avail_sched:{acc_str}:{it_id}")
-        except Exception:
-            pass
-
-        return {
-            "status": "partial_or_failed",
-            "quantity_failed_skus": qty_failed,
-            "delivery_failed_skus": deliv_failed,
-            "error": err_msg,
-        }
+        state = db.query(models.InitialAvailabilityState).filter_by(id=state_id).one()
+        return {"status": "processed", "state_id": state.id, "stock_state": state.stock_state,
+                "delivery_state": state.delivery_state, "steps_sent": sent}
     finally:
+        finalize_dispatch(db, state_id)
         db.close()
 
 
 @shared_task(name="tasks.recover_incomplete_availability")
 def recover_incomplete_availability():
-    """
-    Periodic safety sweep (runs every 15 minutes) to automatically recover any published items
-    whose availability or shipping profile was delayed/rejected by OTTO indexing lag.
-    """
-    import logging
-    from database import SessionLocal
-    import models
-    from services.otto_client import OttoMarketClient
-    from services.otto_availability import apply_otto_availability
-
-    db = SessionLocal()
-    try:
-        items = db.query(models.PublishQueueItem).filter(
-            models.PublishQueueItem.error_message.ilike("%Availability sync incomplete%")
-        ).limit(100).all()
-
-        if not items:
-            return {"status": "noop", "recovered": 0}
-
-        by_account = {}
-        for it in items:
-            acc_name = it.account_name.value if hasattr(it.account_name, "value") else str(it.account_name)
-            by_account.setdefault(acc_name, []).append(it)
-
-        recovered_count = 0
-        for acc_name, acc_items in by_account.items():
-            settings = db.query(models.AccountSettings).filter(
-                models.AccountSettings.account_name == acc_name
-            ).first()
-            if not settings or not settings.otto_client_id or not settings.otto_client_secret:
-                continue
-
-            client = OttoMarketClient(settings.otto_client_id, settings.otto_client_secret)
-
-            for i in range(0, len(acc_items), 25):
-                batch = acc_items[i : i + 25]
-                plan = None
-                if batch[0].plan_id:
-                    plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == batch[0].plan_id).first()
-
-                res = apply_otto_availability(
-                    client=client,
-                    items=batch,
-                    account_name=acc_name,
-                    db=db,
-                    plan=plan
-                )
-
-                qty_failed = res.get("quantity_failed_skus", [])
-                deliv_failed = res.get("delivery_failed_skus", [])
-                unknown = res.get("unknown_skus", [])
-                failed_set = set(qty_failed + deliv_failed + unknown)
-
-                synced_eans = []
-                for it in batch:
-                    if it.product_ean not in failed_set:
-                        it.error_message = None
-                        it.status = models.QueueItemStatus.PUBLISHED
-                        synced_eans.append(it.product_ean)
-                        recovered_count += 1
-
-                if synced_eans:
-                    db.query(models.ProductMapping).filter(
-                        models.ProductMapping.product_ean.in_(synced_eans),
-                        models.ProductMapping.account_name == acc_name,
-                    ).update({
-                        "status": "Published",
-                        "last_error": None,
-                    }, synchronize_session=False)
-
-                db.commit()
-
-        logging.info(f"[recover_incomplete_availability] Successfully recovered {recovered_count} items.")
-        return {"status": "success", "recovered": recovered_count}
-    except Exception as e:
-        logging.error(f"[recover_incomplete_availability] Error during recovery: {e}")
-        return {"status": "error", "error": str(e)}
-    finally:
-        db.close()
+    """Compatibility no-op for already queued messages from the old sweep."""
+    return {"status": "disabled", "writes": 0}
 
 
 
@@ -458,57 +288,76 @@ def dispatch_otto_availability_batches(
     jitter_step: int = 5,
     aftercool_product_map: dict | None = None,
     force: bool = False,
+    initial_setup: bool = False,
 ) -> int:
-    """
-    Slices item_ids into chunks of OTTO_AVAILABILITY_BATCH_SIZE (default 100),
-    checks Redis deduplication lock to avoid double-scheduling the same items,
-    and enqueues apply_otto_availability_task with staggered countdowns.
-    If force=True, deletes any existing deduplication lock before acquiring.
-    Returns the number of scheduled tasks.
-    """
-    if not item_ids:
-        return 0
+    """Legacy API shim: old queue-item messages must never trigger stock writes."""
+    return 0
 
-    import redis
-    redis_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+
+def dispatch_pending_initial_availability(limit: int = 100) -> int:
+    """Deliver due PostgreSQL state rows; the committed lease is the outbox."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import or_, and_
+
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
     try:
-        r = redis.from_url(redis_url)
-    except Exception:
-        r = None
-
-    # Filter out items that are already scheduled using Redis set NX
-    eligible_ids = []
-    for item_id in item_ids:
-        if r:
-            lock_key = f"otto_avail_sched:{account_name}:{item_id}"
-            if force:
-                try:
-                    r.delete(lock_key)
-                except Exception:
-                    pass
-            # 20 minutes TTL protects against duplicate scheduling
-            if r.set(lock_key, "1", nx=True, ex=1200):
-                eligible_ids.append(item_id)
-        else:
-            eligible_ids.append(item_id)
-
-    if not eligible_ids:
-        return 0
-
-    batch_size = max(1, OTTO_AVAILABILITY_BATCH_SIZE)
-    batches = [eligible_ids[i:i + batch_size] for i in range(0, len(eligible_ids), batch_size)]
-
-    dispatched = 0
-    for idx, batch in enumerate(batches):
-        countdown = max(0, base_countdown + (idx * jitter_step))
-        apply_otto_availability_task.apply_async(
-            args=[batch, account_name, plan_id],
-            kwargs={"aftercool_product_map": aftercool_product_map},
-            countdown=countdown,
+        retryable_stock = and_(
+            models.InitialAvailabilityState.stock_state == "retryable_failed",
+            models.InitialAvailabilityState.stock_attempts < 10 + models.InitialAvailabilityState.manual_retry_count,
+            or_(models.InitialAvailabilityState.stock_next_attempt_at.is_(None),
+                models.InitialAvailabilityState.stock_next_attempt_at <= now),
         )
-        dispatched += 1
+        retryable_delivery = and_(
+            models.InitialAvailabilityState.delivery_state == "retryable_failed",
+            models.InitialAvailabilityState.delivery_attempts < 10 + models.InitialAvailabilityState.manual_retry_count,
+            or_(models.InitialAvailabilityState.delivery_next_attempt_at.is_(None),
+                models.InitialAvailabilityState.delivery_next_attempt_at <= now),
+        )
+        runnable = or_(
+            models.InitialAvailabilityState.stock_state == "pending",
+            models.InitialAvailabilityState.delivery_state == "pending",
+            retryable_stock,
+            retryable_delivery,
+        )
+        candidates = (db.query(models.InitialAvailabilityState)
+                      .filter(runnable,
+                              or_(models.InitialAvailabilityState.next_dispatch_at.is_(None),
+                                  models.InitialAvailabilityState.next_dispatch_at <= now),
+                              or_(models.InitialAvailabilityState.dispatch_lease_until.is_(None),
+                                  models.InitialAvailabilityState.dispatch_lease_until <= now))
+                      .order_by(models.InitialAvailabilityState.id)
+                      .with_for_update(skip_locked=True).limit(max(1, min(limit, 500))).all())
+        state_dispatches = [(state.id, state.next_attempt_trigger_kind) for state in candidates]
+        if not state_dispatches:
+            return 0
+        lease_until = now + timedelta(minutes=5)
+        for state in candidates:
+            state.dispatch_lease_until = lease_until
+            state.next_dispatch_at = None
+            state.last_dispatch_error = None
+        db.commit()
 
-    return dispatched
+        dispatched = 0
+        for state_id, trigger_kind in state_dispatches:
+            try:
+                apply_otto_availability_task.apply_async(kwargs={"state_id": state_id,
+                                                                "trigger_kind": trigger_kind})
+                dispatched += 1
+            except Exception as exc:
+                failed_at = datetime.now(timezone.utc)
+                row = db.query(models.InitialAvailabilityState).filter_by(id=state_id).with_for_update().first()
+                if row:
+                    row.dispatch_lease_until = None
+                    row.next_dispatch_at = failed_at + timedelta(minutes=1)
+                    row.last_dispatch_error = str(exc)[:1000]
+                    db.commit()
+        return dispatched
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @shared_task(bind=True, acks_late=True, max_retries=0)
@@ -601,11 +450,24 @@ def poll_otto_processing_items(self):
                     failed_count = task_res.get("failed", 0)
 
                     if state == "done":
-                        if failed_count > 0:
-                            # Fetch failed details
+                        succeeded_count = int(task_res.get("succeeded") or 0)
+                        failed_count = int(task_res.get("failed") or 0)
+                        unchanged_count = int(task_res.get("unchanged") or 0)
+                        err_msg_by_ean = {}
+                        failed_details = []
+
+                        if succeeded_count == 0 and failed_count == 0 and unchanged_count == 0:
+                            for it in task_items:
+                                it.poll_attempts += 1
+                                if it.poll_attempts >= 10:
+                                    it.status = models.QueueItemStatus.FAILED
+                                    it.error_message = "OTTO task ended without reconcilable per-SKU results; manual review required."
+                                    total_failed += 1
+                                else:
+                                    still_processing += 1
+                        elif failed_count > 0:
                             failed_href = task_items[0].otto_task_failed_href or task_href
                             failed_details = client.get_task_failed_details(failed_href)
-                            err_msg_by_ean = {}
                             if isinstance(failed_details, list):
                                 for res_entry in failed_details:
                                     res_ean = res_entry.get("ean") or res_entry.get("sku") or res_entry.get("logref") or ""
@@ -621,10 +483,8 @@ def poll_otto_processing_items(self):
                                     if res_ean:
                                         err_msg_by_ean[str(res_ean).strip()] = {
                                             "readable_err": readable_err,
-                                            "attrs_to_remove": attrs_to_remove
+                                            "attrs_to_remove": attrs_to_remove,
                                         }
-
-                            succeeded_count = task_res.get("succeeded", 0)
 
                             for it in task_items:
                                 it.attempts += 1
@@ -632,80 +492,115 @@ def poll_otto_processing_items(self):
                                     err_data = err_msg_by_ean[it.product_ean]
                                     attrs_to_remove = err_data["attrs_to_remove"]
                                     readable_err = err_data["readable_err"]
-                                    
                                     if attrs_to_remove and it.attempts < 5:
-                                        # Auto-remediation: delete disallowed attributes case-insensitively
                                         attrs_lower = [a.lower().strip() for a in attrs_to_remove]
                                         db.query(models.ProductAttribute).filter(
                                             models.ProductAttribute.product_ean == it.product_ean,
                                             models.ProductAttribute.account_name == it.account_name,
                                             func.lower(models.ProductAttribute.attribute_name).in_(attrs_lower)
                                         ).delete(synchronize_session=False)
-                                        
                                         it.status = models.QueueItemStatus.PENDING
-                                        it.error_message = f"Авто-исправление: удалены лишние атрибуты ({', '.join(attrs_to_remove)}). Ожидает повторной отправки. Исходная ошибка: {readable_err}"
-                                        if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
+                                        it.error_message = (
+                                            f"Авто-исправление: удалены лишние атрибуты ({', '.join(attrs_to_remove)}). "
+                                            f"Ожидает повторной отправки. Исходная ошибка: {readable_err}"
+                                        )[:500]
+                                        if m := db.query(models.ProductMapping).filter(
+                                            models.ProductMapping.product_ean == it.product_ean,
+                                            models.ProductMapping.account_name == it.account_name,
+                                        ).first():
                                             m.status = "Error"
                                             m.last_error = it.error_message
                                     else:
                                         it.status = models.QueueItemStatus.FAILED
-                                        if attrs_to_remove and it.attempts >= 5:
-                                            it.error_message = f"Превышен лимит авто-исправлений (5 попыток). Ошибка: {readable_err}"[:500]
-                                        else:
-                                            it.error_message = readable_err[:500]
+                                        it.error_message = readable_err[:500]
                                         total_failed += 1
-                                        if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
+                                        if m := db.query(models.ProductMapping).filter(
+                                            models.ProductMapping.product_ean == it.product_ean,
+                                            models.ProductMapping.account_name == it.account_name,
+                                        ).first():
                                             m.status = "Error"
                                             m.last_error = it.error_message
-                                elif failed_count >= len(task_items) or succeeded_count == 0:
+                                elif failed_count >= len(task_items) or (succeeded_count == 0 and unchanged_count == 0):
                                     it.status = models.QueueItemStatus.FAILED
                                     sample_err = list(err_msg_by_ean.values())[0]["readable_err"] if err_msg_by_ean else task_res.get("message", "Errors during processing")
                                     it.error_message = f"Otto validation error: {sample_err}"[:500]
                                     total_failed += 1
-                                    if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
+                                    if m := db.query(models.ProductMapping).filter(
+                                        models.ProductMapping.product_ean == it.product_ean,
+                                        models.ProductMapping.account_name == it.account_name,
+                                    ).first():
                                         m.status = "Error"
                                         m.last_error = it.error_message
-                                elif failed_count > len(err_msg_by_ean):
+                                elif failed_count > len(err_msg_by_ean) and not (isinstance(failed_details, list) and len(failed_details) >= failed_count):
                                     it.status = models.QueueItemStatus.FAILED
                                     it.error_message = f"Otto reported {failed_count} failures in batch. SKU status unconfirmed."[:500]
                                     total_failed += 1
-                                    if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
+                                    if m := db.query(models.ProductMapping).filter(
+                                        models.ProductMapping.product_ean == it.product_ean,
+                                        models.ProductMapping.account_name == it.account_name,
+                                    ).first():
                                         m.status = "Error"
                                         m.last_error = it.error_message
                                 else:
+                                    mapping = db.query(models.ProductMapping).filter(
+                                        models.ProductMapping.product_ean == it.product_ean,
+                                        models.ProductMapping.account_name == it.account_name,
+                                    ).first()
+                                    previously_published = bool(
+                                        it.published_at or (mapping and (mapping.published_at or mapping.status == "Published"))
+                                    )
+                                    plan = db.query(models.PublishPlan).filter_by(id=it.plan_id).first()
+                                    try:
+                                        from services.initial_availability import register_for_success
+                                        register_for_success(
+                                            db, acc_str, it, plan,
+                                            previously_published=previously_published,
+                                        )
+                                    except Exception as registration_err:
+                                        import logging
+                                        logging.exception("Could not persist initial availability state for %s", it.product_ean)
+                                        if mapping:
+                                            mapping.last_error = (
+                                                f"Initial availability registration requires review: {registration_err}"[:500]
+                                            )
                                     it.status = models.QueueItemStatus.PUBLISHED
                                     it.published_at = now_utc
                                     it.error_message = None
                                     total_published += 1
-                                    if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
-                                        m.status = "Published"
-                                        m.published_at = now_utc
+                                    if mapping:
+                                        mapping.status = "Published"
+                                        mapping.published_at = now_utc
                         else:
                             # Succeeded with 0 failures
                             for it in task_items:
+                                mapping = db.query(models.ProductMapping).filter(
+                                    models.ProductMapping.product_ean == it.product_ean,
+                                    models.ProductMapping.account_name == it.account_name,
+                                ).first()
+                                previously_published = bool(
+                                    it.published_at or (mapping and (mapping.published_at or mapping.status == "Published"))
+                                )
+                                plan = db.query(models.PublishPlan).filter_by(id=it.plan_id).first()
+                                try:
+                                    from services.initial_availability import register_for_success
+                                    register_for_success(
+                                        db, acc_str, it, plan,
+                                        previously_published=previously_published,
+                                    )
+                                except Exception as registration_err:
+                                    import logging
+                                    logging.exception("Could not persist initial availability state for %s", it.product_ean)
+                                    if mapping:
+                                        mapping.last_error = (
+                                            f"Initial availability registration requires review: {registration_err}"[:500]
+                                        )
                                 it.status = models.QueueItemStatus.PUBLISHED
                                 it.published_at = now_utc
                                 it.error_message = None
                                 total_published += 1
-                                if m := db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == it.product_ean, models.ProductMapping.account_name == it.account_name).first():
-                                    m.status = "Published"
-                                    m.published_at = now_utc
-
-                        # Dispatch Availability API (Stock=20 and Shipping Profile) in batches with delayed countdown
-                        succeeded_items = [it for it in task_items if it.status == models.QueueItemStatus.PUBLISHED]
-                        if succeeded_items:
-                            try:
-                                plan = db.query(models.PublishPlan).filter(models.PublishPlan.id == succeeded_items[0].plan_id).first()
-                                dispatch_otto_availability_batches(
-                                    item_ids=[it.id for it in succeeded_items],
-                                    account_name=acc_str,
-                                    plan_id=plan.id if plan else None,
-                                    base_countdown=60,
-                                    jitter_step=5,
-                                )
-                            except Exception as avail_err:
-                                import logging
-                                logging.warning(f"[poll_otto_processing_items] Failed to dispatch availability tasks: {avail_err}")
+                                if mapping:
+                                    mapping.status = "Published"
+                                    mapping.published_at = now_utc
                     else:
                         # Task still in progress in Otto
                         for it in task_items:

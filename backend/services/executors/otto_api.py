@@ -692,34 +692,43 @@ class OttoApiExecutor(BasePublishExecutor):
         # 4. Dispatch to Otto API
         try:
             res = client.publish_products(payloads)
+            if res.get("request_attempted"):
+                attempted_at = datetime.now(timezone.utc)
+                for item in item_lookup.values():
+                    if not item.otto_submission_attempted_at:
+                        item.otto_submission_attempted_at = attempted_at
             status_code = res.get("status_code", 500)
 
             if status_code in (200, 201, 204):
                 # Synchronous success (rare in v5, but supported)
                 now_utc = datetime.now(timezone.utc)
                 for item in item_lookup.values():
+                    mapping = mapping_by_ean.get(item.product_ean)
+                    previously_published = bool(
+                        item.published_at or (mapping and (mapping.published_at or mapping.status == "Published"))
+                    )
+                    try:
+                        from services.initial_availability import register_for_success
+                        register_for_success(
+                            db, account_name_str, item, plan, aftercool_product_map,
+                            previously_published=previously_published,
+                        )
+                    except Exception as availability_state_err:
+                        import logging
+                        logging.exception("Could not persist initial availability state for %s", item.product_ean)
+                        # Publication evidence remains authoritative. A state
+                        # registration error must not change its outcome.
+                        if mapping:
+                            mapping.last_error = (
+                                f"Initial availability registration requires review: {availability_state_err}"[:500]
+                            )
                     item.status = models.QueueItemStatus.PUBLISHED
                     item.published_at = now_utc
                     item.error_message = None
-                    if m := mapping_by_ean.get(item.product_ean):
-                        m.published_at = now_utc
-                        m.status = "Published"
+                    if mapping:
+                        mapping.published_at = now_utc
+                        mapping.status = "Published"
                     published_count += 1
-
-                # Dispatch Availability API (stock=20 and shipping profile) with delayed Celery task
-                try:
-                    from tasks import dispatch_otto_availability_batches
-                    dispatch_otto_availability_batches(
-                        item_ids=[item.id for item in item_lookup.values() if item.id],
-                        account_name=account_name_str,
-                        plan_id=plan.id if plan else None,
-                        base_countdown=60,
-                        jitter_step=5,
-                        aftercool_product_map=aftercool_product_map,
-                    )
-                except Exception as avail_err:
-                    import logging
-                    logging.warning(f"Failed to dispatch availability tasks after sync publish: {avail_err}")
             elif status_code == 202:
                 # Asynchronous task accepted by Otto:
                 # Save task references and set state to PROCESSING.
