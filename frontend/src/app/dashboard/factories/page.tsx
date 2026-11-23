@@ -150,8 +150,8 @@ export default function DashboardPage() {
           const cleanArray = sanitizeFactories(parsedArray, account);
           setFactories(cleanArray);
           setLoading(false);
-          // Silently refresh in background with fresh data from server
-          fetchWithAuth("/aftercool/factories?refresh=true").then(async res => {
+          // Silently refresh in background using the 120s Redis cache (explicit refresh button uses ?refresh=true)
+          fetchWithAuth("/aftercool/factories").then(async res => {
             if (!res.ok) return;
             const data = await res.json();
             const all: Factory[] = Array.isArray(data) ? data : data?.items ?? [];
@@ -200,10 +200,10 @@ export default function DashboardPage() {
       await Promise.all(
         chunk.map(async (fid) => {
           try {
-            const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
+            const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1&compact=1&sync_db=0`);
             if (res.ok) {
               const data = await res.json();
-              let items = data?.items || data || [];
+              const items: any[] = [...(data?.items || data || [])];
               const total = Number(data?.total) || items.length;
               if (total > items.length && items.length > 0) {
                 const MAX_SAFE_TOTAL = 50000;
@@ -211,12 +211,12 @@ export default function DashboardPage() {
                 for (let off = items.length; off < safeTotal; off += 500) {
                   try {
                     await new Promise(r => setTimeout(r, 100));
-                    const r = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&offset=${off}&include_row=1&sync_db=0`);
+                    const r = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&offset=${off}&include_row=1&compact=1&sync_db=0`);
                     if (r.ok) {
                       const d = await r.json();
                       const chunkItems = d?.items || d || [];
                       if (!chunkItems.length) break;
-                      items = items.concat(chunkItems);
+                      items.push(...chunkItems);
                     } else {
                       break;
                     }
@@ -226,7 +226,7 @@ export default function DashboardPage() {
                   }
                 }
               }
-              await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
+              await setCachedFactory({ factoryId: fid, products: items, total, sourceRowsCount: items.length, fetchedAt: Date.now(), compact: true }, true, account);
               setCachedIds(prev => ({ ...prev, [fid]: true }));
             }
           } catch (e) {
@@ -251,7 +251,7 @@ export default function DashboardPage() {
     await Promise.all(
       ids.map(async (fid) => {
         try {
-          await deleteCachedFactory(fid);
+          await deleteCachedFactory(fid, account);
         } catch (e) {
           console.error(e);
         }
@@ -301,39 +301,11 @@ export default function DashboardPage() {
       const fid = ids[i];
       try {
         let items: any[] = [];
-        const cached = await getCachedFactory(fid);
-        const isTruncated = Boolean(cached && (cached.products.length === 500 || (cached.total && cached.products.length < cached.total)));
-        if (cached?.products?.length && !isTruncated) {
-          items = cached.products;
-        } else {
-          const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1`);
-          if (res.ok) {
-            const data = await res.json();
-            items = data?.items || data || [];
-            const total = Number(data?.total) || items.length;
-            if (total > items.length && items.length > 0) {
-              const MAX_SAFE_TOTAL = 50000;
-              const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
-              for (let off = items.length; off < safeTotal; off += 500) {
-                try {
-                  await new Promise(r => setTimeout(r, 100));
-                  const r = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&offset=${off}&include_row=1&sync_db=0`);
-                  if (r.ok) {
-                    const d = await r.json();
-                    const chunkItems = d?.items || d || [];
-                    if (!chunkItems.length) break;
-                    items = items.concat(chunkItems);
-                  } else {
-                    break;
-                  }
-                } catch (e) {
-                  console.error("AutoMap fetch chunk error:", e);
-                  break;
-                }
-              }
-            }
-            await setCachedFactory({ factoryId: fid, products: items, total: items.length, fetchedAt: Date.now() }, true);
-          }
+        // Batch AI auto-map requires full CustomItemSpecifics/Beschreibung and only maps the first 500 items
+        const res = await fetchWithAuth(`/aftercool/products?factory_id=${fid}&account=${account}&dataset=lister&limit=500&include_row=1&compact=0&sync_db=0`);
+        if (res.ok) {
+          const data = await res.json();
+          items = data?.items || data || [];
         }
 
         const payload = items.slice(0, 500).map((p: any) => {

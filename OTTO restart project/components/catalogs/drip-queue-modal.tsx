@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Layers,
-  Play,
   Calendar,
 } from "lucide-react";
 import { useRestartAccount } from "@/features/state/restart-account";
@@ -24,11 +23,19 @@ import {
 } from "@/features/catalogs/drip-feed-service";
 import { catalogDemoService } from "@/features/catalogs/service";
 import type { CatalogProductItem } from "@/features/catalogs/types";
+import type { RestartAccount } from "@/features/api/types";
 import { ProductDrawer } from "./product-drawer";
+import { ProductionDripQueueModal } from "./production-drip-queue-modal";
 
 interface DripQueueModalProps {
-  factoryId: string;
+  demoMode?: boolean;
+  factoryId?: string;
   factoryName?: string;
+  sourceType?: "AFTERBUY" | "OTTO_DIRECT";
+  initialRequestId?: string;
+  initialRequestAccount?: RestartAccount;
+  initialBatchId?: string;
+  initialBatchAccount?: RestartAccount;
   isOpen: boolean;
   onClose: () => void;
   onPlanUpdated?: () => void;
@@ -43,8 +50,9 @@ interface EnrichedQueueItem extends DripQueueItem {
 
 const PAGE_SIZE = 50;
 
-export function DripQueueModal({
-  factoryId,
+function DemoDripQueueModal({
+  demoMode = true,
+  factoryId = "direct-otto",
   factoryName,
   isOpen,
   onClose,
@@ -59,7 +67,6 @@ export function DripQueueModal({
   const [items, setItems] = useState<DripQueueItem[]>([]);
   const [loadingItems, setLoadingItems] = useState<boolean>(false);
   const [retrying, setRetrying] = useState<boolean>(false);
-  const [triggeringNow, setTriggeringNow] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [statusTab, setStatusTab] = useState<
@@ -261,19 +268,6 @@ export function DripQueueModal({
     setActiveDrawerProduct(synth);
   }, [factoryId, factoryName, account]);
 
-  const handleTriggerNow = () => {
-    if (!selectedPlanId) return;
-    setTriggeringNow(true);
-    setTimeout(() => {
-      dripFeedService.triggerNow(selectedPlanId);
-      fetchPlans();
-      fetchPlanItems(selectedPlanId);
-      onPlanUpdated?.();
-      setTriggeringNow(false);
-      showToast("✓ Выгрузка очереди Drip Feed успешно запущена!");
-    }, 400);
-  };
-
   const handleRetryFailed = () => {
     if (!selectedPlanId) return;
     setRetrying(true);
@@ -283,7 +277,7 @@ export function DripQueueModal({
       fetchPlanItems(selectedPlanId);
       onPlanUpdated?.();
       setRetrying(false);
-      showToast("✓ Товары с ошибками отправлены на повторную выгрузку!");
+      showToast("DEMO: локально повторно поставлены задачи dry-run; OTTO не вызывался.");
     }, 400);
   };
 
@@ -295,7 +289,7 @@ export function DripQueueModal({
     }
     setActiveDrawerProduct(null);
     onPlanUpdated?.();
-    showToast(`✓ Товар сохранён: ${updated.ean}`);
+    showToast(`DEMO: карточка ${updated.ean} изменена только в локальном примере.`);
   };
 
   if (!isOpen) return null;
@@ -415,16 +409,12 @@ export function DripQueueModal({
               {stats.pending > 0 && (
                 <button
                   type="button"
-                  onClick={handleTriggerNow}
-                  disabled={triggeringNow}
+                  disabled
+                  title="Локальная demo-очередь не подтверждает обработку или публикацию OTTO"
                   className="drip-queue-action-btn btn-trigger-now"
                 >
-                  {triggeringNow ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <Play size={12} style={{ fill: "currentColor" }} />
-                  )}
-                  <span>Выгрузить сейчас</span>
+                  <AlertCircle size={12} />
+                  <span>Публикация отключена</span>
                 </button>
               )}
               {stats.failed > 0 && (
@@ -746,6 +736,7 @@ export function DripQueueModal({
         <ProductDrawer
           product={activeDrawerProduct}
           onClose={() => setActiveDrawerProduct(null)}
+          demoMode={demoMode}
           onSaveProduct={handleSaveDrawerProduct}
         />
       )}
@@ -758,4 +749,22 @@ export function DripQueueModal({
       )}
     </div>
   );
+}
+
+export function DripQueueModal(props: DripQueueModalProps) {
+  if (props.demoMode === false) {
+    return <ProductionDripQueueModal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      factoryId={props.factoryId}
+      factoryName={props.factoryName}
+      sourceType={props.sourceType}
+      initialRequestId={props.initialRequestId}
+      initialRequestAccount={props.initialRequestAccount}
+      initialBatchId={props.initialBatchId}
+      initialBatchAccount={props.initialBatchAccount}
+      onPlanUpdated={props.onPlanUpdated}
+    />;
+  }
+  return <DemoDripQueueModal {...props} demoMode={props.demoMode ?? true} />;
 }

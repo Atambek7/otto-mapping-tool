@@ -1,4 +1,6 @@
 import os
+import logging
+logger = logging.getLogger(__name__)
 import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
 from fastapi.responses import StreamingResponse, Response, FileResponse
@@ -77,6 +79,18 @@ def ensure_default_attributes(db: Session, ean: str, account: str, category_id: 
             existing_map[k_lower] = new_attr
         elif not str(existing_map[k_lower].attribute_value).strip():
             existing_map[k_lower].attribute_value = v
+
+def _sync_unfinished_queue_category(db: Session, ean: str, account: Any, new_cat_id: str) -> None:
+    """Keep pending/failed Drip Feed queue items aligned with the updated mapping category."""
+    db.query(models.PublishQueueItem).filter(
+        models.PublishQueueItem.product_ean == ean,
+        models.PublishQueueItem.account_name == account,
+        models.PublishQueueItem.status.in_([
+            models.QueueItemStatus.PENDING,
+            models.QueueItemStatus.FAILED,
+        ]),
+    ).update({"category_id": str(new_cat_id).strip()}, synchronize_session=False)
+
 
 def migrate_product_attributes_for_new_category(
     db: Session,
@@ -173,12 +187,17 @@ def migrate_product_attributes_for_new_category(
     ).all()
     attr_map = {a.attribute_name: a.attribute_value for a in refreshed_attrs}
 
-    from services.validator import validate_product
-    errors = validate_product(clean_ean, clean_new_cat, attr_map)
+    from services.validator import validate_product, get_missing_required_attributes
+    errors = validate_product(clean_ean, clean_new_cat, attr_map, product_name=db_mapping.product_name or "")
+    db_mapping.missing_attributes = get_missing_required_attributes(clean_new_cat, attr_map)
     if not errors:
         db_mapping.status = "Ready"
+        db_mapping.last_error = None
     else:
         db_mapping.status = "Need Attributes"
+
+    # Keep unfinished Drip Feed queue rows aligned with the new category
+    _sync_unfinished_queue_category(db, clean_ean, account, clean_new_cat)
 
 import openai
 
@@ -192,34 +211,38 @@ router = APIRouter(
 class CategoryMappingBase(BaseModel):
     product_ean: str
     factory_id: str
-    account: str = "JV"
+    account: Optional[str] = None
     category_id: str
 
 class CategoryMappingBulk(BaseModel):
     product_eans: List[str]
     factory_id: str
-    account: str = "JV"
+    account: Optional[str] = None
     category_id: str
 
 class BulkDeleteRequest(BaseModel):
     product_eans: List[str]
-    account: str = "JV"
+    account: Optional[str] = None
+    factory_id: Optional[str] = None
 
 class AttributeMappingBase(BaseModel):
     product_ean: str
-    account: str = "JV"
+    account: Optional[str] = None
+    factory_id: Optional[str] = None
     attributes: Dict[str, str]
     ai_attributes: Optional[List[str]] = None
 
 class AttributeMappingBulk(BaseModel):
     product_eans: List[str]
-    account: str = "JV"
+    account: Optional[str] = None
+    factory_id: Optional[str] = None
     attributes: Dict[str, str]
     ai_attributes: Optional[List[str]] = None
 
 class ApplyDefaultsRequest(BaseModel):
     product_eans: List[str]
-    account: str = "JV"
+    account: Optional[str] = None
+    factory_id: Optional[str] = None
     target_group: Optional[str] = "Erwachsene ; Jugendliche"
     design: Optional[str] = None
     overwrite_existing: bool = False
@@ -238,7 +261,7 @@ class TransferAccountRequest(BaseModel):
 
 class BulkExportRequest(BaseModel):
     factory_ids: List[str]
-    account: str = "JV"
+    account: Optional[str] = None
 
 @router.post("/bulk/export")
 async def bulk_export(format: str, req: BulkExportRequest, db: Session = Depends(get_db)):
@@ -253,11 +276,22 @@ async def bulk_export(format: str, req: BulkExportRequest, db: Session = Depends
     if not req.factory_ids:
         raise HTTPException(status_code=400, detail="No factory IDs provided")
     
-    target_account = req.account or "JV"
+    from services.factory_exclusions import is_protected_factory, resolve_account_scope
+    protected_ids = [fid for fid in req.factory_ids if is_protected_factory(fid)]
+    if not req.account and protected_ids:
+        resolve_account_scope(db, req.account, protected_ids[0])
+    target_account = resolve_account_scope(db, req.account)
     mappings = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id.in_(req.factory_ids),
         models.ProductMapping.account_name == target_account
     ).all()
+    from services.factory_exclusions import filter_factory_mappings
+    visible_mappings = []
+    for selected_factory_id in req.factory_ids:
+        visible_mappings.extend(filter_factory_mappings(
+            db, selected_factory_id, [m for m in mappings if m.factory_id == selected_factory_id]
+        ))
+    mappings = visible_mappings
     
     if format == "json":
         data = [m.__dict__ for m in mappings]
@@ -323,12 +357,16 @@ class ExportDbRequest(BaseModel):
 @router.api_route("/export-db/{factory_id}", methods=["GET", "POST"])
 async def export_factory_db(
     factory_id: str, 
-    account: str = "JV", 
+    account: str = None,
     factory_name: str = "",
     req: ExportDbRequest = None,
     db: Session = Depends(get_db)
 ):
     from services.roma_db import build_roma_sqlite_db
+    from services.factory_exclusions import filter_factory_mappings, require_factory_eans_allowed, resolve_account_scope
+    account = resolve_account_scope(db, account, factory_id, req.product_eans if req else ())
+    if req and req.product_eans:
+        require_factory_eans_allowed(db, account, factory_id, req.product_eans)
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id == factory_id,
         models.ProductMapping.account_name == account
@@ -336,7 +374,7 @@ async def export_factory_db(
     if req and req.product_eans:
         query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
 
-    mappings = query.all()
+    mappings = filter_factory_mappings(db, factory_id, query.all())
     if not mappings:
         from routers.aftercool import force_sync_metadata
         try:
@@ -347,7 +385,7 @@ async def export_factory_db(
             )
             if req and req.product_eans:
                 query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
-            mappings = query.all()
+            mappings = filter_factory_mappings(db, factory_id, query.all())
         except Exception as e:
             print(f"Auto-sync metadata for export-db failed: {e}")
 
@@ -382,13 +420,17 @@ async def export_factory_db(
 @router.post("/export-db/start/{factory_id}")
 async def start_export_factory_db(
     factory_id: str,
-    account: str = "JV",
+    account: str = None,
     factory_name: str = "",
     req: ExportDbRequest = None,
     db: Session = Depends(get_db)
 ):
     from tasks import export_factory_db_task
     eans = req.product_eans if req else []
+    from services.factory_exclusions import require_factory_eans_allowed, resolve_account_scope
+    account = resolve_account_scope(db, account, factory_id, eans)
+    if eans:
+        require_factory_eans_allowed(db, account, factory_id, eans)
     try:
         task = export_factory_db_task.delay(
             factory_id=str(factory_id),
@@ -442,7 +484,7 @@ async def download_export_db(task_id: str):
 async def import_db(
     file: UploadFile = File(...),
     factory_id: str = Form(None),
-    account: str = Form("JV"),
+    account: str = Form(None),
     db: Session = Depends(get_db)
 ):
     import shutil
@@ -475,6 +517,8 @@ async def import_db(
 
 class AutoMapProductModel(BaseModel):
     ean: str
+    factory_id: Optional[str] = None
+    account: Optional[str] = None
     title: str
     description: str = ""
     specifics: str
@@ -519,7 +563,7 @@ def format_openai_error(e: Exception) -> str:
 
 class AutoMapBulkRequest(BaseModel):
     factory_id: str
-    account: str = "JV"
+    account: Optional[str] = None
     products: List[AutoMapProductModel]
     only_required: bool = False
     use_vision: bool = False
@@ -527,6 +571,10 @@ class AutoMapBulkRequest(BaseModel):
 
 @router.post("/auto-map")
 async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    from services.factory_exclusions import require_factory_eans_allowed, lock_and_require_factory_eans_allowed, resolve_account_scope
+    request_eans = [p.ean.strip() for p in req.products if p.ean and p.ean.strip()]
+    req.account = resolve_account_scope(db, req.account, req.factory_id, request_eans)
+    require_factory_eans_allowed(db, req.account, req.factory_id, request_eans)
     custom_api_key = resolve_openai_key(db=db, user=current_user)
     if not custom_api_key:
         raise HTTPException(
@@ -536,7 +584,7 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
         )
     
     # 1. Pre-fetch all necessary data to avoid N+1 and concurrent DB locks
-    eans = [p.ean.strip() for p in req.products if p.ean and p.ean.strip()]
+    eans = request_eans
     
     existing_mappings = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean.in_(eans),
@@ -604,12 +652,20 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
             detail=str(e),
             headers={"x-error-code": "AI_MAPPING_ERROR"}
         )
+
+    # AI calls may take long enough for a manifest apply to complete while
+    # they run. Recheck under the same mapping locks immediately before writes.
+    lock_and_require_factory_eans_allowed(db, req.account, req.factory_id, request_eans)
     
     # 3. Apply all updates to the DB in one single batch
     for res in results:
         if res.get("status") in ["success", "partial"] and "db_updates" in res:
             ean = res["ean"]
             updates = res["db_updates"]
+            if updates.get("category_id") and not get_category_by_id(updates["category_id"]):
+                res["status"] = "error"
+                res["message"] = "Unknown OTTO category; changes were not applied"
+                continue
             
             # Update mapping
             db_mapping = mapping_dict.get(ean)
@@ -621,6 +677,10 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
                 db_mapping.factory_id = req.factory_id
                 
             new_cat_id = updates.get("category_id")
+            if new_cat_id and not get_category_by_id(new_cat_id):
+                res["status"] = "error"
+                res["message"] = "Unknown OTTO category; changes were not applied"
+                continue
             if new_cat_id and db_mapping.category_id and not is_same_category(db_mapping.category_id, new_cat_id):
                 migrate_product_attributes_for_new_category(
                     db, ean, req.account, db_mapping.category_id, new_cat_id, db_mapping=db_mapping
@@ -710,18 +770,20 @@ async def auto_map_bulk(req: AutoMapBulkRequest, current_user: models.User = Dep
 class SyncOkbBulkRequest(BaseModel):
     product_eans: List[str]
     factory_id: str
-    account: str = "JV"
+    account: Optional[str] = None
     products_data: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/sync-okb-bulk")
 async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
+    from services.factory_exclusions import require_factory_eans_allowed, lock_and_require_factory_eans_allowed, resolve_account_scope
+    acc = resolve_account_scope(db, req.account, req.factory_id, req.product_eans)
+    require_factory_eans_allowed(db, acc, req.factory_id, req.product_eans)
     row_dict = {}
     if req.products_data:
         for pd in req.products_data:
             if isinstance(pd, dict) and pd.get("ean"):
                 row_dict[str(pd["ean"])] = pd.get("row")
 
-    acc = str(req.account or "JV").strip().upper()
     if acc not in ("JV", "XL"):
         raise HTTPException(status_code=400, detail="Account must be JV or XL")
 
@@ -736,9 +798,13 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
             return result
                 
     results = await asyncio.gather(*(process(ean) for ean in req.product_eans))
+
+    # The Aftercool calls above are read-only. Revalidate after them and lock
+    # mappings before applying their response to local records.
+    lock_and_require_factory_eans_allowed(db, acc, req.factory_id, req.product_eans)
     
     # Pre-fetch existing mappings
-    eans = [r["ean"] for r in results if r.get("status") in ("success", "unresolved")]
+    eans = [r["ean"] for r in results if r.get("status") in ("success", "partial", "unresolved")]
     existing_mappings = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean.in_(eans),
         models.ProductMapping.account_name == acc
@@ -759,7 +825,7 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
     from services.aftercool_service import apply_aftercool_prices
 
     for res in results:
-        if res.get("status") in ("success", "unresolved"):
+        if res.get("status") in ("success", "partial", "unresolved"):
             ean = res["ean"]
             cat_id = res.get("category_id")
             attributes = res.get("attributes", {})
@@ -824,9 +890,10 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
                     if allowed is not None and key not in allowed and not key.startswith("Bullet Point "):
                         db.delete(attr)
                         del attrs_orm_dict[ean][key]
+                _sync_unfinished_queue_category(db, ean, acc, cat_id)
             all_attributes = {k: a.attribute_value for k, a in attrs_orm_dict.get(ean, {}).items()}
             all_attributes.update(attributes)
-            errors = validate_product(ean, db_mapping.category_id, all_attributes)
+            errors = validate_product(ean, db_mapping.category_id, all_attributes, product_name=db_mapping.product_name or "")
             db_mapping.missing_attributes = errors
             # Status protection: do not downgrade Published status
             if (db_mapping.status or "").lower() != "published":
@@ -841,6 +908,9 @@ async def sync_okb_bulk(req: SyncOkbBulkRequest, db: Session = Depends(get_db)):
 
 @router.post("/predict-category")
 async def api_predict_category(req: AutoMapProductModel, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    from services.factory_exclusions import resolve_account_scope, require_factory_eans_allowed
+    scoped_account = resolve_account_scope(db, req.account, req.factory_id, [req.ean])
+    require_factory_eans_allowed(db, scoped_account, req.factory_id, [req.ean])
     custom_key = resolve_openai_key(db=db, user=current_user)
     if not custom_key:
         raise HTTPException(
@@ -857,8 +927,8 @@ async def api_predict_category(req: AutoMapProductModel, current_user: models.Us
             detail=format_openai_error(e),
             headers={"x-error-code": "OPENAI_API_ERROR"}
         )
-    if not category_id:
-        raise HTTPException(status_code=400, detail="Could not predict category")
+    if not category_id or not get_category_by_id(category_id):
+        raise HTTPException(status_code=400, detail="Could not resolve a valid OTTO category")
     return {"status": "success", "category_id": category_id}
 
 class ExtractAttributesRequest(AutoMapProductModel):
@@ -867,6 +937,9 @@ class ExtractAttributesRequest(AutoMapProductModel):
 
 @router.post("/extract-attributes")
 async def api_extract_attributes(req: ExtractAttributesRequest, current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    from services.factory_exclusions import resolve_account_scope, require_factory_eans_allowed
+    scoped_account = resolve_account_scope(db, req.account, req.factory_id, [req.ean])
+    require_factory_eans_allowed(db, scoped_account, req.factory_id, [req.ean])
     custom_key = resolve_openai_key(db=db, user=current_user)
     if not custom_key:
         raise HTTPException(
@@ -896,8 +969,14 @@ async def api_extract_attributes(req: ExtractAttributesRequest, current_user: mo
 
 @router.post("/category")
 async def assign_category(mapping: CategoryMappingBase, db: Session = Depends(get_db)):
-    acc = mapping.account or "JV"
+    if mapping.category_id and not get_category_by_id(mapping.category_id):
+        raise HTTPException(status_code=400, detail="Unknown OTTO category")
+    from services.factory_exclusions import resolve_account_scope
+    acc = resolve_account_scope(db, mapping.account, mapping.factory_id, [mapping.product_ean])
+    mapping.account = acc
     clean_ean = mapping.product_ean.strip()
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed
+    lock_and_require_factory_eans_allowed(db, acc, mapping.factory_id, [clean_ean])
     db_mapping = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean == clean_ean,
         models.ProductMapping.account_name == acc
@@ -926,7 +1005,12 @@ async def assign_category(mapping: CategoryMappingBase, db: Session = Depends(ge
 
 @router.post("/category/bulk")
 async def assign_category_bulk(mapping: CategoryMappingBulk, db: Session = Depends(get_db)):
+    if mapping.category_id and not get_category_by_id(mapping.category_id):
+        raise HTTPException(status_code=400, detail="Unknown OTTO category")
     clean_eans = [e.strip() for e in mapping.product_eans if e and e.strip()]
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    mapping.account = resolve_account_scope(db, mapping.account, mapping.factory_id, clean_eans)
+    lock_and_require_factory_eans_allowed(db, mapping.account, mapping.factory_id, clean_eans)
     for ean in clean_eans:
         db_mapping = db.query(models.ProductMapping).filter(
             models.ProductMapping.product_ean == ean,
@@ -958,7 +1042,9 @@ async def delete_mapping_bulk(req: BulkDeleteRequest, db: Session = Depends(get_
     if not clean_eans:
         return {"status": "success", "deleted": 0}
         
-    acc = req.account or "JV"
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    acc = resolve_account_scope(db, req.account, req.factory_id, clean_eans)
+    lock_and_require_factory_eans_allowed(db, acc, req.factory_id, clean_eans)
     attr_q = db.query(models.ProductAttribute).filter(
         models.ProductAttribute.product_ean.in_(clean_eans),
         models.ProductAttribute.account_name == acc
@@ -977,7 +1063,7 @@ async def delete_mapping_bulk(req: BulkDeleteRequest, db: Session = Depends(get_
 from services.categories_repo import get_category_by_id, get_categories, get_groups
 
 @router.get("/categories")
-async def search_categories(q: str = "", sort: str = "asc", letter: str = None, limit: int = 100):
+def search_categories(q: str = "", sort: str = "asc", letter: str = None, limit: int = 100):
     q_lower = q.lower().strip()
     letter_upper = letter.upper().strip() if letter else None
     results = []
@@ -998,8 +1084,11 @@ async def search_categories(q: str = "", sort: str = "asc", letter: str = None, 
             elif first_char != letter_upper:
                 continue
                 
-        if q_lower and (q_lower not in name.lower() and q_lower not in group.lower()):
-            continue
+        if q_lower:
+            name_l = c.get("_name_lower") or name.lower()
+            group_l = c.get("_group_lower") or group.lower()
+            if q_lower not in name_l and q_lower not in group_l:
+                continue
             
         results.append({
             "id": str(c.get("categoryId")),
@@ -1013,7 +1102,7 @@ async def search_categories(q: str = "", sort: str = "asc", letter: str = None, 
     return results
 
 @router.get("/categories/{category_id}")
-async def get_category(category_id: str):
+def get_category(category_id: str):
     cat = get_category_by_id(category_id)
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -1025,7 +1114,7 @@ async def get_category(category_id: str):
     }
 
 @router.get("/categories/{category_id}/attributes")
-async def get_category_attributes(category_id: str, response: Response):
+def get_category_attributes(category_id: str, response: Response):
     response.headers["Cache-Control"] = "public, max-age=86400"
     cat = get_category_by_id(category_id)
     if not cat:
@@ -1043,7 +1132,16 @@ async def get_category_attributes(category_id: str, response: Response):
         attr_name = a.get("name")
         if is_forbidden_warranty_attribute(attr_name):
             continue
-        is_req = a.get("relevance") == "HIGH"
+        is_req = (
+            a.get("relevance") == "HIGH"
+            or (
+                "LEGAL" in (a.get("featureRelevance") or [])
+                and (
+                    attr_name in {"Benutzergewicht maximal", "Trainingsgewicht maximal"}
+                    or (attr_name == "Materialzusammensetzung" and group_id in {"2957", "2824", "2136", "2142"})
+                )
+            )
+        )
         # Force Brand to be required based on typical marketplace rules, or rely on 'HIGH'
         # Often 'Marke' is universally required
         if attr_name == "Marke":
@@ -1082,6 +1180,9 @@ async def get_category_attributes(category_id: str, response: Response):
 @router.get("/product/{product_ean}")
 async def get_product_mapping(product_ean: str, account: str = None, db: Session = Depends(get_db)):
     clean_ean = product_ean.strip()
+    if not account:
+        from services.factory_exclusions import require_factory_eans_allowed
+        require_factory_eans_allowed(db, None, None, [clean_ean])
     query = db.query(models.ProductMapping).filter(models.ProductMapping.product_ean == clean_ean)
     mapping = None
     if account:
@@ -1090,7 +1191,7 @@ async def get_product_mapping(product_ean: str, account: str = None, db: Session
         mapping = query.first()
 
     if not mapping:
-        return {"category_id": None, "category_name": None, "attributes": {}, "ai_attributes": [], "status": "Unmapped", "account": account or "JV"}
+        return {"category_id": None, "category_name": None, "attributes": {}, "ai_attributes": [], "status": "Unmapped", "account": account or "JV", "factory_id": None}
 
     actual_account = mapping.account_name.value if hasattr(mapping.account_name, "value") else str(mapping.account_name)
     attrs = db.query(models.ProductAttribute).filter(
@@ -1119,23 +1220,41 @@ async def get_product_mapping(product_ean: str, account: str = None, db: Session
         "product_name": clean_p_name,
         "price": str(clean_p) if clean_p is not None else str(clean_p_af) if clean_p_af is not None and not mapping.has_manual_price else None,
         "price_af": str(clean_p_af) if clean_p_af is not None else None,
-        "has_manual_price": bool(mapping.has_manual_price)
+        "has_manual_price": bool(mapping.has_manual_price),
+        "factory_id": mapping.factory_id,
     }
 
 @router.get("/factory/{factory_id}")
-async def get_factory_mappings(factory_id: str, account: str = None, db: Session = Depends(get_db)):
+def get_factory_mappings(factory_id: str, account: str = None, db: Session = Depends(get_db)):
     actual_account = account.upper() if account else None
-    query = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
+    from services.factory_exclusions import PROTECTED_FACTORY_PAIRS, excluded_eans
+    if actual_account is None and any(factory_id in (excluded, source) for _acc, excluded, source in PROTECTED_FACTORY_PAIRS):
+        raise HTTPException(status_code=400, detail={"code": "ACCOUNT_CONTEXT_REQUIRED", "message": "Укажите аккаунт для защищённой фабрики."})
+    query = db.query(
+        models.ProductMapping.product_ean,
+        models.ProductMapping.category_id,
+        models.ProductMapping.status,
+        models.ProductMapping.published_at,
+        models.ProductMapping.product_name,
+        models.ProductMapping.price,
+        models.ProductMapping.price_af,
+        models.ProductMapping.missing_attributes,
+        models.ProductMapping.last_error,
+        models.ProductMapping.has_ai_title,
+    ).filter(models.ProductMapping.factory_id == factory_id)
     if actual_account:
         query = query.filter(models.ProductMapping.account_name == actual_account)
     mappings = query.all()
+    excluded = excluded_eans(db, actual_account or "", factory_id)
+    if excluded:
+        mappings = [m for m in mappings if m.product_ean not in excluded]
     result = {}
 
     # Project a confirmed remote product record separately from the original
     # submission error. Check only the latest failed queue item per EAN for this
     # account and factory, and never make a live OTTO request from this endpoint.
     observations_by_ean = {}
-    mapping_eans = [m.product_ean for m in mappings if m.product_ean]
+    mapping_eans = {m.product_ean for m in mappings if m.product_ean}
     if actual_account and mapping_eans:
         latest_failed_ids = (
             db.query(func.max(models.PublishQueueItem.id).label("item_id"))
@@ -1144,23 +1263,27 @@ async def get_factory_mappings(factory_id: str, account: str = None, db: Session
                 models.PublishPlan.factory_id == factory_id,
                 models.PublishPlan.account_name == actual_account,
                 models.PublishQueueItem.account_name == actual_account,
-                models.PublishQueueItem.product_ean.in_(mapping_eans),
                 models.PublishQueueItem.status == models.QueueItemStatus.FAILED,
             )
             .group_by(models.PublishQueueItem.product_ean)
             .subquery()
         )
-        latest_failed_items = (
-            db.query(models.PublishQueueItem)
-            .join(latest_failed_ids, models.PublishQueueItem.id == latest_failed_ids.c.item_id)
-            .all()
-        )
-        observations = load_observations(actual_account, latest_failed_items)
-        observations_by_ean = {
-            item.product_ean: observations[item.id]
-            for item in latest_failed_items
-            if item.id in observations
-        }
+        latest_failed_items = [
+            item
+            for item in (
+                db.query(models.PublishQueueItem)
+                .join(latest_failed_ids, models.PublishQueueItem.id == latest_failed_ids.c.item_id)
+                .all()
+            )
+            if item.product_ean in mapping_eans
+        ]
+        if latest_failed_items:
+            observations = load_observations(actual_account, latest_failed_items)
+            observations_by_ean = {
+                item.product_ean: observations[item.id]
+                for item in latest_failed_items
+                if item.id in observations
+            }
     
     def _clean_price_val(v):
         if not v:
@@ -1203,6 +1326,32 @@ async def get_factory_mappings(factory_id: str, account: str = None, db: Session
         }
     return result
 
+
+@router.get("/factory-exclusions")
+def get_factory_exclusions(
+    account: str,
+    factory_id: str,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the durable exclusion policy for one authenticated factory scope."""
+    account = str(account or "").upper().strip()
+    factory_id = str(factory_id or "").strip()
+    rows = db.query(models.FactoryProductExclusion).filter_by(
+        account_name=account, excluded_factory_id=factory_id, is_active=True,
+    ).order_by(models.FactoryProductExclusion.product_ean).all()
+    from services.factory_exclusions import manifest_hash
+    eans = [row.product_ean for row in rows]
+    sources = sorted({row.source_factory_id for row in rows})
+    return {
+        "account": account,
+        "factory_id": factory_id,
+        "source_factory_ids": sources,
+        "excluded_eans": eans,
+        "count": len(eans),
+        "version": manifest_hash(eans),
+    }
+
 @router.get("/factory/{factory_id}/processing-status")
 async def get_factory_processing_status(
     factory_id: str,
@@ -1215,6 +1364,10 @@ async def get_factory_processing_status(
     Returns only mappings modified since `since` (ISO datetime string).
     If `since` is omitted or invalid, returns all mappings for the factory with only status-relevant fields.
     """
+    from services.factory_exclusions import PROTECTED_FACTORY_PAIRS, excluded_eans
+    if not account and any(factory_id in (excluded, source) for _acc, excluded, source in PROTECTED_FACTORY_PAIRS):
+        raise HTTPException(status_code=400, detail={"code": "ACCOUNT_CONTEXT_REQUIRED", "message": "Укажите аккаунт для защищённой фабрики."})
+
     now_dt = datetime.datetime.now(datetime.timezone.utc)
     server_time = now_dt.isoformat()
 
@@ -1240,6 +1393,9 @@ async def get_factory_processing_status(
         models.ProductMapping.last_error,
         models.ProductMapping.missing_attributes
     ).all()
+    if account:
+        blocked = excluded_eans(db, account, factory_id)
+        mappings = [row for row in mappings if row[0] not in blocked]
 
     changed = []
     for row in mappings:
@@ -1264,7 +1420,7 @@ async def get_factory_processing_status(
 class ProductDetailsUpdate(BaseModel):
     product_ean: str
     factory_id: Optional[str] = None
-    account: Optional[str] = "JV"
+    account: Optional[str] = None
     product_name: Optional[str] = None
     price: Optional[str] = None
 
@@ -1273,12 +1429,16 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
     clean_ean = req.product_ean.strip()
     if not clean_ean:
         raise HTTPException(status_code=400, detail="product_ean is required")
-    acc = (req.account or "JV").upper()
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    acc = resolve_account_scope(db, req.account, req.factory_id, [clean_ean])
 
     db_mapping = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean == clean_ean,
         models.ProductMapping.account_name == acc
     ).first()
+
+    canonical_factory_id = db_mapping.factory_id if db_mapping else None
+    lock_and_require_factory_eans_allowed(db, acc, req.factory_id or canonical_factory_id, [clean_ean])
 
     if not db_mapping:
         # Strict protection: If creating mapping for XL, inherit category & status from JV if present
@@ -1336,7 +1496,7 @@ async def update_product_details(req: ProductDetailsUpdate, db: Session = Depend
 
 
 class ApplyPriceEndingRequest(BaseModel):
-    account: str = "JV"
+    account: Optional[str] = None
     ending: str = "99"
     product_eans: Optional[List[str]] = None
     items: Optional[List[Dict[str, Any]]] = None
@@ -1356,7 +1516,14 @@ async def apply_price_ending(
     Invalidates Redis products cache for the factory.
     """
     clean_fid = str(factory_id).strip()
-    acc = str(req.account or "JV").upper().strip()
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    clean_eans = [str(e).strip() for e in (req.product_eans or []) if str(e).strip()]
+    fallback_eans = [
+        str(item.get("ean") or item.get("product_ean") or "").strip()
+        for item in (req.items or [])
+        if isinstance(item, dict) and (item.get("ean") or item.get("product_ean"))
+    ]
+    acc = resolve_account_scope(db, req.account, clean_fid, [*clean_eans, *fallback_eans])
     raw_ending = str(req.ending or "99").replace(".", "").replace(",", "").strip()
     if not raw_ending:
         clean_ending = "99"
@@ -1365,10 +1532,13 @@ async def apply_price_ending(
     else:
         clean_ending = raw_ending[:2]
 
-    clean_eans = [str(e).strip() for e in (req.product_eans or []) if str(e).strip()]
+    requested_eans = set(clean_eans) | set(fallback_eans)
+    if requested_eans:
+        lock_and_require_factory_eans_allowed(db, acc, clean_fid, requested_eans)
 
     query = db.query(models.ProductMapping).filter(
-        models.ProductMapping.account_name == acc
+        models.ProductMapping.account_name == acc,
+        models.ProductMapping.factory_id == clean_fid,
     )
     if req.product_eans is not None:
         if not clean_eans:
@@ -1472,8 +1642,11 @@ async def apply_price_ending(
 
 @router.post("/attributes")
 async def save_attributes(mapping: AttributeMappingBase, db: Session = Depends(get_db)):
-    acc = mapping.account or "JV"
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    acc = resolve_account_scope(db, mapping.account, mapping.factory_id, [mapping.product_ean])
+    mapping.account = acc
     clean_ean = mapping.product_ean.strip()
+    lock_and_require_factory_eans_allowed(db, acc, mapping.factory_id, [clean_ean])
     
     # Ensure product mapping exists for the requested account
     db_mapping = db.query(models.ProductMapping).filter(
@@ -1563,8 +1736,11 @@ async def save_attributes(mapping: AttributeMappingBase, db: Session = Depends(g
 async def save_attributes_bulk(mapping: AttributeMappingBulk, db: Session = Depends(get_db)):
     from services.validator import validate_product
 
-    acc = mapping.account or "JV"
     clean_eans = [e.strip() for e in mapping.product_eans if e and e.strip()]
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    acc = resolve_account_scope(db, mapping.account, mapping.factory_id, clean_eans)
+    mapping.account = acc
+    lock_and_require_factory_eans_allowed(db, acc, mapping.factory_id, clean_eans)
 
     clean_attributes = {k: v for k, v in mapping.attributes.items() if not is_forbidden_warranty_attribute(k)}
 
@@ -1686,6 +1862,10 @@ async def apply_defaults_bulk(req: ApplyDefaultsRequest, db: Session = Depends(g
     if not req.product_eans:
         return {"status": "success", "total": 0, "updated": 0, "ready": 0, "errors": 0}
 
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed, resolve_account_scope
+    req.account = resolve_account_scope(db, req.account, req.factory_id, req.product_eans)
+    lock_and_require_factory_eans_allowed(db, req.account, req.factory_id, req.product_eans)
+
     defaults_to_apply = get_attributes_for_apply(
         account=req.account,
         target_group=req.target_group,
@@ -1806,6 +1986,16 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
     if src_acc_str == tgt_acc_str:
         raise HTTPException(status_code=400, detail="Source and target accounts must be different.")
 
+    if req.factory_id:
+        from services.factory_exclusions import require_factory_eans_allowed
+        source_eans = req.product_eans or db.query(models.ProductMapping.product_ean).filter(
+            models.ProductMapping.account_name == req.source_account,
+            models.ProductMapping.factory_id == req.factory_id,
+        ).all()
+        if not req.product_eans:
+            source_eans = [row[0] for row in source_eans]
+        require_factory_eans_allowed(db, src_acc_str, req.factory_id, source_eans)
+
     # 1. Query source mappings
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.account_name == req.source_account
@@ -1818,6 +2008,13 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
         query = query.filter(models.ProductMapping.status == "Ready")
 
     source_mappings = query.all()
+    from services.factory_exclusions import require_factory_eans_allowed
+    # An explicit cross-account selection without its source factory cannot be
+    # used to infer which protected factory the user selected.
+    require_factory_eans_allowed(
+        db, src_acc_str, req.factory_id,
+        [m.product_ean for m in source_mappings] if source_mappings else (req.product_eans or []),
+    )
     resolved_target_factory_id = req.target_factory_id
     source_fid = req.factory_id or (source_mappings[0].factory_id if source_mappings else None)
     if not resolved_target_factory_id and source_fid:
@@ -1839,6 +2036,11 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
             status_code=409,
             detail=f"Target factory could not be resolved in {tgt_acc_str} for source factory {source_fid}. Manual mapping required."
         )
+
+    from services.factory_exclusions import lock_and_require_factory_eans_allowed
+    lock_and_require_factory_eans_allowed(
+        db, tgt_acc_str, resolved_target_factory_id, [m.product_ean for m in source_mappings]
+    )
 
     src_eans = [m.product_ean for m in source_mappings]
 
@@ -2041,7 +2243,8 @@ async def transfer_to_account(req: TransferAccountRequest, db: Session = Depends
 
 class MassEditSchemaRequest(BaseModel):
     product_eans: List[str]
-    account: str = "JV"
+    account: Optional[str] = None
+    factory_id: Optional[str] = None
 
 @router.post("/mass-edit/schema")
 async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends(get_db)):
@@ -2052,6 +2255,10 @@ async def get_mass_edit_schema(req: MassEditSchemaRequest, db: Session = Depends
     """
     if not req.product_eans:
         return {"shared_attrs": [], "other_attrs": [], "current_values": {}, "categories": []}
+
+    from services.factory_exclusions import resolve_account_scope, require_factory_eans_allowed
+    req.account = resolve_account_scope(db, req.account, req.factory_id, req.product_eans)
+    require_factory_eans_allowed(db, req.account, req.factory_id, req.product_eans)
 
     mappings_list = db.query(models.ProductMapping).filter(
         models.ProductMapping.product_ean.in_(req.product_eans),
@@ -2242,6 +2449,11 @@ async def generate_ai_titles(
     if not factory_id_clean:
         raise HTTPException(status_code=400, detail="factory_id is required")
 
+    clean_eans = [e.strip() for e in (req.eans or []) if e and e.strip()]
+    from services.factory_exclusions import require_factory_eans_allowed, lock_and_require_factory_eans_allowed
+    if clean_eans:
+        require_factory_eans_allowed(db, target_account, factory_id_clean, clean_eans)
+
     # 1. Resolve OpenAI API key
     custom_api_key = resolve_openai_key(db=db, user=current_user)
     if not custom_api_key:
@@ -2259,7 +2471,6 @@ async def generate_ai_titles(
         models.ProductMapping.account_name == target_account
     )
 
-    clean_eans = [e.strip() for e in (req.eans or []) if e and e.strip()]
     if clean_eans:
         query = query.filter(models.ProductMapping.product_ean.in_(clean_eans))
 
@@ -2376,6 +2587,7 @@ async def generate_ai_titles(
 
     # 6. Persist updates to DB in a single commit with strict category & attribute protection
     if updated_map:
+        lock_and_require_factory_eans_allowed(db, target_account, factory_id_clean, [m.product_ean for m in mappings])
         now_utc = datetime.datetime.utcnow()
         for pm in mappings:
             if pm.product_ean in updated_map:

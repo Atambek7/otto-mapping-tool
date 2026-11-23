@@ -40,6 +40,7 @@ class ReconciliationTests(unittest.TestCase):
         models.ProductMapping.__table__.create(self.engine)
         models.PublishQueueItem.__table__.create(self.engine)
         models.CategoryCache.__table__.create(self.engine)
+        models.FactoryProductExclusion.__table__.create(self.engine)
         self.db = sessionmaker(bind=self.engine)()
         self.cache = Mock()
         self.cache.mget.return_value = [None]

@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Check, Edit2, Loader2, Search, Tag, X } from "lucide-react";
 import type { RestartAccount } from "@/features/api/types";
+import { MAX_PREPARED_TITLE_CODEPOINTS, titleCodePointLength } from "@/features/catalogs/title-policy";
 import {
   calculateRestartPriceCents,
   formatPriceEur,
@@ -15,6 +16,8 @@ interface InlineTitleCellProps {
   title: string;
   onSave: (newTitle: string) => void;
   onOpenDrawer?: () => void;
+  readOnly?: boolean;
+  titleOrigin?: "SOURCE" | "DRAFT" | "PREPARED";
   className?: string;
 }
 
@@ -22,6 +25,8 @@ export const InlineTitleCell = React.memo(function InlineTitleCell({
   title,
   onSave,
   onOpenDrawer,
+  readOnly = false,
+  titleOrigin = "PREPARED",
   className = "",
 }: InlineTitleCellProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -41,8 +46,8 @@ export const InlineTitleCell = React.memo(function InlineTitleCell({
     }
   }, [isEditing]);
 
-  const currentLen = value.trim().length;
-  const isExceeded = currentLen > 70;
+  const currentLen = titleCodePointLength(value.trim());
+  const isExceeded = currentLen > MAX_PREPARED_TITLE_CODEPOINTS;
 
   function handleSave() {
     const clean = value.trim();
@@ -89,8 +94,8 @@ export const InlineTitleCell = React.memo(function InlineTitleCell({
             className={`inline-char-badge ${isExceeded ? "badge-exceeded" : "badge-valid"}`}
             title={
               isExceeded
-                ? `Превышает лимит OTTO (70 симв.) на ${currentLen - 70} симв.`
-                : `В пределах лимита OTTO (70 симв.)`
+                ? `Подготовленное название OttoRestart длиннее внутреннего лимита 70 символов на ${currentLen - MAX_PREPARED_TITLE_CODEPOINTS}.`
+                : `Подготовленное название в пределах внутреннего лимита OttoRestart.`
             }
           >
             {currentLen}/70
@@ -139,17 +144,19 @@ export const InlineTitleCell = React.memo(function InlineTitleCell({
       </span>
 
       <span
-        className={`char-len-badge ${isExceeded ? "badge-exceeded" : "badge-valid"}`}
+        className={`char-len-badge ${titleOrigin === "SOURCE" ? "badge-source" : isExceeded ? "badge-exceeded" : "badge-valid"}`}
         title={
-          isExceeded
-            ? `Длина: ${title.length}/70 симв. Превышает лимит OTTO!`
-            : `Длина: ${title.length}/70 симв. Соответствует лимиту OTTO.`
+          titleOrigin === "SOURCE"
+            ? `Исходное название: ${currentLen} символов. Оно хранится отдельно; при подготовке будет создана отдельная проверенная версия до 70 символов.`
+            : isExceeded
+              ? `Подготовленное название OttoRestart: ${currentLen}/70 символов. Подготовка/QC блокируется до исправления.`
+              : `Подготовленное название OttoRestart: ${currentLen}/70 символов.`
         }
       >
-        ({title.length}/70)
+        {titleOrigin === "SOURCE" ? `${currentLen} исходное` : `(${currentLen}/70)`}
       </span>
 
-      <button
+      {!readOnly ? <button
         type="button"
         className="inline-pencil-btn"
         onClick={(e) => {
@@ -160,7 +167,7 @@ export const InlineTitleCell = React.memo(function InlineTitleCell({
         aria-label="Редактировать название"
       >
         <Edit2 size={12} />
-      </button>
+      </button> : null}
     </div>
   );
 });
@@ -172,6 +179,8 @@ interface InlinePriceCellProps {
   oldStandardPriceCents: number;
   account: RestartAccount;
   onSavePriceCents: (newCents: number) => void;
+  readOnly?: boolean;
+  priceAvailable?: boolean;
   className?: string;
 }
 
@@ -179,6 +188,8 @@ export const InlinePriceCell = React.memo(function InlinePriceCell({
   oldStandardPriceCents,
   account,
   onSavePriceCents,
+  readOnly = false,
+  priceAvailable = true,
   className = "",
 }: InlinePriceCellProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -260,6 +271,8 @@ export const InlinePriceCell = React.memo(function InlinePriceCell({
     );
   }
 
+  if (readOnly) return <div className={`prod-price-cell ${className}`}><span className="prod-price-main">{priceAvailable ? formatPriceEur(oldStandardPriceCents) : "Цена не подтверждена"}</span></div>;
+
   return (
     <div
       className={`prod-price-cell ${className}`}
@@ -286,6 +299,7 @@ interface InlineCategoryCellProps {
   hasAiCategory?: boolean;
   categoriesList?: string[];
   onSaveCategory: (newCategory: string) => void;
+  readOnly?: boolean;
   className?: string;
 }
 
@@ -309,6 +323,7 @@ export const InlineCategoryCell = React.memo(function InlineCategoryCell({
   hasAiCategory = false,
   categoriesList = DEFAULT_CATEGORIES,
   onSaveCategory,
+  readOnly = false,
   className = "",
 }: InlineCategoryCellProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -340,6 +355,8 @@ export const InlineCategoryCell = React.memo(function InlineCategoryCell({
   const filtered = categoriesList.filter((cat) =>
     cat.toLowerCase().includes(search.toLowerCase())
   );
+
+  if (readOnly) return <div className={`category-cell-stack ${className}`}><span className="category-badge">{category || "Без категории"}</span>{isSyncedWithOtto ? <span className="badge-otto-synced">Синхр. с ОТТО</span> : null}</div>;
 
   function handleSelect(cat: string) {
     onSaveCategory(cat);

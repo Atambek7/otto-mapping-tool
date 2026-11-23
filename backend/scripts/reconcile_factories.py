@@ -15,7 +15,7 @@ from services.factory_scope import get_authoritative_factory_eans
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("reconcile_factories")
 
-async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool = False):
+async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool = False, account: str = "JV"):
     """
     Reconciles PostgreSQL ProductMapping.factory_id against Aftercool's authoritative product inventory.
     Guarantees that every product in ProductMapping has the correct factory_id,
@@ -23,6 +23,9 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
     """
     db = SessionLocal()
     try:
+        account = str(account or "JV").upper().strip()
+        if account not in {"JV", "XL"}:
+            raise ValueError("account must be JV or XL")
         session = await get_aftercool_session()
         
         # 1. Fetch all active factories from Aftercool
@@ -47,8 +50,13 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
             factories = [f for f in factories if str(f.get("id") or f.get("factory_id")).strip() == str(target_factory_id).strip()]
             logger.info(f"Filtered to target factory: {target_factory_id}")
 
-        # Map each EAN -> authoritative factory_id
-        ean_to_factory: Dict[str, str] = {}
+        # Keep this run strictly account-scoped. Some Aftercool responses omit
+        # account, in which case the authenticated session supplies the scope.
+        factories = [f for f in factories if str(f.get("account") or f.get("account_name") or account).upper() == account]
+
+        # Collect candidates first. Conflicting factory memberships are not
+        # resolved by response order.
+        ean_factories: Dict[str, Set[str]] = {}
         factory_eans_map: Dict[str, Set[str]] = {}
 
         for f in factories:
@@ -56,26 +64,45 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
             if not fid:
                 continue
             
-            eans = await get_authoritative_factory_eans(fid, account="JV", force_refresh=True)
+            eans = await get_authoritative_factory_eans(fid, account=account, force_refresh=True)
             factory_eans_map[fid] = eans
             for ean in eans:
-                ean_to_factory[ean] = fid
+                ean_factories.setdefault(ean, set()).add(fid)
             logger.info(f"Factory {fid} ({f.get('name', 'Unknown')}): {len(eans)} authoritative products.")
+
+        ean_to_factory = {ean: next(iter(fids)) for ean, fids in ean_factories.items() if len(fids) == 1}
+        identity_conflicts = {ean for ean, fids in ean_factories.items() if len(fids) > 1}
+
+        protected_factory_by_ean = {}
+        for row in db.query(models.FactoryProductExclusion).filter_by(account_name=account, is_active=True).all():
+            protected_factory_by_ean[row.product_ean] = row.source_factory_id
 
         # 2. Update DB mappings
         total_reassigned = 0
         total_cleared = 0
         total_confirmed = 0
+        policy_conflicts = set(identity_conflicts)
 
         # Process each factory in DB
         for fid, auth_eans in factory_eans_map.items():
             # A) Set factory_id for authoritative products
-            if auth_eans:
+            protected_seen = auth_eans.intersection(protected_factory_by_ean)
+            for ean in protected_seen:
+                current_mapping = db.query(models.ProductMapping).filter_by(
+                    account_name=account, product_ean=ean
+                ).first()
+                if fid != protected_factory_by_ean[ean] or not current_mapping or current_mapping.factory_id != protected_factory_by_ean[ean]:
+                    policy_conflicts.add(ean)
+            # Ownership changes for manifest EANs are made only by the audited
+            # apply command, never by a generic reconciliation run.
+            allowed_eans = set(auth_eans) - protected_seen
+            if allowed_eans:
                 updated = (
                     db.query(models.ProductMapping)
                     .filter(
-                        models.ProductMapping.product_ean.in_(auth_eans),
-                        models.ProductMapping.factory_id != fid
+                        models.ProductMapping.product_ean.in_(allowed_eans),
+                        models.ProductMapping.factory_id != fid,
+                        models.ProductMapping.account_name == account,
                     )
                     .update({"factory_id": fid}, synchronize_session=False)
                 )
@@ -88,7 +115,8 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
                 db.query(models.ProductMapping)
                 .filter(
                     models.ProductMapping.factory_id == fid,
-                    ~models.ProductMapping.product_ean.in_(auth_eans)
+                    ~models.ProductMapping.product_ean.in_(auth_eans),
+                    models.ProductMapping.account_name == account,
                 )
                 .all()
             )
@@ -96,6 +124,11 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
             if foreign_mappings:
                 logger.info(f"Found {len(foreign_mappings)} foreign/orphaned products marked as factory {fid}.")
                 for m in foreign_mappings:
+                    canonical_factory = protected_factory_by_ean.get(m.product_ean)
+                    if canonical_factory:
+                        if fid != canonical_factory or m.factory_id != canonical_factory:
+                            policy_conflicts.add(m.product_ean)
+                        continue
                     real_fid = ean_to_factory.get(m.product_ean)
                     if real_fid:
                         m.factory_id = real_fid
@@ -115,7 +148,10 @@ async def reconcile_all_factories(target_factory_id: str = None, dry_run: bool =
             "success": True,
             "reassigned": total_reassigned,
             "cleared": total_cleared,
-            "factories_processed": len(factory_eans_map)
+            "factories_processed": len(factory_eans_map),
+            "account": account,
+            "policy_conflicts": sorted(policy_conflicts),
+            "identity_conflict_count": len(identity_conflicts),
         }
     except Exception as e:
         logger.exception(f"Error during reconciliation: {e}")

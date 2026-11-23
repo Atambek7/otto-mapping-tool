@@ -16,13 +16,7 @@ load_dotenv()
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-CATEGORIES_PATH = os.path.join(DATA_DIR, "categories.json")
-GROUPS_PATH = os.path.join(DATA_DIR, "category_groups.json")
-
-# Load data into memory once
-CATEGORIES = []
-GROUPS = {}
+from services.categories_repo import CATEGORIES, GROUPS
 
 _client_cache = {}
 
@@ -37,16 +31,6 @@ def get_openai_client(api_key: str = None) -> AsyncOpenAI:
 # Inverted index: word -> [(category_dict, score_weight)]
 # score_weight: 3 for name, 1 for path
 WORD_TO_CAT = defaultdict(list)
-
-try:
-    if os.path.exists(CATEGORIES_PATH):
-        with open(CATEGORIES_PATH, "r", encoding="utf-8") as f:
-            CATEGORIES = json.load(f)
-    if os.path.exists(GROUPS_PATH):
-        with open(GROUPS_PATH, "r", encoding="utf-8") as f:
-            GROUPS = json.load(f)
-except Exception as e:
-    print("Warning: Could not load category data:", e)
 
 def get_category_schema(category_id: str):
     cat = get_category_by_id(category_id)
@@ -81,7 +65,8 @@ def get_category_schema(category_id: str):
             "Material Gestell", "Material Füße", "Material Griffe",
             "Art Füße", "Art Gestell", "Art Griffe", "Art Bett", "Art Sofa", "Art Tisch", "Art Stuhl",
             "Pflegehinweise", "Pflegehinweise Bezug", "Hinweis Maßangaben", "Montagehinweis", "Montagehinweise",
-            "Geräteart laut ElektroG"
+            "Geräteart laut ElektroG",
+            "Materialzusammensetzung", "Benutzergewicht maximal", "Trainingsgewicht maximal"
         }:
             raw_rel = "HIGH"
             
@@ -151,6 +136,35 @@ CATEGORY_SYNONYMS = {
     25777: ["bargruppe", "bartischset", "barset"],
     20105: ["barset", "bartischset"],
 }
+
+_BEDDING_TEXTILE_GROUP_IDS = {"2142", "2136", "2824"}  # Bettwaren-Sets (incl. 15778 Bett-Set), Bettdecken, Kopfkissen
+_FURNITURE_BEDROOM_MARKERS = (
+    "nachttisch", "kleiderschrank", "schminktisch", "polsterbank",
+    "kommode", "polsterbett", "boxspring", "lattenrost",
+    "schlafzimmer", "liegefläche", "holz", "buche", "kiefer", "eiche",
+)
+_BEDDING_TEXTILE_MARKERS = (
+    "bettdecke", "kopfkissen", "bettwäsche", "bettwaesche", "daunen",
+    "microfaser", "mikrofaser", "steppbett", "kissenbezug", "bettbezug",
+    "wärmeklasse", "waermeklasse", "4-jahreszeiten",
+)
+
+
+def is_furniture_bedroom_context(text: str) -> bool:
+    """Return True when text describes bedroom furniture rather than textile bedding."""
+    lowered = str(text or "").lower()
+    if any(marker in lowered for marker in _BEDDING_TEXTILE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _FURNITURE_BEDROOM_MARKERS)
+
+
+def _is_bedding_textile_category(cat: dict | None) -> bool:
+    if not cat:
+        return False
+    return (
+        str(cat.get("categoryId") or "") == "15778"
+        or str(cat.get("category_group_id") or "") in _BEDDING_TEXTILE_GROUP_IDS
+    )
 
 # Build inverted index
 def build_category_index():
@@ -228,7 +242,13 @@ def heuristic_category_prediction(title: str, product_info: str = "") -> str | N
             return "20101" # Badmöbel-Set
         if any(w in text for w in ["garderobe", "garderoben", "diele", "flur"]):
             return "20112" # Garderoben-Set
-        if any(w in text for w in ["schlafzimmer"]):
+        if any(w in text for w in ["schlafzimmer"]) and not any(w in text for w in _BEDDING_TEXTILE_MARKERS):
+            return "24447" # Schlafzimmer-Set
+        if (
+            any(w in text for w in ["bett", "polsterbett", "boxspring"])
+            and any(w in text for w in ["nachttisch", "kleiderschrank", "schminktisch", "polsterbank", "kommode"])
+            and not any(w in text for w in _BEDDING_TEXTILE_MARKERS)
+        ):
             return "24447" # Schlafzimmer-Set
         if any(w in text for w in ["wohnzimmer", "wohnwand"]):
             return "20110" # Wohnzimmer-Set
@@ -297,10 +317,13 @@ def get_top_categories(title: str, keywords: list = None, n=100):
     # Dictionary to keep track of scores: category_id -> (score, category_dict)
     # Using category_id as key because dictionaries are unhashable
     cat_scores = {}
-    
+    furniture_bedroom = is_furniture_bedroom_context(search_text)
+
     for token in title_tokens:
         if token in WORD_TO_CAT:
             for cat, weight in WORD_TO_CAT[token]:
+                if furniture_bedroom and _is_bedding_textile_category(cat):
+                    continue
                 cid = cat.get("categoryId")
                 if cid not in cat_scores:
                     cat_scores[cid] = [0, cat]
@@ -347,6 +370,12 @@ def get_top_categories(title: str, keywords: list = None, n=100):
                     if cid_int not in cat_scores:
                         cat_scores[cid_int] = [0, cat_obj]
                     cat_scores[cid_int][0] += 50
+        if furniture_bedroom and any(w in title_lower for w in ["bett", "polsterbett", "boxspring"]):
+            cat_obj = get_category_by_id("24447")
+            if cat_obj:
+                if 24447 not in cat_scores:
+                    cat_scores[24447] = [0, cat_obj]
+                cat_scores[24447][0] += 50
                 
     if not cat_scores:
         return CATEGORIES[:n]
@@ -396,6 +425,8 @@ CRITICAL CATEGORIZATION RULES FOR FURNITURE & SETS:
    - If the product consists of a dining table AND chairs (e.g., "Esstisch mit 4 Stühlen", "Essgruppe", "Esszimmergarnitur"), the category MUST be "Essgruppe" (ID: 25784). Do NOT classify as just a table ("Esstisch").
 3. SETS & BUNDLES (contains "Set", "Garnitur", "3-tlg.", "x-teilig", or multiple combined furniture items):
    - When a product is a multi-piece furniture set or bundle, you MUST choose the corresponding multi-piece SET or GARNITUR category (such as "Badmöbel-Set" [20101], "Schlafzimmer-Set" [24447], "Wohnzimmer-Set" [20110], "Garderoben-Set" [20112], "Polstergarnitur" [25785], "Essgruppe" [25784], "Sitzgruppe" [25778], "Bar-Set" [20105], "Balkonset" [25776], "Gartenlounge-Set" [25786], "Regal-Set" [20107], "Schrank-Set" [20103]) rather than classifying it as an individual item (e.g. do NOT pick just 'Schrank', 'Spiegel', 'Bett', or 'Sofa').
+4. BEDDING SETS vs. BEDROOM FURNITURE:
+   - "Bett-Set" (15778, Bettwaren-Sets) is ONLY for textile bedding (duvets + pillows / Bettdecke + Kopfkissen). NEVER assign "Bett-Set" (15778) to beds, upholstered beds, or bedroom sets with nightstands/wardrobes/vanities — use "Schlafzimmer-Set" (24447) or "Polsterbett" (15720) / "Bett" (15733).
 
 Based on the product information and rules above, choose the single most appropriate category ID for this product from the list above.
 """
@@ -437,8 +468,15 @@ Based on the product information and rules above, choose the single most appropr
         from services.categories_repo import get_category_by_id
         cat = get_category_by_id(predicted_id)
         if cat:
+            if _is_bedding_textile_category(cat) and is_furniture_bedroom_context(f"{title} {product_info}"):
+                for cand in top_categories:
+                    if not _is_bedding_textile_category(cand):
+                        return str(cand.get("categoryId"))
+                fallback = get_category_by_id("24447")
+                if fallback:
+                    return str(fallback.get("categoryId"))
             return str(cat.get("categoryId", predicted_id))
-        return predicted_id
+        return None
     except openai.OpenAIError as e:
         print(f"OpenAI API Error in category: {e}")
         raise e

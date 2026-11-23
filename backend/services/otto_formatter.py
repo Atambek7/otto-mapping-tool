@@ -82,6 +82,18 @@ def _resolve_brand(mapping: dict[str, Any], ean: str) -> str:
     raise ValueError(f"Brand is missing for EAN {ean}")
 
 
+_EMPTY_ATTRIBUTE_TOKENS = {
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "-",
+    "—",
+    "keine",
+    "nicht zutreffend",
+}
+
+
 def _normalize_attribute_values(value: Any) -> list[str]:
     """
     Convert supported attribute input formats into Otto's
@@ -116,7 +128,7 @@ def _normalize_attribute_values(value: Any) -> list[str]:
 
         normalized = str(item).strip()
 
-        if normalized:
+        if normalized and normalized.lower() not in _EMPTY_ATTRIBUTE_TOKENS:
             result.append(normalized)
 
     return result
@@ -577,11 +589,15 @@ def _build_attributes_and_bullets(
                 c = clean_dimension_value(v)
                 if not c:
                     continue
+                try:
+                    num_f = float(str(c).replace(",", "."))
+                except (ValueError, TypeError):
+                    # Reject non-numeric garbage (e.g. 'none') from FLOAT/INTEGER attributes
+                    continue
                 if spec and spec.get("type") == "INTEGER":
-                    try:
-                        c = str(int(float(c)))
-                    except Exception:
-                        pass
+                    c = str(int(round(num_f)))
+                else:
+                    c = str(int(num_f)) if num_f.is_integer() else str(num_f)
                 cleaned_vals.append(c)
             values = cleaned_vals
         else:
@@ -608,20 +624,61 @@ def _build_attributes_and_bullets(
             "additional": False,
         })
 
-    # Ensure textile composition if category is textile/bedding and allowed by schema
-    target_cat_lower = str(target_cat or "").lower()
-    is_textile_cat = any(t in target_cat_lower for t in ["bett", "kissen", "textil", "wäsche", "waesche", "decke"])
+    # Ensure legal fitness weight attributes from Belastbarkeit maximal ('140') when required by category schema
+    if allowed_map:
+        raw_load = raw_attrs.get("Belastbarkeit maximal") or "140"
+        clean_load = clean_dimension_value(str(raw_load)) or "140"
+        try:
+            load_num = str(int(round(float(str(clean_load).replace(",", ".")))))
+        except Exception:
+            load_num = "140"
+        for fit_key_lower in ("benutzergewicht maximal", "trainingsgewicht maximal"):
+            if fit_key_lower in allowed_map:
+                canon_fit_name = allowed_map[fit_key_lower]
+                if not any(a.get("name") == canon_fit_name for a in attributes):
+                    attributes.append({
+                        "name": canon_fit_name,
+                        "values": [load_num],
+                        "additional": False,
+                    })
+
+    # Ensure textile composition only for genuine textile/bedding/mattress categories
+    # (never trigger on furniture like Polsterbett just because it contains "bett",
+    # and never copy rigid furniture materials like Holz/Metall into Materialzusammensetzung).
+    from services.categories_repo import get_category_by_id
+    from services.validator import TEXTILE_MATERIAL_COMPOSITION_GROUP_IDS
+
+    resolved_cat = get_category_by_id(target_cat) or get_category_by_id(mapping.get("category"))
+    if resolved_cat:
+        is_textile_cat = str(resolved_cat.get("category_group_id") or "") in TEXTILE_MATERIAL_COMPOSITION_GROUP_IDS
+    else:
+        target_cat_lower = f"{target_cat or ''} {mapping.get('category') or ''}".lower()
+        is_textile_cat = any(
+            t in target_cat_lower
+            for t in ["bett-set", "bettwäsche", "bettwaesche", "kissen", "textil", "wäsche", "waesche", "decke", "matratze"]
+        )
     if is_textile_cat and allowed_map and "materialzusammensetzung" in allowed_map:
         has_mat = any(a.get("name") == allowed_map["materialzusammensetzung"] for a in attributes)
         if not has_mat:
-            comp_val = raw_attrs.get("Bezug") or raw_attrs.get("Material") or raw_attrs.get("material") or "100% Polyester"
-            comp_val_str = _truncate_text_safely(str(comp_val), 70)
-            if comp_val_str:
-                attributes.append({
-                    "name": allowed_map["materialzusammensetzung"],
-                    "values": [comp_val_str],
-                    "additional": False,
-                })
+            explicit_comp = raw_attrs.get("Materialzusammensetzung")
+            fallback_comp = raw_attrs.get("Bezug") or raw_attrs.get("Material") or raw_attrs.get("material")
+            if explicit_comp:
+                comp_val = explicit_comp
+            elif fallback_comp and not any(
+                kw in str(fallback_comp).lower()
+                for kw in ("holz", "metall", "stahl", "eisen", "glas", "marmor", "stein", "buche", "kiefer", "eiche", "mdf", "spanplatte")
+            ):
+                comp_val = fallback_comp
+            else:
+                comp_val = None
+            if comp_val:
+                comp_val_str = _truncate_text_safely(str(comp_val), 70)
+                if comp_val_str:
+                    attributes.append({
+                        "name": allowed_map["materialzusammensetzung"],
+                        "values": [comp_val_str],
+                        "additional": False,
+                    })
 
     # Sort bullet points by their index to ensure correct ordering 1 to 5.
     bullet_points = [bullet_dict[i] for i in sorted(bullet_dict.keys())]

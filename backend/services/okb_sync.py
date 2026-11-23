@@ -1028,7 +1028,7 @@ async def sync_product_data(
 
     return {
         "ean": ean,
-        "status": "success",
+        "status": "success" if final_category_id else "partial",
         "category": final_category_name,
         "category_id": final_category_id,
         "category_source": "aftercool" if ac_category_id else "okb" if okb_category_id else None,

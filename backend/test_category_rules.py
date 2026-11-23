@@ -35,6 +35,8 @@ def test_heuristic_category_prediction():
         ("Badmöbel-Set 3-tlg. Hochschrank Waschbeckenunterschrank Spiegel", "20101", "Badmöbel-Set"),
         ("Garderoben-Set 4-tlg. Schuhschrank Spiegel Wandpaneel", "20112", "Garderoben-Set"),
         ("Schlafzimmer-Set 3-teilig Bett Nachtkommoden", "24447", "Schlafzimmer-Set"),
+        ("Schlafzimmer Set Rosa Bett Nachttische Kleiderschrank Schminktisch", "24447", "Schlafzimmer-Set"),
+        ("Modernes Polsterbett Set mit 2 Nachttische Beige Doppelbett 180x200", "24447", "Schlafzimmer-Set"),
         ("Wohnzimmer-Set 4-tlg. Wohnwand Vitrine TV-Lowboard", "20110", "Wohnzimmer-Set"),
         ("Polstergarnitur 3-teilig Sofa 3-Sitzer 2-Sitzer Sessel", "25785", "Polstergarnitur"),
         ("Bartisch mit 2 Barhockern Bar-Set", "20105", "Bar-Set"),
@@ -81,6 +83,12 @@ def test_top_categories_ranking():
     top_ids_sofa = [str(c.get("categoryId")) for c in sofa_top]
     assert "25785" in top_ids_sofa[:5], f"25785 (Polstergarnitur) not in top 5 for sofa set! Top 5: {top_ids_sofa[:5]}"
     print(f"  [OK] 'Polstergarnitur Sofa Couch Set' includes 25785 (Polstergarnitur) at rank #{top_ids_sofa.index('25785')+1}")
+
+    # 6. Bedroom furniture sets must NOT pull bedding 15778 (Bett-Set) into candidates
+    bed_furniture_top = get_top_categories("Polsterbett Holz 180x200 Set Kopfteil", n=25)
+    bed_furniture_ids = [str(c.get("categoryId")) for c in bed_furniture_top]
+    assert "15778" not in bed_furniture_ids, f"15778 (Bett-Set) leaked into furniture candidates: {bed_furniture_ids}"
+    print("  [OK] Bedroom furniture excludes 15778 (Bett-Set) from candidates")
 
     print("All candidate ranking tests passed successfully!\n")
 

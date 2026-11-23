@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchWithAuth } from "@/lib/api";
 import { ProductDrawer } from "@/components/ProductDrawer";
 import { ShieldCheck, AlertCircle, RefreshCw, CheckCircle2, Trash2, Search, X, AlertTriangle, PackageOpen } from "lucide-react";
@@ -15,6 +16,31 @@ import { useAccount } from "@/lib/useAccount";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { ImageHoverPreview, HoverImagePreviewState } from "@/components/ImageHoverPreview";
+
+let cachedOttoCategoryNames: Record<string, string> | null = null;
+let cachedOttoCategoryNamesPromise: Promise<Record<string, string>> | null = null;
+
+function loadOttoCategoryNames(): Promise<Record<string, string>> {
+  if (cachedOttoCategoryNames) return Promise.resolve(cachedOttoCategoryNames);
+  if (!cachedOttoCategoryNamesPromise) {
+    cachedOttoCategoryNamesPromise = fetch("/otto_categories.json")
+      .then(res => res.json())
+      .then(data => {
+        const map: Record<string, string> = {};
+        if (Array.isArray(data)) {
+          data.forEach((c: any) => { map[String(c.categoryGroupId)] = c.categoryGroupPath; });
+        }
+        cachedOttoCategoryNames = map;
+        return map;
+      })
+      .catch(e => {
+        cachedOttoCategoryNamesPromise = null;
+        console.error("Failed to load categories", e);
+        return {};
+      });
+  }
+  return cachedOttoCategoryNamesPromise;
+}
 
 export default function FactoryValidationPage() {
   const params = useParams();
@@ -101,15 +127,10 @@ export default function FactoryValidationPage() {
       };
       loadFactories();
 
-    // Load category names from static file
-    fetch('/otto_categories.json')
-      .then(res => res.json())
-      .then(data => {
-        const map: Record<string, string> = {};
-        data.forEach((c: any) => { map[String(c.categoryGroupId)] = c.categoryGroupPath; });
-        setCategoryNames(map);
-      })
-      .catch(e => console.error("Failed to load categories", e));
+    // Load category names from static file (cached once per session)
+    loadOttoCategoryNames().then(map => {
+      if (Object.keys(map).length > 0) setCategoryNames(map);
+    });
   }, []);
 
   const handleForceApprove = async () => {
@@ -118,7 +139,7 @@ export default function FactoryValidationPage() {
     try {
       const res = await fetchWithAuth("/validation/approve", {
         method: "POST",
-        body: JSON.stringify({ product_eans: Array.from(selectedIds) })
+        body: JSON.stringify({ product_eans: Array.from(selectedIds), account: account || "JV", factory_id: factoryId })
       });
       if (res.ok) {
         setInvalidProducts(prev => prev.filter(p => !selectedIds.has(p.product_ean)));
@@ -140,7 +161,8 @@ export default function FactoryValidationPage() {
         method: "POST",
         body: JSON.stringify({ 
           product_eans: Array.from(selectedIds),
-          account: account || "JV"
+          account: account || "JV",
+          factory_id: factoryId
         })
       });
       if (res.ok) {
@@ -219,6 +241,19 @@ export default function FactoryValidationPage() {
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [invalidProducts]);
+
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 68,
+    overscan: 12,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const paddingBottom = virtualRows.length > 0
+    ? Math.max(0, rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end)
+    : 0;
 
   return (
     <div className="flex flex-col h-full space-y-5 pb-20">
@@ -314,7 +349,7 @@ export default function FactoryValidationPage() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto bg-white dark:bg-card border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs">
+      <div ref={tableContainerRef} className="flex-1 overflow-auto bg-white dark:bg-card border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs">
         {loading ? (
           <div className="p-16 text-center text-xs text-slate-400">{t("validation.loading_errors")}</div>
         ) : invalidProducts.length === 0 ? (
@@ -346,11 +381,20 @@ export default function FactoryValidationPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-              {filtered.map((p, i) => {
+              {paddingTop > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={5} style={{ height: `${paddingTop}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {virtualRows.map((virtualRow) => {
+                const i = virtualRow.index;
+                const p = filtered[i];
                 const isSelected = selectedIds.has(p.product_ean);
                 return (
                   <tr
                     key={p.product_ean + i}
+                    data-index={i}
+                    ref={rowVirtualizer.measureElement}
                     onClick={() => openProduct(p)}
                     className={cn(
                       "hover:bg-slate-50/70 dark:hover:bg-slate-800/30 cursor-pointer transition-colors group",
@@ -437,6 +481,11 @@ export default function FactoryValidationPage() {
                   </tr>
                 );
               })}
+              {paddingBottom > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={5} style={{ height: `${paddingBottom}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
             </tbody>
           </table>
         )}

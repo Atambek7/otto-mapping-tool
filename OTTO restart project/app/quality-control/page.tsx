@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import { QualityControlWorkspace } from "@/components/quality-control-workspace";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Quality Control" };
-export default function QualityControlPage() { return <QualityControlWorkspace />; }
+export default function QualityControlPage() {
+  redirect("/queue");
+}

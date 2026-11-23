@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>OttoRestart Media Sync</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup-root">
+      <header class="popup-header">
+        <div>
+          <h1>OttoRestart Media Bridge</h1>
+          <p class="subtitle">Подтягивание фото из OTTO Partner Connect</p>
+        </div>
+        <span class="badge">MV3</span>
+      </header>
+
+      <section class="status-card" id="tabs-status">
+        <div class="status-row">
+          <span>Вкладка OttoRestart:</span>
+          <strong id="status-restart">Проверка...</strong>
+        </div>
+        <div class="status-row">
+          <span>Вкладка OTTO Portal:</span>
+          <strong id="status-portal">Проверка...</strong>
+        </div>
+      </section>
+
+      <section class="controls">
+        <label class="field-label" for="account-select">Аккаунт OTTO</label>
+        <select id="account-select">
+          <option value="JV">JV (Brand UO4EGHSX)</option>
+          <option value="XL">XL (Brand 6HMOZBOU)</option>
+        </select>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="include-resolved" />
+          <span>Обновить даже товары с уже сохранённым фото</span>
+        </label>
+
+        <button id="sync-btn" type="button">Забрать фото сейчас</button>
+      </section>
+
+      <section class="result-box" id="result-box" hidden></section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

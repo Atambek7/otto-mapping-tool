@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "OttoRestart Portal Media Bridge",
+  "version": "1.0.0",
+  "description": "Автоматическая синхронизация URL изображений (i.otto.de) из активной сессии OTTO Partner Connect в OttoRestart.",
+  "permissions": [
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://omt.automatonsoft.de/*",
+    "http://localhost:3002/*",
+    "https://*.otto.market/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OttoRestart Media Sync"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://omt.automatonsoft.de/restart*",
+        "http://localhost:3002/restart*"
+      ],
+      "js": [
+        "ottorestart-bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

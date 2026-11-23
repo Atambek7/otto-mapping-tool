@@ -199,6 +199,29 @@ class OttoApiExecutor(BasePublishExecutor):
         db: Session
     ) -> Dict[str, Any]:
         account_name_str = plan.account_name.value if hasattr(plan.account_name, "value") else str(plan.account_name)
+        # A plan can outlive a mapping correction. Re-check its stored factory
+        # context before credentials, Aftercool reads, mapping changes, or OTTO writes.
+        eans = [it.product_ean for it in items]
+        try:
+            from fastapi import HTTPException
+            from services.factory_exclusions import require_factory_eans_allowed
+            require_factory_eans_allowed(db, account_name_str, str(plan.factory_id), eans)
+        except HTTPException as exc:
+            error_msg = f"Factory exclusion policy rejected this Drip Feed batch: {getattr(exc, 'detail', str(exc))}"
+            for item in items:
+                item.attempts += 1
+                item.error_message = error_msg[:2000]
+                item.status = models.QueueItemStatus.FAILED
+            db.commit()
+            return {
+                "success": False,
+                "error": error_msg,
+                "total": len(items),
+                "published": 0,
+                "processing": 0,
+                "failed": len(items),
+                "skipped": 0,
+            }
         
         # 1. Fetch account credentials
         settings = (
@@ -235,7 +258,6 @@ class OttoApiExecutor(BasePublishExecutor):
         )
 
         # 2. Collect product mappings and attributes
-        eans = [it.product_ean for it in items]
         mappings = (
             db.query(models.ProductMapping)
             .filter(
@@ -270,11 +292,11 @@ class OttoApiExecutor(BasePublishExecutor):
         price_conflicts = set()
         try:
             from routers.aftercool import get_aftercool_session, AFTERCOOL_BASE_URL
-            from ..aftercool_service import resolve_aftercool_account
+            from ..aftercool_service import resolve_aftercool_account, get_aftercool_candidate_factory_ids
             import httpx
             import asyncio
 
-            aftercool_acc = resolve_aftercool_account(str(plan.factory_id).strip(), account_name_str, db=db)
+            candidate_fids = get_aftercool_candidate_factory_ids(str(plan.factory_id).strip(), account_name_str)
 
             async def fetch_af_data():
                 session_cookie = await get_aftercool_session()
@@ -293,87 +315,96 @@ class OttoApiExecutor(BasePublishExecutor):
                             logging.warning(f"Error fetching from Aftercool URL {url}: {ex}")
                             return None
 
-                    offset = 0
-                    limit = 500
-                    catalog_complete = False
-                    while offset < 50000:
-                        params = {
-                            "factory_id": str(plan.factory_id).strip(),
-                            "account": aftercool_acc,
-                            "dataset": "lister",
-                            "include_row": 1,
-                            "limit": limit,
-                            "offset": offset,
-                        }
-                        res = await safe_get(f"{AFTERCOOL_BASE_URL}/api/products", params=params)
-                        if not res or res.status_code != 200:
-                            break
-                        data = res.json()
-                        items_list = data.get("items", data) if isinstance(data, dict) else data
-                        if not isinstance(items_list, list):
-                            break
-                        if not items_list:
-                            total = data.get("total") if isinstance(data, dict) else None
-                            catalog_complete = total is None or offset >= int(total)
-                            break
-                        for p in items_list:
-                            row = p.get("row", {})
-                            ean = str(p.get("ean") or row.get("EAN") or "").strip()
-                            if ean not in mapping_by_ean:
-                                continue
-
-                            pic_urls = extract_images_from_aftercool_row(row, p, account=account_name_str)
-                            desc = (
-                                row.get("Artikelbeschreibung")
-                                or row.get("Beschreibung")
-                                or row.get("Description")
-                                or p.get("description")
-                                or ""
-                            )
-                            cis = (
-                                row.get("CustomItemSpecifics")
-                                or p.get("CustomItemSpecifics")
-                                or row.get("custom_item_specifics")
-                                or ""
-                            )
-                            kurz = (
-                                row.get("Kurzbeschreibung")
-                                or row.get("kurzbeschreibung")
-                                or row.get("ShortDescription")
-                                or row.get("short_description")
-                                or p.get("kurzbeschreibung")
-                                or ""
-                            )
-                            parsed = parse_aftercool_product(p, default_factory_id=str(plan.factory_id))
-                            previous = aftercool_product_map.get(ean)
-                            if previous and parsed and (
-                                parse_price(previous.get("price")), parse_price(previous.get("price_af"))
-                            ) != (parsed.price, parsed.price_af):
-                                price_conflicts.add(ean)
-                            aftercool_product_map[ean] = {
-                                "price": str(parsed.price) if parsed and parsed.price is not None else None,
-                                "price_af": str(parsed.price_af) if parsed and parsed.price_af is not None else None,
-                                "images": pic_urls,
-                                "description": str(desc).strip(),
-                                "custom_item_specifics": str(cis).strip(),
-                                "factory_id": str(p.get("factory_id") or row.get("CatalogID") or "").strip(),
-                                "kurzbeschreibung": str(kurz).strip(),
+                    for candidate_fid in candidate_fids:
+                        aftercool_acc = resolve_aftercool_account(candidate_fid, account_name_str, db=db)
+                        offset = 0
+                        limit = 500
+                        catalog_complete = False
+                        candidate_map = {}
+                        candidate_conflicts = set()
+                        while offset < 50000:
+                            params = {
+                                "factory_id": candidate_fid,
+                                "account": aftercool_acc,
+                                "dataset": "lister",
+                                "include_row": 1,
+                                "limit": limit,
+                                "offset": offset,
                             }
+                            res = await safe_get(f"{AFTERCOOL_BASE_URL}/api/products", params=params)
+                            if not res or res.status_code != 200:
+                                break
+                            data = res.json()
+                            items_list = data.get("items", data) if isinstance(data, dict) else data
+                            if not isinstance(items_list, list):
+                                break
+                            if not items_list:
+                                total = data.get("total") if isinstance(data, dict) else None
+                                catalog_complete = total is None or offset >= int(total)
+                                break
+                            for p in items_list:
+                                row = p.get("row", {})
+                                ean = str(p.get("ean") or row.get("EAN") or "").strip()
+                                if ean not in mapping_by_ean:
+                                    continue
 
-                        offset += len(items_list)
-                        total = data.get("total") if isinstance(data, dict) else None
-                        if total is not None and offset >= int(total):
-                            catalog_complete = True
-                            break
-                        if total is None and len(items_list) < limit:
-                            catalog_complete = True
-                            break
+                                pic_urls = extract_images_from_aftercool_row(row, p, account=account_name_str)
+                                desc = (
+                                    row.get("Artikelbeschreibung")
+                                    or row.get("Beschreibung")
+                                    or row.get("Description")
+                                    or p.get("description")
+                                    or ""
+                                )
+                                cis = (
+                                    row.get("CustomItemSpecifics")
+                                    or p.get("CustomItemSpecifics")
+                                    or row.get("custom_item_specifics")
+                                    or ""
+                                )
+                                kurz = (
+                                    row.get("Kurzbeschreibung")
+                                    or row.get("kurzbeschreibung")
+                                    or row.get("ShortDescription")
+                                    or row.get("short_description")
+                                    or p.get("kurzbeschreibung")
+                                    or ""
+                                )
+                                parsed = parse_aftercool_product(p, default_factory_id=candidate_fid)
+                                previous = candidate_map.get(ean)
+                                if previous and parsed and (
+                                    parse_price(previous.get("price")), parse_price(previous.get("price_af"))
+                                ) != (parsed.price, parsed.price_af):
+                                    candidate_conflicts.add(ean)
+                                candidate_map[ean] = {
+                                    "price": str(parsed.price) if parsed and parsed.price is not None else None,
+                                    "price_af": str(parsed.price_af) if parsed and parsed.price_af is not None else None,
+                                    "images": pic_urls,
+                                    "description": str(desc).strip(),
+                                    "custom_item_specifics": str(cis).strip(),
+                                    "factory_id": str(p.get("factory_id") or row.get("CatalogID") or "").strip(),
+                                    "kurzbeschreibung": str(kurz).strip(),
+                                }
 
-                    if not catalog_complete:
-                        # A partial catalog cannot establish that duplicate prices
-                        # do not exist on unseen pages. Recheck each target exactly.
-                        aftercool_product_map.clear()
-                        price_conflicts.clear()
+                            offset += len(items_list)
+                            total = data.get("total") if isinstance(data, dict) else None
+                            if total is not None and offset >= int(total):
+                                catalog_complete = True
+                                break
+                            if total is None and len(items_list) < limit:
+                                catalog_complete = True
+                                break
+
+                        if catalog_complete and candidate_map:
+                            for ean_k, ean_v in candidate_map.items():
+                                if ean_k not in aftercool_product_map:
+                                    aftercool_product_map[ean_k] = ean_v
+                            price_conflicts.update(candidate_conflicts)
+                        elif not catalog_complete and candidate_fid == str(plan.factory_id).strip():
+                            aftercool_product_map.clear()
+                            price_conflicts.clear()
+                        if all(e in aftercool_product_map for e in eans):
+                            break
 
                     # Fallback for any EANs in batch not found in the factory batch
                     missing_eans = [e for e in eans if e not in aftercool_product_map]
@@ -567,6 +598,25 @@ class OttoApiExecutor(BasePublishExecutor):
                 failed_count += 1
                 continue
 
+            raw_attrs = attrs_by_ean.get(item.product_ean, {}).copy()
+            safe_attrs = sanitize_brand_attributes(account_name_str, raw_attrs)
+            from services.validator import get_legal_blocking_errors
+            legal_errors = get_legal_blocking_errors(
+                m.category_id,
+                safe_attrs,
+                product_name=m.product_name or "",
+                allow_formatter_defaults=True,
+            )
+            if legal_errors:
+                err_text = "; ".join(legal_errors)[:500]
+                item.attempts += 1
+                item.status = models.QueueItemStatus.FAILED
+                item.error_message = err_text
+                m.status = "Error"
+                m.last_error = err_text
+                failed_count += 1
+                continue
+
             # Refresh from the already fetched Aftercool row before checking local data.
             # A manually entered price always wins over automatic Aftercool values.
             af_data = aftercool_product_map.get(item.product_ean, {})
@@ -589,8 +639,6 @@ class OttoApiExecutor(BasePublishExecutor):
             if price is None and not getattr(m, "has_manual_price", False):
                 price = parse_price(m.price_af)
             prod_price = str(price) if price is not None else ""
-
-            raw_attrs = attrs_by_ean.get(item.product_ean, {}).copy()
 
             # 1. Product Description: resolve real description, not just product_name
             full_desc = (
@@ -658,7 +706,6 @@ class OttoApiExecutor(BasePublishExecutor):
             }
 
             # Strictly sanitize brand attributes before dispatch to Otto
-            safe_attrs = sanitize_brand_attributes(account_name_str, raw_attrs)
             cat_name = cat_name_by_id.get(m.category_id, m.category_id or "Standard")
             mapping_dict = {
                 "attributes": safe_attrs,
@@ -692,34 +739,43 @@ class OttoApiExecutor(BasePublishExecutor):
         # 4. Dispatch to Otto API
         try:
             res = client.publish_products(payloads)
+            if res.get("request_attempted"):
+                attempted_at = datetime.now(timezone.utc)
+                for item in item_lookup.values():
+                    if not item.otto_submission_attempted_at:
+                        item.otto_submission_attempted_at = attempted_at
             status_code = res.get("status_code", 500)
 
             if status_code in (200, 201, 204):
                 # Synchronous success (rare in v5, but supported)
                 now_utc = datetime.now(timezone.utc)
                 for item in item_lookup.values():
+                    mapping = mapping_by_ean.get(item.product_ean)
+                    previously_published = bool(
+                        item.published_at or (mapping and (mapping.published_at or mapping.status == "Published"))
+                    )
+                    try:
+                        from services.initial_availability import register_for_success
+                        register_for_success(
+                            db, account_name_str, item, plan, aftercool_product_map,
+                            previously_published=previously_published,
+                        )
+                    except Exception as availability_state_err:
+                        import logging
+                        logging.exception("Could not persist initial availability state for %s", item.product_ean)
+                        # Publication evidence remains authoritative. A state
+                        # registration error must not change its outcome.
+                        if mapping:
+                            mapping.last_error = (
+                                f"Initial availability registration requires review: {availability_state_err}"[:500]
+                            )
                     item.status = models.QueueItemStatus.PUBLISHED
                     item.published_at = now_utc
                     item.error_message = None
-                    if m := mapping_by_ean.get(item.product_ean):
-                        m.published_at = now_utc
-                        m.status = "Published"
+                    if mapping:
+                        mapping.published_at = now_utc
+                        mapping.status = "Published"
                     published_count += 1
-
-                # Dispatch Availability API (stock=20 and shipping profile) with delayed Celery task
-                try:
-                    from tasks import dispatch_otto_availability_batches
-                    dispatch_otto_availability_batches(
-                        item_ids=[item.id for item in item_lookup.values() if item.id],
-                        account_name=account_name_str,
-                        plan_id=plan.id if plan else None,
-                        base_countdown=60,
-                        jitter_step=5,
-                        aftercool_product_map=aftercool_product_map,
-                    )
-                except Exception as avail_err:
-                    import logging
-                    logging.warning(f"Failed to dispatch availability tasks after sync publish: {avail_err}")
             elif status_code == 202:
                 # Asynchronous task accepted by Otto:
                 # Save task references and set state to PROCESSING.

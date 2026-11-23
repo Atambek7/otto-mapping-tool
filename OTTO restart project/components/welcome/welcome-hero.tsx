@@ -79,7 +79,7 @@ export function WelcomeHero() {
               <span className="transform-node-badge accent">Restart</span>
             </div>
             <div className="transform-node-name">Оптимизация</div>
-            <p className="transform-node-meta">Скидка до -15€ · ИИ и QC</p>
+            <p className="transform-node-meta">ИИ-название (≤70) и Drip Feed</p>
           </div>
 
           {/* Connector 2 */}

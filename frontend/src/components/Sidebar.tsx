@@ -12,7 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Layers,
-  PackageSearch
+  PackageSearch,
+  ListChecks
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ import { useTranslation } from "react-i18next";
 const NAV_ITEMS = [
   { key: "dashboard", href: "/dashboard", icon: LayoutDashboard },
   { key: "factories", href: "/dashboard/factories", icon: FolderTree },
+  { key: "drip_factories", href: "/dashboard/drip-factories", icon: ListChecks },
   { key: "products", href: "/dashboard/products", icon: PackageSearch },
   { key: "validation", href: "/dashboard/validation", icon: ShieldCheck },
   { key: "export", href: "/dashboard/export", icon: DownloadCloud },

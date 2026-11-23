@@ -1,0 +1,96 @@
+[
+  {
+    "check": "JV: processing valid since",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "JV: processing invalid since handled",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'logger' is not defined"
+  },
+  {
+    "check": "JV: transfer source failure handled",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'logger' is not defined"
+  },
+  {
+    "check": "JV: fresh catalog sync exclusion",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "JV: cached catalog sync exclusion",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "JV: worker DB export",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "task_id": null,
+      "filename": "NEW_BATCH_JV_504487.db",
+      "total": 1
+    }
+  },
+  {
+    "check": "JV: worker ZIP export",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "task_id": null,
+      "filename": "Attributes_504487.zip",
+      "total": 1
+    }
+  },
+  {
+    "check": "XL: processing valid since",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "XL: processing invalid since handled",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'logger' is not defined"
+  },
+  {
+    "check": "XL: transfer source failure handled",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'logger' is not defined"
+  },
+  {
+    "check": "XL: fresh catalog sync exclusion",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "XL: cached catalog sync exclusion",
+    "pass": true,
+    "status": 200
+  },
+  {
+    "check": "XL: worker DB export",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "task_id": null,
+      "filename": "NEW_BATCH_XL_483563.db",
+      "total": 1
+    }
+  },
+  {
+    "check": "XL: worker ZIP export",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "task_id": null,
+      "filename": "Attributes_483563.zip",
+      "total": 1
+    }
+  }
+]

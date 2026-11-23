@@ -59,12 +59,13 @@ interface PresetsData {
 
 interface Props {
   selectedEans: string[];
+  factoryId?: string;
   account?: string;
   onClose: () => void;
   onSaved: (updatedEans: string[]) => void;
 }
 
-export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved }: Props) {
+export function MassEditDrawer({ selectedEans, factoryId, account = "JV", onClose, onSaved }: Props) {
   const [schema, setSchema] = useState<MassEditSchema | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -92,7 +93,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
 
     fetchWithAuth("/mapping/mass-edit/schema", {
       method: "POST",
-      body: JSON.stringify({ product_eans: selectedEans, account: account || "JV" }),
+      body: JSON.stringify({ product_eans: selectedEans, account: account || "JV", factory_id: factoryId }),
     })
       .then((r) => r.json())
       .then((data: MassEditSchema) => {
@@ -215,7 +216,7 @@ export function MassEditDrawer({ selectedEans, account = "JV", onClose, onSaved 
       const eansList = selectedEans.filter((e) => !schema.unmapped_eans.includes(e));
       const res = await fetchWithAuth("/mapping/attributes/bulk", {
         method: "POST",
-        body: JSON.stringify({ product_eans: eansList, attributes: toSave, account: account || "JV" }),
+        body: JSON.stringify({ product_eans: eansList, attributes: toSave, account: account || "JV", factory_id: factoryId }),
       });
       if (res.ok) {
         toast.success(`Saved ${Object.keys(toSave).length} attribute(s) for ${eansList.length} products`);

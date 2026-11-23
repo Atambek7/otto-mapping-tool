@@ -73,9 +73,9 @@ export class DemoReviewService {
     const source = this.prices.get(item.id)!;
     if (source.account !== item.account || source.sku !== item.old.sku) return { code: "PRICE_UNAVAILABLE", message: "Цена относится к другому аккаунту или SKU.", field: "price" };
     if (source.amount === null) return { code: "PRICE_UNAVAILABLE", message: "В демонстрационном ответе OTTO нет standardPrice.amount.", field: "price" };
-    const discountCents = item.account === "JV" ? 1000 : 1500;
+    const discountCents = item.account === "JV" ? 1000 : 2000;
     if (source.currency !== "EUR" || !Number.isSafeInteger(source.amount) || source.amount <= discountCents) return { code: "PRICE_REVIEW_REQUIRED", message: "Цена должна быть в EUR и больше суммы вычета.", field: "price" };
-    return { source: "DEMO_OTTO_STANDARD_PRICE", account: item.account, oldSku: item.old.sku, baseCents: source.amount, discountCents, newCents: source.amount - discountCents, currency: "EUR", fetchedAt: this.now(), snapshotVersion: source.revision };
+    return { source: "DEMO_OTTO_STANDARD_PRICE", account: item.account, oldSku: item.old.sku, baseCents: source.amount, discountCents, newCents: Math.floor((source.amount - discountCents) / 100) * 100 + 99, currency: "EUR", fetchedAt: this.now(), snapshotVersion: source.revision };
   }
   private refresh(item: ReviewItem): { changed: boolean; valid: boolean } {
     const snapshot = this.snapshot(item);
