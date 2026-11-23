@@ -69,6 +69,8 @@ WARRANTY_FORBIDDEN_ATTRIBUTES = {
     "garantieform",
     "garantiedauer",
     "garantie",
+    "nachhaltigkeitssiegel",
+    "kurzlink blauer engel",
 }
 
 WARRANTY_SYNONYMS_PATTERN = re.compile(
@@ -130,9 +132,10 @@ def sanitize_text_for_warranty(text: str) -> str:
 
 def is_forbidden_warranty_attribute(name: str) -> bool:
     """
-    Checks if the attribute is related to manufacturer warranty (Herstellergarantie).
-    On Otto, warranty claims without legally complex warranty conditions cause strict
-    rejections/penalties, so Herstellergarantie must NEVER be populated and must stay empty.
+    Checks if the attribute is related to manufacturer warranty (Herstellergarantie)
+    or unverified sustainability seal / license attributes (Nachhaltigkeitssiegel).
+    On Otto, warranty claims or sustainability seals without license numbers cause strict
+    rejections/penalties, so they must NEVER be populated and must stay empty.
     """
     if not name:
         return False
@@ -144,6 +147,9 @@ def is_forbidden_warranty_attribute(name: str) -> bool:
         or "gewährleistung" in n
         or "warranty" in n
         or "guarantee" in n
+        or "nachhaltigkeitssiegel" in n
+        or n.startswith("lizenznummer ")
+        or "blauer engel" in n
     )
 
 def sanitize_brand_attributes(account: str, attributes: Dict[str, str], ensure_marke: bool = True) -> Dict[str, str]:

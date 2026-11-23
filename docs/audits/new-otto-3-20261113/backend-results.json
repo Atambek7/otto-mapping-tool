@@ -1,0 +1,646 @@
+[
+  {
+    "check": "JV: policy",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: product read",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: factory mappings",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: assign valid category",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: schema valid",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: save attributes",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: save title/price",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: bulk category",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: bulk attributes",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: defaults",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: mass edit schema",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: price ending",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: AI category stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: AI attrs stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: AI bulk stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: sync result persistence stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked mixed category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked attributes",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked mixed attrs",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked defaults",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked details",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked sync",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked AI category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked AI attrs",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked AI bulk",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked AI title",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked delete",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: excluded blocked price ending",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: categories export",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: attributes export",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: ZIP export enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: ZIP export carries scope",
+    "pass": true
+  },
+  {
+    "check": "JV: DB export enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: DB export carries scope",
+    "pass": true
+  },
+  {
+    "check": "JV: AI title persistence stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: SQLite DB import skips excluded",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: transfer missing twin blocked",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: cross-account transfer matched twin stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: CSV import skips exclusions",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "updated_categories": 0,
+      "updated_attributes": 1,
+      "skipped_foreign_eans": 0,
+      "skipped_excluded_eans": 1,
+      "skip_reasons": {
+        "excluded_from_factory": 1
+      },
+      "imported_count": 1,
+      "matched_categories": 0
+    }
+  },
+  {
+    "check": "JV: Drip preview",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: Drip excluded preview",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: Drip create",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'lock_and_require_factory_eans_allowed' is not defined"
+  },
+  {
+    "check": "JV: Drip excluded create",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "JV: queue read",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: plan pause",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: plan resume",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: plan trigger enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: plan cancel",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "JV: INVALID category rejected",
+    "status": 200,
+    "expected": 400,
+    "pass": false,
+    "detail": "{'status': 'success', 'account': 'JV'}"
+  },
+  {
+    "check": "JV: INVALID AI category rejected",
+    "status": 200,
+    "expected": 400,
+    "pass": false,
+    "detail": "{'status': 'success', 'category_id': 'N/A'}"
+  },
+  {
+    "check": "JV: invalid schema 404",
+    "status": 404,
+    "expected": 404,
+    "pass": true
+  },
+  {
+    "check": "XL: policy",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: product read",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: factory mappings",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: assign valid category",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: schema valid",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: save attributes",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: save title/price",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: bulk category",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: bulk attributes",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: defaults",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: mass edit schema",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: price ending",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: AI category stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: AI attrs stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: AI bulk stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: sync result persistence stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked mixed category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked attributes",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked mixed attrs",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked defaults",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked details",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked sync",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked AI category",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked AI attrs",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked AI bulk",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked AI title",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked delete",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: excluded blocked price ending",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: categories export",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: attributes export",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: ZIP export enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: ZIP export carries scope",
+    "pass": true
+  },
+  {
+    "check": "XL: DB export enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: DB export carries scope",
+    "pass": true
+  },
+  {
+    "check": "XL: AI title persistence stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: SQLite DB import skips excluded",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: transfer missing twin blocked",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: cross-account transfer matched twin stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: CSV import skips exclusions",
+    "pass": true,
+    "result": {
+      "status": "success",
+      "updated_categories": 0,
+      "updated_attributes": 1,
+      "skipped_foreign_eans": 0,
+      "skipped_excluded_eans": 1,
+      "skip_reasons": {
+        "excluded_from_factory": 1
+      },
+      "imported_count": 1,
+      "matched_categories": 0
+    }
+  },
+  {
+    "check": "XL: Drip preview",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: Drip excluded preview",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: Drip create",
+    "pass": false,
+    "exception": "NameError",
+    "detail": "name 'lock_and_require_factory_eans_allowed' is not defined"
+  },
+  {
+    "check": "XL: Drip excluded create",
+    "status": 409,
+    "expected": 409,
+    "pass": true
+  },
+  {
+    "check": "XL: queue read",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: plan pause",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: plan resume",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: plan trigger enqueue stubbed",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: plan cancel",
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  {
+    "check": "XL: INVALID category rejected",
+    "status": 200,
+    "expected": 400,
+    "pass": false,
+    "detail": "{'status': 'success', 'account': 'XL'}"
+  },
+  {
+    "check": "XL: INVALID AI category rejected",
+    "status": 200,
+    "expected": 400,
+    "pass": false,
+    "detail": "{'status': 'success', 'category_id': 'N/A'}"
+  },
+  {
+    "check": "XL: invalid schema 404",
+    "status": 404,
+    "expected": 404,
+    "pass": true
+  },
+  {
+    "check": "NEW_OTTO_2 mappings and attrs preserved in both accounts",
+    "pass": true
+  }
+]

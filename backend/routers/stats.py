@@ -43,7 +43,7 @@ def get_catalog_total(account: str = "JV") -> int:
 
 @router.get("")
 @router.get("/")
-async def get_dashboard_stats(account: str = "JV", refresh: bool = False, db: Session = Depends(get_db)):
+def get_dashboard_stats(account: str = "JV", refresh: bool = False, db: Session = Depends(get_db)):
     acc = account.upper() if account else "JV"
     cache_key = f"otto:dashboard:stats:{acc}"
 

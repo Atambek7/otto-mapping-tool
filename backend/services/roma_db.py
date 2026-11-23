@@ -164,7 +164,7 @@ async def build_roma_sqlite_db(
 def import_roma_sqlite_db(
     db_path: str, 
     factory_id: str = None, 
-    account: str = "JV", 
+    account: str = None,
     db: Session = None
 ) -> dict:
     """
@@ -203,15 +203,13 @@ def import_roma_sqlite_db(
     valid_category_ids = {str(c.get("categoryId")) for c in all_cats if c.get("categoryId")}
     name_to_id = {c.get("name", "").strip().lower(): str(c.get("categoryId")) for c in all_cats if c.get("name")}
 
-    defaults = get_defaults_for_account(account)
-    acc_specific = get_account_specific_defaults(account)
-
-    imported_count = 0
-    matched_cats = 0
-
+    from services.factory_exclusions import excluded_eans, require_factory_eans_allowed, resolve_account_scope
+    # Preflight the whole file before the first mapping or attribute mutation.
+    prepared_rows = []
+    skipped_excluded = 0
+    target_account = account
     for row in rows:
         row_dict = dict(zip(cols, row))
-        
         raw_val = row_dict.get("ean") or row_dict.get("old_prod_ref") or row_dict.get("ean_af") or ""
         if isinstance(raw_val, float):
             ean = str(int(raw_val))
@@ -219,9 +217,25 @@ def import_roma_sqlite_db(
             ean = str(raw_val).strip()
             if ean.endswith(".0"):
                 ean = ean[:-2]
-                
         if not ean or len(ean) < 8:
             continue
+        collection = str(row_dict.get("collection") or factory_id or "").strip()
+        row_factory_id = str(factory_id or collection or "").strip() or None
+        target_account = resolve_account_scope(db, target_account, row_factory_id, [ean])
+        if row_factory_id and ean in excluded_eans(db, target_account, row_factory_id):
+            skipped_excluded += 1
+            continue
+        require_factory_eans_allowed(db, target_account, row_factory_id, [ean])
+        prepared_rows.append((row_dict, ean, row_factory_id))
+
+    account = target_account or "JV"
+    defaults = get_defaults_for_account(account)
+    acc_specific = get_account_specific_defaults(account)
+
+    imported_count = 0
+    matched_cats = 0
+
+    for row_dict, ean, row_factory_id in prepared_rows:
 
         cat_str = str(row_dict.get("category") or row_dict.get("new_category") or "").strip()
         cat_id = None
@@ -258,9 +272,7 @@ def import_roma_sqlite_db(
             
         raw_pic = row_dict.get("pic_main")
         pic_main = str(raw_pic).strip() if isinstance(raw_pic, str) and raw_pic.startswith("http") else ""
-        collection = str(row_dict.get("collection") or factory_id or "")
-
-        target_factory = factory_id or collection
+        target_factory = row_factory_id
 
         # Upsert ProductMapping for the specified account
         acc = account or "JV"
@@ -324,5 +336,6 @@ def import_roma_sqlite_db(
         "status": "success",
         "total_rows": len(rows),
         "imported_count": imported_count,
+        "skipped_excluded_count": skipped_excluded,
         "matched_categories": matched_cats
     }

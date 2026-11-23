@@ -1,0 +1,62 @@
+[
+  {
+    "account": "JV",
+    "factory": "504487",
+    "mode": "normal",
+    "scopedSavePass": true,
+    "pageErrors": [],
+    "executed": true
+  },
+  {
+    "account": "JV",
+    "factory": "504487",
+    "mode": "invalid_ai",
+    "schema404Requested": true,
+    "loadingTextAfterFailure": true,
+    "saveStillEnabled": true,
+    "confirmedBug": "Invalid N/A category accepted; failed schema presented as loading",
+    "pageErrors": [],
+    "executed": true
+  },
+  {
+    "account": "JV",
+    "factory": "504487",
+    "mode": "policy_failure",
+    "blockedActions": true,
+    "pageErrors": [],
+    "executed": true
+  },
+  {
+    "account": "XL",
+    "factory": "483563",
+    "mode": "normal",
+    "scopedSavePass": true,
+    "pageErrors": [
+      "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    ],
+    "executed": true
+  },
+  {
+    "account": "XL",
+    "factory": "483563",
+    "mode": "invalid_ai",
+    "schema404Requested": true,
+    "loadingTextAfterFailure": true,
+    "saveStillEnabled": true,
+    "confirmedBug": "Invalid N/A category accepted; failed schema presented as loading",
+    "pageErrors": [
+      "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    ],
+    "executed": true
+  },
+  {
+    "account": "XL",
+    "factory": "483563",
+    "mode": "policy_failure",
+    "blockedActions": true,
+    "pageErrors": [
+      "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    ],
+    "executed": true
+  }
+]

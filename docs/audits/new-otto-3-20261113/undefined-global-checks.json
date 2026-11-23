@@ -1,0 +1,22 @@
+[
+  {
+    "module": "routers.mapping",
+    "function": "get_factory_processing_status",
+    "missing_name": "logger"
+  },
+  {
+    "module": "routers.mapping",
+    "function": "transfer_to_account",
+    "missing_name": "logger"
+  },
+  {
+    "module": "routers.mapping",
+    "function": "transfer_to_account",
+    "missing_name": "logger"
+  },
+  {
+    "module": "routers.publish_pipeline",
+    "function": "create_pipeline_plan",
+    "missing_name": "lock_and_require_factory_eans_allowed"
+  }
+]

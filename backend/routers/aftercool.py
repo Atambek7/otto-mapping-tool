@@ -185,6 +185,39 @@ async def get_twin_factory(
     }
 
 
+COMPACT_ROW_FIELDS = (
+    "EAN",
+    "Artikelbeschreibung",
+    "Startpreis",
+    "SofortkaufenPreis",
+    "GalleryURL",
+    "PictureURL",
+    "PictureURLs",
+    "ItemID",
+    "id",
+    "category_id",
+    "category_name",
+)
+
+
+def _compact_products_page(page: Any) -> Any:
+    """Project each product's `row` to the 11 UI table fields (~10x smaller payload)."""
+    if not isinstance(page, dict) or not isinstance(page.get("items"), list):
+        return page
+    compact_items = []
+    for item in page["items"]:
+        if not isinstance(item, dict):
+            compact_items.append(item)
+            continue
+        row = item.get("row")
+        if isinstance(row, dict):
+            compact_row = {k: row[k] for k in COMPACT_ROW_FIELDS if k in row and row[k] is not None}
+            compact_items.append({**item, "row": compact_row, "_compact": True})
+        else:
+            compact_items.append({**item, "_compact": True})
+    return {**page, "items": compact_items, "compact": True}
+
+
 @router.get("/products")
 async def get_products(
     factory_id: Optional[str] = None,
@@ -197,6 +230,7 @@ async def get_products(
     refresh: bool = False,
     sync_db: int = 1,
     dedup: int = 0,
+    compact: int = 0,
     background_tasks: BackgroundTasks = None,
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
@@ -207,22 +241,66 @@ async def get_products(
     """
     fid_str = str(factory_id).strip() if factory_id else ""
     acc_str = str(account or "").upper().strip()
+    from services.factory_exclusions import is_protected_factory
+    if fid_str and is_protected_factory(fid_str) and acc_str not in {"JV", "XL"}:
+        raise HTTPException(status_code=409, detail={
+            "code": "ACCOUNT_CONTEXT_REQUIRED",
+            "message": "Для этой фабрики укажите аккаунт JV или XL.",
+        })
+    if acc_str and acc_str not in {"JV", "XL"}:
+        raise HTTPException(status_code=400, detail="Account must be JV or XL")
     aftercool_acc = resolve_aftercool_account(fid_str, acc_str, db) if (fid_str and acc_str) else acc_str
     src_account = aftercool_acc if aftercool_acc != acc_str else None
 
     cache_key = f"aftercool:products:{acc_str}:{fid_str}:{dataset}:{q}:{limit}:{offset}:{include_row}:{dedup}"
 
+    def filter_excluded_page(page):
+        """Filter fresh and cached pages without changing Aftercool pagination totals."""
+        if not (fid_str and acc_str) or not isinstance(page, dict) or not isinstance(page.get("items"), list):
+            return page
+        from services.factory_exclusions import excluded_eans
+        blocked = excluded_eans(db, acc_str, fid_str)
+        items = page["items"]
+        visible = [
+            item for item in items
+            if str(item.get("ean") or (item.get("row") or {}).get("EAN") or "").strip() not in blocked
+        ] if blocked else items
+        source_page_count = page.get("source_page_count", len(items))
+        if len(visible) == len(items) and page.get("source_page_count") == source_page_count:
+            return page
+        return {
+            **page,
+            "items": visible,
+            "source_page_count": source_page_count,
+            "excluded_count": int(page.get("excluded_count", 0)) + len(items) - len(visible),
+        }
+
     async def sync_page(page):
+        page = filter_excluded_page(page)
         if include_row == 1 and sync_db == 1 and fid_str and acc_str:
             result = await asyncio.to_thread(sync_products_to_db, fid_str, acc_str, page, 500, src_account)
-            if result.get("price_conflicts") and isinstance(page, dict):
-                page = {**page, "sync_status": "partial_error", "price_conflicts": result["price_conflicts"]}
-        return page
+            excluded_count = int(page.get("excluded_count", 0)) if isinstance(page, dict) else 0
+            has_warnings = bool(excluded_count or result.get("price_conflicts") or result.get("factory_conflicts") or result.get("excluded_count"))
+            if has_warnings and isinstance(page, dict):
+                page = {
+                    **page,
+                    "sync_status": "partial_error",
+                    "price_conflicts": result.get("price_conflicts", []),
+                    "factory_conflicts": result.get("factory_conflicts", []),
+                    "excluded_count": excluded_count + result.get("excluded_count", 0),
+                }
+        return filter_excluded_page(page)
+
+    async def finalize_page(page):
+        result_page = await sync_page(page)
+        if compact == 1 and include_row == 1:
+            return _compact_products_page(result_page)
+        return result_page
 
     if not refresh:
         cached_data = await get_cached_json(cache_key)
         if cached_data:
-            return await sync_page(cached_data)
+            return await finalize_page(cached_data)
 
     params = {
         "account": aftercool_acc,
@@ -261,13 +339,13 @@ async def get_products(
         # Cache for 30 minutes (1800s)
         await set_cached_json(cache_key, data, ex=1800)
 
-    return await sync_page(data)
+    return await finalize_page(data)
 
 
 @router.post("/sync-metadata/{factory_id}")
 async def force_sync_metadata(
     factory_id: str,
-    account: str = "JV",
+    account: str = "",
     dataset: str = "lister",
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
@@ -277,7 +355,8 @@ async def force_sync_metadata(
     Protects manually set user prices (has_manual_price).
     """
     fid = str(factory_id).strip()
-    acc = str(account or "JV").upper().strip()
+    from services.factory_exclusions import resolve_account_scope
+    acc = resolve_account_scope(db, account, fid)
 
     result = await force_sync_factory_metadata(factory_id=fid, account=acc, dataset=dataset)
     if result["status"] == "partial_error" and result["synced"] == 0 and result["error"]:
@@ -326,6 +405,7 @@ async def transfer_factories_to_xl(
     total_ready = 0
     total_need_attributes = 0
     total_not_mapped = 0
+    total_skipped_excluded = 0
 
     for fid in req.factory_ids:
         clean_fid = str(fid).strip()
@@ -346,6 +426,25 @@ async def transfer_factories_to_xl(
             continue
 
         eans = [p.ean for p in factory_products if p.ean and p.ean not in ("—", "0", "None", "-")]
+        if not eans:
+            continue
+
+        # Whole-factory transfers respect both the selected source scope and
+        # the resolved target factory scope before any mapping/attribute writes.
+        from services.factory_exclusions import excluded_eans
+        source_blocked = excluded_eans(db, src_acc, clean_fid)
+        target_factory_id = clean_fid
+        try:
+            from services.aftercool_twin import resolve_target_factory_id
+            target_factory_id = await resolve_target_factory_id(clean_fid, src_acc, tgt_acc) or clean_fid
+        except Exception as exc:
+            logger.warning("Could not resolve target factory for transfer %s (%s -> %s): %s", clean_fid, src_acc, tgt_acc, exc)
+        target_blocked = excluded_eans(db, tgt_acc, target_factory_id) | excluded_eans(db, tgt_acc, clean_fid)
+        blocked_eans = source_blocked | target_blocked
+        if blocked_eans:
+            total_skipped_excluded += sum(1 for ean in eans if ean in blocked_eans)
+            factory_products = [product for product in factory_products if product.ean not in blocked_eans]
+            eans = [ean for ean in eans if ean not in blocked_eans]
         if not eans:
             continue
 
@@ -521,6 +620,7 @@ async def transfer_factories_to_xl(
         "ready_count": total_ready,
         "need_attributes_count": total_need_attributes,
         "not_mapped_count": total_not_mapped,
+        "skipped_excluded_count": total_skipped_excluded,
         "factory_ids": req.factory_ids,
         "source_account": src_acc,
         "target_account": tgt_acc

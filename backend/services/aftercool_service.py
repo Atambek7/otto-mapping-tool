@@ -5,6 +5,7 @@ import asyncio
 import logging
 import datetime
 import re
+import weakref
 from decimal import Decimal
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator, Union
@@ -30,6 +31,19 @@ except Exception as e:
 
 _cached_session: Optional[str] = None
 _session_lock = asyncio.Lock()
+_http_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = weakref.WeakKeyDictionary()
+
+
+def _get_aftercool_http_client() -> httpx.AsyncClient:
+    """Return a reusable keep-alive AsyncClient scoped to the current running event loop."""
+    loop = asyncio.get_running_loop()
+    client = _http_clients.get(loop)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=6, keepalive_expiry=30.0),
+        )
+        _http_clients[loop] = client
+    return client
 
 
 # ==========================================
@@ -228,39 +242,53 @@ async def request_aftercool(
         url = f"{AFTERCOOL_BASE_URL}{path}" if path.startswith("/") else f"{AFTERCOOL_BASE_URL}/{path}"
         session = await get_aftercool_session()
 
+        client = _get_aftercool_http_client()
+
         for attempt in range(1, max_retries + 1):
             try:
-                async with httpx.AsyncClient(cookies={"session": session}, timeout=timeout) as client:
-                    res = await client.request(method, url, params=params, json=json_body)
+                res = await client.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    headers={"Cookie": f"session={session}"},
+                    timeout=timeout,
+                )
 
-                    # Auth expired or invalid
-                    if res.status_code in (401, 403):
-                        logger.info("Aftercool session expired (HTTP %s). Refreshing session (attempt %s/%s)...",
-                                    res.status_code, attempt, max_retries)
-                        session = await get_aftercool_session(force_refresh=True)
-                        # Retry immediately with fresh session
-                        async with httpx.AsyncClient(cookies={"session": session}, timeout=timeout) as client_retry:
-                            res = await client_retry.request(method, url, params=params, json=json_body)
+                # Auth expired or invalid
+                if res.status_code in (401, 403):
+                    logger.info("Aftercool session expired (HTTP %s). Refreshing session (attempt %s/%s)...",
+                                res.status_code, attempt, max_retries)
+                    session = await get_aftercool_session(force_refresh=True)
+                    # Retry immediately with fresh session
+                    res = await client.request(
+                        method,
+                        url,
+                        params=params,
+                        json=json_body,
+                        headers={"Cookie": f"session={session}"},
+                        timeout=timeout,
+                    )
 
-                    # Rate limited (429)
-                    if res.status_code == 429:
-                        retry_after = res.headers.get("Retry-After")
-                        wait_time = float(retry_after) if retry_after and retry_after.isdigit() else (2.0 * attempt)
-                        logger.warning("Aftercool rate limit 429. Sleeping %ss before retry %s/%s...",
-                                       wait_time, attempt, max_retries)
+                # Rate limited (429)
+                if res.status_code == 429:
+                    retry_after = res.headers.get("Retry-After")
+                    wait_time = float(retry_after) if retry_after and retry_after.isdigit() else (2.0 * attempt)
+                    logger.warning("Aftercool rate limit 429. Sleeping %ss before retry %s/%s...",
+                                   wait_time, attempt, max_retries)
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                # Server error (5xx)
+                if res.status_code in (500, 502, 503, 504):
+                    if attempt < max_retries:
+                        wait_time = 1.0 * (2 ** (attempt - 1))
+                        logger.warning("Aftercool server error HTTP %s. Retrying in %ss (attempt %s/%s)...",
+                                       res.status_code, wait_time, attempt, max_retries)
                         await asyncio.sleep(wait_time)
                         continue
 
-                    # Server error (5xx)
-                    if res.status_code in (500, 502, 503, 504):
-                        if attempt < max_retries:
-                            wait_time = 1.0 * (2 ** (attempt - 1))
-                            logger.warning("Aftercool server error HTTP %s. Retrying in %ss (attempt %s/%s)...",
-                                           res.status_code, wait_time, attempt, max_retries)
-                            await asyncio.sleep(wait_time)
-                            continue
-
-                    return res
+                return res
 
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 if attempt < max_retries:
@@ -300,14 +328,14 @@ async def set_cached_json(key: str, data: Any, ex: int = 1800) -> None:
     if not redis_client or data is None:
         return
     try:
-        payload = json.dumps(data)
-        await asyncio.to_thread(_sync_redis_set, key, payload, ex)
+        await asyncio.to_thread(_sync_redis_set, key, data, ex)
     except Exception as e:
         logger.debug("Redis cache write error for key '%s': %s", key, e)
 
 
-def _sync_redis_set(key: str, payload: str, ex: int) -> None:
+def _sync_redis_set(key: str, data: Any, ex: int) -> None:
     if redis_client:
+        payload = data if isinstance(data, str) else json.dumps(data)
         redis_client.set(key, payload, ex=ex)
 
 
@@ -325,9 +353,9 @@ async def invalidate_products_cache(account: str = "", factory_id: str = "") -> 
 def _sync_redis_delete_pattern(pattern: str) -> None:
     if not redis_client:
         return
-    keys = redis_client.keys(pattern)
-    if keys:
-        redis_client.delete(*keys)
+    keys = list(redis_client.scan_iter(match=pattern, count=200))
+    for i in range(0, len(keys), 500):
+        redis_client.delete(*keys[i:i + 500])
 
 
 # ==========================================
@@ -401,30 +429,50 @@ async def iter_products(
     raise RuntimeError(f"Aftercool pagination limit reached at offset {offset}")
 
 
+def get_aftercool_candidate_factory_ids(factory_id: str, account: str) -> List[str]:
+    """
+    Returns [factory_id] plus any paired sibling factory from PROTECTED_FACTORY_PAIRS
+    where products of source_factory_id (e.g. NEW_Otto_2 504466 / 483554) are also stored
+    in Aftercool under excluded_factory_id (e.g. NEW_Otto_3 504487 / 483563).
+    """
+    fid = str(factory_id or "").strip()
+    acc = str(account or "JV").upper().strip()
+    candidates = [fid] if fid else []
+    try:
+        from services.factory_exclusions import PROTECTED_FACTORY_PAIRS
+        for pair_acc, excluded_fid, source_fid in PROTECTED_FACTORY_PAIRS:
+            if pair_acc == acc and source_fid == fid and excluded_fid not in candidates:
+                candidates.append(excluded_fid)
+    except Exception:
+        pass
+    return candidates
+
+
 async def fetch_aftercool_product(ean: str, factory_id: str, account: str) -> Optional[AftercoolProduct]:
-    """Fresh exact-EAN lookup, scoped to the factory's Aftercool source account."""
-    source = await asyncio.to_thread(resolve_aftercool_account, factory_id, account)
-    res = await request_aftercool("GET", "/api/products", params={
-        "factory_id": factory_id, "account": source, "dataset": "lister",
-        "q": str(ean).strip(), "limit": 500, "include_row": 1,
-    })
-    if res.status_code != 200:
-        raise RuntimeError(f"Aftercool product lookup: HTTP {res.status_code}")
-    data = res.json()
-    items = data.get("items") if isinstance(data, dict) else data
-    if not isinstance(items, list):
-        raise ValueError("Invalid Aftercool product lookup response")
-    if isinstance(data, dict) and data.get("total") is not None and int(data["total"]) > len(items):
-        raise ValueError("Incomplete Aftercool product lookup; cannot establish a unique price")
-    matches = []
-    for item in items:
-        product = parse_aftercool_product(item, default_factory_id=factory_id)
-        if product and product.ean == str(ean).strip() and product.factory_id == str(factory_id).strip():
-            matches.append(product)
-    if len({(p.price, p.price_af) for p in matches}) > 1:
-        raise ValueError(f"Conflicting Aftercool prices for EAN {ean}; synchronization skipped")
-    if matches:
-        return matches[0]
+    """Fresh exact-EAN lookup, scoped to the factory's Aftercool source account (with sibling fallback)."""
+    for candidate_fid in get_aftercool_candidate_factory_ids(factory_id, account):
+        source = await asyncio.to_thread(resolve_aftercool_account, candidate_fid, account)
+        res = await request_aftercool("GET", "/api/products", params={
+            "factory_id": candidate_fid, "account": source, "dataset": "lister",
+            "q": str(ean).strip(), "limit": 500, "include_row": 1,
+        })
+        if res.status_code != 200:
+            raise RuntimeError(f"Aftercool product lookup: HTTP {res.status_code}")
+        data = res.json()
+        items = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            raise ValueError("Invalid Aftercool product lookup response")
+        if isinstance(data, dict) and data.get("total") is not None and int(data["total"]) > len(items):
+            raise ValueError("Incomplete Aftercool product lookup; cannot establish a unique price")
+        matches = []
+        for item in items:
+            product = parse_aftercool_product(item, default_factory_id=candidate_fid)
+            if product and product.ean == str(ean).strip() and product.factory_id == str(candidate_fid).strip():
+                matches.append(product)
+        if len({(p.price, p.price_af) for p in matches}) > 1:
+            raise ValueError(f"Conflicting Aftercool prices for EAN {ean}; synchronization skipped")
+        if matches:
+            return matches[0]
     return None
 
 
@@ -516,21 +564,52 @@ def sync_products_to_db(
     if not parsed_products:
         return {"synced": 0, "created": 0, "updated": 0}
 
-    # Never choose a price by row order when an EAN has conflicting source rows.
-    price_signatures = {}
-    conflicts = set(excluded_price_eans or ())
-    for product in parsed_products:
-        signature = (product.price, product.price_af)
-        if product.ean in price_signatures and price_signatures[product.ean] != signature:
-            conflicts.add(product.ean)
-        price_signatures[product.ean] = signature
-
     db: Session = SessionLocal()
     now = datetime.datetime.utcnow()
     total_created = 0
     total_updated = 0
+    total_excluded = 0
+    excluded_eans_seen: set[str] = set()
+    factory_conflicts = []
 
     try:
+        from services.factory_exclusions import PROTECTED_FACTORY_PAIRS
+        is_excluded_scope = any(acc == acc_name and excluded == target_fid for acc, excluded, _src in PROTECTED_FACTORY_PAIRS)
+        is_source_scope = any(acc == acc_name and src == target_fid for acc, _excluded, src in PROTECTED_FACTORY_PAIRS)
+        exclusion_rows = db.query(models.FactoryProductExclusion).filter_by(
+            account_name=acc_name, excluded_factory_id=target_fid, is_active=True
+        ).all() if is_excluded_scope else []
+        excluded_here = {row.product_ean for row in exclusion_rows}
+        source_protected = {
+            row.product_ean for row in db.query(models.FactoryProductExclusion).filter_by(
+                account_name=acc_name, source_factory_id=target_fid, is_active=True
+            ).all()
+        } if is_source_scope else set()
+        if excluded_here:
+            excluded_eans_seen.update(product.ean for product in parsed_products if product.ean in excluded_here)
+            total_excluded = len(excluded_eans_seen)
+            parsed_products = [product for product in parsed_products if product.ean not in excluded_here]
+        for product in parsed_products:
+            if product.ean in source_protected and product.factory_id and product.factory_id != target_fid:
+                factory_conflicts.append(product.ean)
+        if factory_conflicts:
+            parsed_products = [product for product in parsed_products if product.ean not in set(factory_conflicts)]
+
+        if not parsed_products:
+            return {"synced": 0, "created": 0, "updated": 0,
+                    "excluded_count": total_excluded,
+                    "factory_conflicts": sorted(set(factory_conflicts)),
+                    "price_conflicts": []}
+
+        # Never choose a price by row order when an EAN has conflicting source rows.
+        price_signatures = {}
+        conflicts = set(excluded_price_eans or ())
+        for product in parsed_products:
+            signature = (product.price, product.price_af)
+            if product.ean in price_signatures and price_signatures[product.ean] != signature:
+                conflicts.add(product.ean)
+            price_signatures[product.ean] = signature
+
         # Process in chunks of 500
         for i in range(0, len(parsed_products), chunk_size):
             chunk = parsed_products[i : i + chunk_size]
@@ -542,6 +621,50 @@ def sync_products_to_db(
                 models.ProductMapping.account_name == acc_name
             )
             existing_map = {m.product_ean: m for m in query.with_for_update().all()}
+
+            # Re-read the policy only after obtaining the same mapping locks as
+            # apply_batch. A sync that started before the manifest transaction
+            # must not wake after that transaction and move an EAN back.
+            if is_excluded_scope:
+                newly_excluded = {row[0] for row in db.query(
+                    models.FactoryProductExclusion.product_ean
+                ).filter(
+                    models.FactoryProductExclusion.account_name == acc_name,
+                    models.FactoryProductExclusion.excluded_factory_id == target_fid,
+                    models.FactoryProductExclusion.is_active.is_(True),
+                    models.FactoryProductExclusion.product_ean.in_(chunk_eans),
+                ).all()}
+                if newly_excluded:
+                    excluded_eans_seen.update(newly_excluded)
+                    total_excluded = len(excluded_eans_seen)
+                    chunk = [product for product in chunk if product.ean not in newly_excluded]
+
+            # An embedded Aftercool factory_id cannot override an exclusion
+            # from the canonical source factory. Recheck after the row locks
+            # too, because apply_batch may have committed while this sync waited.
+            if is_source_scope and chunk:
+                newly_source_protected = {row[0] for row in db.query(
+                    models.FactoryProductExclusion.product_ean
+                ).filter(
+                    models.FactoryProductExclusion.account_name == acc_name,
+                    models.FactoryProductExclusion.source_factory_id == target_fid,
+                    models.FactoryProductExclusion.is_active.is_(True),
+                    models.FactoryProductExclusion.product_ean.in_([product.ean for product in chunk]),
+                ).all()}
+                conflicts_now = {
+                    product.ean for product in chunk
+                    if product.ean in newly_source_protected
+                    and product.factory_id and product.factory_id != target_fid
+                }
+                if conflicts_now:
+                    factory_conflicts.extend(sorted(conflicts_now))
+                    chunk = [product for product in chunk if product.ean not in conflicts_now]
+
+            if not chunk:
+                continue
+            chunk_eans = [p.ean for p in chunk]
+            # Keep only locked mappings for rows still eligible in this chunk.
+            existing_map = {ean: mapping for ean, mapping in existing_map.items() if ean in set(chunk_eans)}
 
             new_mappings = []
             seen_chunk_eans = set()
@@ -601,6 +724,8 @@ def sync_products_to_db(
             db.commit()
 
         return {"synced": total_created + total_updated, "created": total_created, "updated": total_updated,
+                "excluded_count": total_excluded,
+                "factory_conflicts": sorted(set(factory_conflicts)),
                 "price_conflicts": sorted(conflicts)}
 
     except Exception as exc:
@@ -623,6 +748,8 @@ async def force_sync_factory_metadata(
     """
     total_loaded = 0
     total_synced = 0
+    total_excluded = 0
+    factory_conflicts = set()
     last_error = None
 
     fid_clean = str(factory_id or "").strip()
@@ -638,20 +765,33 @@ async def force_sync_factory_metadata(
 
     conflicts = set()
     signatures = {}
+    collected_pages: List[List[AftercoolProduct]] = []
     try:
-        # Preflight price signatures across all pages before changing any prices.
-        # Store only EAN/Decimal pairs, never the full raw catalog in memory.
+        # Single-pass stream: collect lightweight DTOs (dropping bulky raw_item) and detect
+        # all cross-page price conflicts before writing anything to the database.
         async for page in iter_products(factory_id=fid_clean, account=aftercool_account, dataset=dataset, page_size=500):
+            compact_page: List[AftercoolProduct] = []
             for product in page:
                 signature = (product.price, product.price_af)
                 if product.ean in signatures and signatures[product.ean] != signature:
                     conflicts.add(product.ean)
                 signatures[product.ean] = signature
-        async for product_page in iter_products(factory_id=fid_clean, account=aftercool_account, dataset=dataset, page_size=500):
+                compact_page.append(
+                    AftercoolProduct(
+                        ean=product.ean,
+                        name=product.name,
+                        price=product.price,
+                        price_af=product.price_af,
+                        image_url=product.image_url,
+                        factory_id=product.factory_id,
+                        raw_item={},
+                    )
+                )
+            if compact_page:
+                collected_pages.append(compact_page)
+
+        for product_page in collected_pages:
             total_loaded += len(product_page)
-            for product in product_page:
-                if signatures.get(product.ean) != (product.price, product.price_af):
-                    conflicts.add(product.ean)
             # Run DB sync in thread pool to prevent blocking the async loop
             res = await asyncio.to_thread(
                 sync_products_to_db,
@@ -663,6 +803,8 @@ async def force_sync_factory_metadata(
                 conflicts,
             )
             total_synced += (res.get("created", 0) + res.get("updated", 0))
+            total_excluded += int(res.get("excluded_count", 0))
+            factory_conflicts.update(res.get("factory_conflicts", []))
 
         # Invalidate cache for this factory
         await invalidate_products_cache(account=acc_clean, factory_id=fid_clean)
@@ -674,11 +816,15 @@ async def force_sync_factory_metadata(
     catalog_complete = last_error is None
     if conflicts and not last_error:
         last_error = f"Conflicting Aftercool prices for {len(conflicts)} EAN(s); their prices were not changed"
+    if factory_conflicts and not last_error:
+        last_error = f"Aftercool factory identity conflicts for {len(factory_conflicts)} protected EAN(s); their mappings were not changed"
     status = "partial_error" if last_error else "ok"
     return {
         "status": status,
         "synced": total_synced,
         "total_loaded": total_loaded,
+        "excluded_count": total_excluded,
+        "factory_conflicts": sorted(factory_conflicts),
         "error": last_error,
         "price_conflicts": sorted(conflicts),
         "catalog_complete": catalog_complete,

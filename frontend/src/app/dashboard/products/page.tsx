@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import Link from "next/link";
+import { useEffect, useState, useRef } from "react";
 import { fetchWithAuth } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,27 @@ import { useAccount } from "@/lib/useAccount";
 import { useTranslation } from "react-i18next";
 import { ImageHoverPreview, HoverImagePreviewState } from "@/components/ImageHoverPreview";
 
-import { getAftercoolPrice } from "@/lib/prices";
+import { getAftercoolPrice, parsePositivePrice } from "@/lib/prices";
+
+function normalizeAccount(value: unknown): string {
+  return String(value ?? "").toUpperCase().replace(/^ACCOUNTTYPE\./, "").trim();
+}
+
+function getFactoryNames(payload: any, account: string): Record<string, string> {
+  const items = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+  const names: Record<string, string> = {};
+
+  for (const factory of items) {
+    if (!factory || normalizeAccount(factory.account) !== normalizeAccount(account)) continue;
+    if (factory.kind && String(factory.kind).toLowerCase() !== "lister") continue;
+
+    const id = String(factory.id ?? "").trim();
+    const name = String(factory.name ?? "").trim();
+    if (id && name && name !== id && name !== `Factory ${id}`) names[id] = name;
+  }
+
+  return names;
+}
 
 export default function ProductsPage() {
   const { account } = useAccount();
@@ -32,8 +53,52 @@ export default function ProductsPage() {
   const [activeProduct, setActiveProduct] = useState<any | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [imgPreview, setImgPreview] = useState<HoverImagePreviewState | null>(null);
+  const [factoryNames, setFactoryNames] = useState<Record<string, string>>({});
 
   const parentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cachedNames: Record<string, string> = {};
+    try {
+      const cached = localStorage.getItem(`otto_factories_list_${account}_v2`);
+      if (cached) cachedNames = getFactoryNames(JSON.parse(cached), account);
+    } catch {
+      // A bad browser cache should not block product search.
+    }
+    setFactoryNames(cachedNames);
+  }, [account]);
+
+  useEffect(() => {
+    const missingIds = new Set<string>();
+    for (const product of products) {
+      const row = product?.row || {};
+      const id = String(product?.factory_id ?? row.factory_id ?? "").trim();
+      const rowName = String(product?.factory_name || product?.factoryName || row.factory_name || row.factoryName || "").trim();
+      if (id && id !== "—" && (!rowName || rowName === id) && !factoryNames[id]) missingIds.add(id);
+    }
+    if (missingIds.size === 0) return;
+
+    const controller = new AbortController();
+    let active = true;
+    fetchWithAuth("/aftercool/factories", { signal: controller.signal }).then(async (res) => {
+      if (!res.ok) return;
+      const names = getFactoryNames(await res.json(), account);
+      const missingNames: Record<string, string> = {};
+      for (const id of missingIds) {
+        if (names[id]) missingNames[id] = names[id];
+      }
+      if (active && Object.keys(missingNames).length > 0) {
+        setFactoryNames((current) => ({ ...current, ...missingNames }));
+      }
+    }).catch(() => {
+      // Keep the factory ID as a useful fallback when the directory is unavailable.
+    });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [account, products, factoryNames]);
 
   const handleImageHover = (img: string, name: string, price: string, e: React.MouseEvent<HTMLElement>) => {
     if (!img) return;
@@ -56,9 +121,10 @@ export default function ProductsPage() {
     setImgPreview(null);
   };
 
-  const getProductPrice = (row: any) => {
-    if (!row) return "";
-    const price = getAftercoolPrice(row);
+  const getProductPrice = (row: any = {}, product: any = {}) => {
+    const price = getAftercoolPrice(row)
+      || getAftercoolPrice(product || {})
+      || parsePositivePrice(product?.price_af);
     return price ? `€${Number(price).toFixed(2)}` : "";
   };
 
@@ -215,6 +281,7 @@ export default function ProductsPage() {
           <div className="sticky top-0 bg-slate-50/95 dark:bg-slate-850/95 backdrop-blur-xs border-b border-slate-200 dark:border-slate-800 z-10 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 py-3 px-4">
             <div className="w-14 text-center">{t("products_search.th_image")}</div>
             <div className="flex-1 px-3">{t("products_search.th_name")}</div>
+            <div className="w-28 px-3 text-right">{t("products_search.th_price")}</div>
             <div className="w-48 px-3">{t("products_search.th_ean")}</div>
             <div className="w-56 px-3">{t("products_search.th_factory")}</div>
             <div className="w-12 text-center">{t("products_search.th_open")}</div>
@@ -243,7 +310,11 @@ export default function ProductsPage() {
               const productName =
                 row.Artikelbeschreibung || p.name || "Untitled Product";
               const ean = p.ean || row.EAN || "—";
-              const factoryId = p.factory_id || "—";
+              const productPrice = getProductPrice(row, p);
+              const factoryId = String(p.factory_id || row.factory_id || "—");
+              const factoryName = String(
+                p.factory_name || p.factoryName || row.factory_name || row.factoryName || factoryNames[factoryId] || factoryId
+              );
 
               return (
                 <div
@@ -259,7 +330,7 @@ export default function ProductsPage() {
                   <div className="w-14 flex items-center justify-center shrink-0" onClick={e => e.stopPropagation()}>
                     <div
                       className="w-11 h-11 rounded-lg border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 flex items-center justify-center p-0.5 overflow-hidden shadow-2xs group-hover:border-indigo-300 dark:group-hover:border-indigo-700 transition-colors relative cursor-pointer"
-                      onMouseEnter={(e) => handleImageHover(img, productName, getProductPrice(row), e)}
+                      onMouseEnter={(e) => handleImageHover(img, productName, productPrice, e)}
                       onMouseLeave={handleImageLeave}
                       onClick={() => setActiveProduct(p)}
                     >
@@ -281,11 +352,13 @@ export default function ProductsPage() {
                     <div className="font-semibold text-slate-900 dark:text-slate-100 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                       {productName}
                     </div>
-                    {getProductPrice(row) && (
-                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                        {getProductPrice(row)}
-                      </div>
-                    )}
+                  </div>
+
+                  {/* Price */}
+                  <div className="w-28 px-3 shrink-0 text-right">
+                    <span className={`text-[11px] font-mono ${productPrice ? "font-semibold text-slate-700 dark:text-slate-200" : "text-slate-400 dark:text-slate-500"}`}>
+                      {productPrice || "—"}
+                    </span>
                   </div>
 
                   {/* EAN */}
@@ -306,11 +379,22 @@ export default function ProductsPage() {
                   </div>
 
                   {/* Factory */}
-                  <div className="w-56 px-3 shrink-0">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded font-medium truncate max-w-[200px] border border-indigo-200/50 dark:border-indigo-800/40">
-                      <FolderTree className="w-3 h-3 text-indigo-500 shrink-0" />
-                      <span className="truncate">{factoryId}</span>
-                    </span>
+                  <div className="w-56 px-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {factoryId && factoryId !== "—" ? (
+                      <Link
+                        href={`/dashboard/factories/${encodeURIComponent(factoryId)}`}
+                        className="inline-flex items-center gap-1.5 text-[11px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 px-2 py-0.5 rounded font-medium truncate max-w-[200px] border border-indigo-200/50 dark:border-indigo-800/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer"
+                        title={factoryName !== factoryId ? `${factoryName} · ${factoryId}` : t("products_search.th_factory")}
+                      >
+                        <FolderTree className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="truncate">{factoryName}</span>
+                      </Link>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded font-medium truncate max-w-[200px] border border-indigo-200/50 dark:border-indigo-800/40">
+                        <FolderTree className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="truncate">{factoryId}</span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Inspect action */}

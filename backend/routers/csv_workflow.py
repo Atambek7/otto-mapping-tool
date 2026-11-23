@@ -50,24 +50,23 @@ def get_category_schema_attrs(category_id: str):
         schema.append({"name": f"Bullet Point {i}", "relevance": "OPTIONAL"})
     return schema
 
-async def fetch_product_info_for_export(factory_id: str) -> dict:
+async def fetch_product_info_for_export(factory_id: str, account: str = None) -> dict:
     from database import SessionLocal
     _db = SessionLocal()
     try:
-        mappings = _db.query(
-            models.ProductMapping.product_ean,
-            models.ProductMapping.product_name,
-            models.ProductMapping.price,
-            models.ProductMapping.price_af,
-            models.ProductMapping.image_url
-        ).filter(models.ProductMapping.factory_id == str(factory_id)).all()
+        query = _db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == str(factory_id))
+        if account:
+            query = query.filter(models.ProductMapping.account_name == str(account).upper())
+        from services.factory_exclusions import filter_factory_mappings
+        mappings = query.all()
+        mappings = filter_factory_mappings(_db, factory_id, mappings)
         return {
-            m[0]: {
-                "name": m[1] or "",
-                "price": m[2] or "",
-                "startpreis": m[3] or "",
-                "img": m[4] or "",
-                "sku": m[0]
+            m.product_ean: {
+                "name": m.product_name or "",
+                "price": m.price or "",
+                "startpreis": m.price_af or "",
+                "img": m.image_url or "",
+                "sku": m.product_ean
             }
             for m in mappings
         }
@@ -78,11 +77,22 @@ async def fetch_product_info_for_export(factory_id: str) -> dict:
 
 @router.get("/export/categories/{factory_id}")
 @router.post("/export/categories/{factory_id}")
-async def export_categories(factory_id: str, req: ExportRequest = None, db: Session = Depends(get_db)):
+async def export_categories(factory_id: str, req: ExportRequest = None, account: str = None, db: Session = Depends(get_db)):
+    from services.factory_exclusions import is_protected_factory, resolve_account_scope, require_factory_eans_allowed
+    selected_eans = req.product_eans if req else []
+    requested_account = (req.account if req and req.account else account)
+    if is_protected_factory(factory_id) or selected_eans:
+        target_acc = resolve_account_scope(db, requested_account, factory_id, selected_eans)
+        require_factory_eans_allowed(db, target_acc, factory_id, selected_eans)
+    else:
+        target_acc = requested_account
     query = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
-    if req and req.product_eans:
-        query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
-    mappings = query.all()
+    if target_acc:
+        query = query.filter(models.ProductMapping.account_name == target_acc)
+    if selected_eans:
+        query = query.filter(models.ProductMapping.product_ean.in_(selected_eans))
+    from services.factory_exclusions import filter_factory_mappings
+    mappings = filter_factory_mappings(db, factory_id, query.all())
     
     stream = io.StringIO()
     writer = csv.writer(stream, delimiter=";")
@@ -110,6 +120,11 @@ async def export_categories(factory_id: str, req: ExportRequest = None, db: Sess
 @router.post("/export/attributes/{factory_id}")
 async def export_attributes(factory_id: str, req: ExportRequest = None, account: str = None, db: Session = Depends(get_db)):
     target_acc = (req.account if req and req.account else None) or account
+    selected_eans = req.product_eans if req else []
+    from services.factory_exclusions import is_protected_factory, resolve_account_scope, require_factory_eans_allowed
+    if is_protected_factory(factory_id) or selected_eans:
+        target_acc = resolve_account_scope(db, target_acc, factory_id, selected_eans)
+        require_factory_eans_allowed(db, target_acc, factory_id, selected_eans)
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id == factory_id,
         models.ProductMapping.category_id != None,
@@ -117,9 +132,10 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, account:
     )
     if target_acc:
         query = query.filter(models.ProductMapping.account_name == target_acc)
-    if req and req.product_eans:
-        query = query.filter(models.ProductMapping.product_ean.in_(req.product_eans))
-    mappings = query.all()
+    if selected_eans:
+        query = query.filter(models.ProductMapping.product_ean.in_(selected_eans))
+    from services.factory_exclusions import filter_factory_mappings
+    mappings = filter_factory_mappings(db, factory_id, query.all())
     
     if not mappings:
         raise HTTPException(status_code=400, detail="No mapped products found to export attributes for.")
@@ -260,17 +276,21 @@ async def export_attributes(factory_id: str, req: ExportRequest = None, account:
 async def start_export_attributes_zip(
     factory_id: str,
     factory_name: str = "",
-    account: str = "JV",
+    account: str = "",
     req: ExportRequest = None,
     db: Session = Depends(get_db)
 ):
     from tasks import export_factory_attributes_zip_task
     eans = req.product_eans if req else []
+    from services.factory_exclusions import require_factory_eans_allowed, resolve_account_scope
+    target_acc = resolve_account_scope(db, req.account if req and req.account else account, factory_id, eans)
+    if eans:
+        require_factory_eans_allowed(db, target_acc, factory_id, eans)
     try:
         task = export_factory_attributes_zip_task.delay(
             factory_id=str(factory_id),
             factory_name=str(factory_name or factory_id),
-            account=str(account) if account else None,
+            account=target_acc,
             product_eans=eans if eans else None
         )
         return {
@@ -319,6 +339,15 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
     updated_categories = 0
     updated_attributes = 0
     skipped_eans = 0
+    skipped_excluded_eans = 0
+
+    from services.factory_exclusions import (
+        excluded_eans as get_excluded_eans,
+        require_factory_eans_allowed, resolve_account_scope,
+    )
+    requested_account = account
+    target_account = resolve_account_scope(db, account, factory_id)
+    account = target_account
 
     query_m = db.query(models.ProductMapping).filter(models.ProductMapping.factory_id == factory_id)
     if account:
@@ -347,6 +376,11 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
             if ean and ean != "nan":
                 all_eans_in_file.add(ean)
 
+    # Do this complete-list check before the import loop can mutate any row.
+    target_account = resolve_account_scope(db, requested_account, factory_id, all_eans_in_file)
+    account = target_account
+    excluded_here = get_excluded_eans(db, target_account, factory_id)
+
     new_mappings: list = []
     new_attrs: list = []
     eans_to_revalidate: set = set()
@@ -363,6 +397,11 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
             ean = raw_ean.replace('="', '').replace('"', '').replace('=', '')
             if not ean or ean == "nan":
                 continue
+            if ean in excluded_here:
+                skipped_excluded_eans += 1
+                continue
+            require_factory_eans_allowed(db, target_account, factory_id, [ean])
+
             if valid_eans and ean not in valid_eans:
                 skipped_eans += 1
                 continue
@@ -472,6 +511,8 @@ def process_attribute_dataframes(dataframes: List[pd.DataFrame], factory_id: str
         "updated_categories": updated_categories,
         "updated_attributes": updated_attributes,
         "skipped_foreign_eans": skipped_eans,
+        "skipped_excluded_eans": skipped_excluded_eans,
+        "skip_reasons": {"excluded_from_factory": skipped_excluded_eans},
         "imported_count": updated_attributes or updated_categories,
         "matched_categories": updated_categories
     }
@@ -592,4 +633,9 @@ async def import_csv(factory_id: str, file: UploadFile = File(...), account: str
     else:
         raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .csv, .db or .zip")
 
-    return process_attribute_dataframes(dataframes, factory_id=factory_id, db=db, account=account)
+    try:
+        return process_attribute_dataframes(dataframes, factory_id=factory_id, db=db, account=account)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": "FACTORY_CONTEXT_REQUIRED", "message": str(exc)}) from exc

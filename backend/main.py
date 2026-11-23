@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 import models, auth
 
-Base.metadata.create_all(bind=engine)
+# Factory exclusion state is deliberately migration-managed: startup must never
+# create only part of its audited schema before the explicit Alembic revision.
+_MIGRATION_MANAGED_TABLES = {
+    "factory_product_exclusions",
+    "factory_product_exclusion_events",
+    "factory_product_reassignments",
+}
+Base.metadata.create_all(
+    bind=engine,
+    tables=[table for table in Base.metadata.sorted_tables if table.name not in _MIGRATION_MANAGED_TABLES],
+)
 
 app = FastAPI(
     title="Otto Mapping Tool API",

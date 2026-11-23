@@ -1,24 +1,69 @@
 import os
+import sys
 import json
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 GROUPS_PATH = os.path.join(DATA_DIR, "category_groups.json")
 CATEGORIES_PATH = os.path.join(DATA_DIR, "categories.json")
 
-# Load data into memory once
+# Load data into memory once (projected & interned to minimize multi-worker RAM footprint)
 GROUPS = {}
 CATEGORIES = []
 CATEGORIES_BY_ID = {}
 CATEGORIES_BY_NAME = {}
 
+_KEEP_ATTR_KEYS = (
+    "attributeId",
+    "name",
+    "type",
+    "unit",
+    "relevance",
+    "featureRelevance",
+    "maxLength",
+    "allowedValues",
+)
+
+
+def _compact_group_entry(group_obj: dict) -> dict:
+    raw_attrs = (group_obj.get("attributes") or {}).get("attributes") or []
+    compact_attrs = []
+    for a in raw_attrs:
+        if not isinstance(a, dict):
+            continue
+        item = {}
+        for k in _KEEP_ATTR_KEYS:
+            val = a.get(k)
+            if val is None:
+                continue
+            if isinstance(val, str):
+                val = sys.intern(val)
+            elif k in ("allowedValues", "featureRelevance") and isinstance(val, list):
+                val = [sys.intern(v) if isinstance(v, str) else v for v in val]
+            item[sys.intern(k)] = val
+        compact_attrs.append(item)
+    return {
+        "group_name": group_obj.get("group_name"),
+        "attributes": {"attributes": compact_attrs},
+    }
+
+
 try:
     if os.path.exists(GROUPS_PATH):
         with open(GROUPS_PATH, "r", encoding="utf-8") as f:
-            GROUPS = json.load(f)
-            
+            _raw_groups = json.load(f)
+            GROUPS = {
+                sys.intern(str(gid)): _compact_group_entry(gdata)
+                for gid, gdata in _raw_groups.items()
+                if isinstance(gdata, dict)
+            }
+            del _raw_groups
+
     if os.path.exists(CATEGORIES_PATH):
         with open(CATEGORIES_PATH, "r", encoding="utf-8") as f:
             CATEGORIES = json.load(f)
+            for _c in CATEGORIES:
+                _c["_name_lower"] = (_c.get("name") or "").lower()
+                _c["_group_lower"] = (_c.get("category_group") or "").lower()
             # Create O(1) lookup dictionary
             CATEGORIES_BY_ID = {str(c.get("categoryId")): c for c in CATEGORIES if c.get("categoryId")}
             # Keep the last encountered category by name for fallback (not perfect for duplicates but O(1))
@@ -26,14 +71,32 @@ try:
 except Exception as e:
     print("Warning: Could not load OKB data in categories_repo:", e)
 
+CATEGORY_ALIASES = {
+    "jungendzimmer-set": "24446",
+    "jungedzimmer-set": "24446",
+    "jugendzimmer set": "24446",
+    "dreisitzer": "25919",
+    "3-sitzer-sofa": "25919",
+    "zweisitzer": "25907",
+    "2-sitzer-sofa": "25907",
+}
+
+
 def get_category_by_id(cat_id: str):
     if not cat_id:
         return None
-    cat = CATEGORIES_BY_ID.get(str(cat_id))
+    raw_key = str(cat_id).strip()
+    cat = CATEGORIES_BY_ID.get(raw_key)
     if cat:
         return cat
     # Fallback to search by name if frontend passes name instead of ID
-    return CATEGORIES_BY_NAME.get(cat_id)
+    cat = CATEGORIES_BY_NAME.get(raw_key)
+    if cat:
+        return cat
+    alias_id = CATEGORY_ALIASES.get(raw_key.lower())
+    if alias_id:
+        return CATEGORIES_BY_ID.get(alias_id)
+    return None
 
 # Precomputed sorted categories for fast A-Z lookup
 CATEGORIES_SORTED = sorted(CATEGORIES, key=lambda c: (c.get("name") or "").lower())

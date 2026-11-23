@@ -13,15 +13,27 @@ router = APIRouter(
 @router.get("/factories")
 async def get_export_factories(account: str = None, db: Session = Depends(get_db)):
     """Returns a list of factory_ids that have at least one product ready for export"""
-    query = db.query(models.ProductMapping.factory_id).filter(
+    query = db.query(models.ProductMapping.factory_id, models.ProductMapping.account_name).filter(
         models.ProductMapping.status == "Ready"
     )
     if account:
         query = query.filter(models.ProductMapping.account_name == account)
     factories = query.distinct().all()
-    
-    # Extract from tuples
-    return [f[0] for f in factories if f[0]]
+    from services.factory_exclusions import excluded_eans
+    result = set()
+    for factory_id, row_account in factories:
+        if not factory_id:
+            continue
+        acc = row_account.value if hasattr(row_account, "value") else str(row_account)
+        blocked = excluded_eans(db, acc, factory_id)
+        ready_eans = db.query(models.ProductMapping.product_ean).filter(
+            models.ProductMapping.factory_id == factory_id,
+            models.ProductMapping.account_name == row_account,
+            models.ProductMapping.status == "Ready",
+        ).all()
+        if any(ean not in blocked for (ean,) in ready_eans):
+            result.add(factory_id)
+    return sorted(result)
 
 @router.get("/preview")
 async def get_export_preview(factory_id: str = None, account: str = None, db: Session = Depends(get_db)):
@@ -32,6 +44,9 @@ async def get_export_preview(factory_id: str = None, account: str = None, db: Se
         query_all = query_all.filter(models.ProductMapping.account_name == account)
         
     mappings = query_all.all()
+    if factory_id:
+        from services.factory_exclusions import filter_factory_mappings
+        mappings = filter_factory_mappings(db, factory_id, mappings)
     eans = [m.product_ean for m in mappings]
     
     if not eans:
@@ -89,7 +104,8 @@ async def download_export(factory_id: str, format: str = "json", account: str = 
     if account:
         query = query.filter(models.ProductMapping.account_name == account)
     
-    mappings = query.all()
+    from services.factory_exclusions import filter_factory_mappings
+    mappings = filter_factory_mappings(db, factory_id, query.all())
     
     # Pre-fetch all attributes for these products
     eans = [m.product_ean for m in mappings]
@@ -157,7 +173,7 @@ async def download_export(factory_id: str, format: str = "json", account: str = 
         import pandas as pd
         from fastapi.responses import StreamingResponse
         
-        product_info = await fetch_product_info_for_export(factory_id)
+        product_info = await fetch_product_info_for_export(factory_id, account)
         
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
@@ -227,7 +243,7 @@ async def download_export(factory_id: str, format: str = "json", account: str = 
         from routers.mapping import get_category_by_id
         import os
         
-        product_info = await fetch_product_info_for_export(factory_id)
+        product_info = await fetch_product_info_for_export(factory_id, account)
         
         items = []
         for item in result:
@@ -284,7 +300,8 @@ async def export_otto_json(factory_id: str, account: str = None, db: Session = D
     )
     if account:
         query = query.filter(models.ProductMapping.account_name == account)
-    mappings = query.all()
+    from services.factory_exclusions import filter_factory_mappings
+    mappings = filter_factory_mappings(db, factory_id, query.all())
     
     if not mappings:
         return Response(content="[]", media_type="application/json")

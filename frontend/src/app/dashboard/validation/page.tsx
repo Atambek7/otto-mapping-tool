@@ -179,7 +179,7 @@ export default function ValidationIndexPage() {
       const res = await fetchWithAuth("/validation/export/csv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ factory_ids: ids })
+        body: JSON.stringify({ factory_ids: ids, account })
       });
       if (res.ok) {
         const blob = await res.blob();

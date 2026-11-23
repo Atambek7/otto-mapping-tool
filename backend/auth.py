@@ -36,7 +36,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(
+def get_current_user(
     request: Request,
     token_from_header: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -74,7 +74,7 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-async def get_current_admin_user(current_user: models.User = Depends(get_current_user)):
+def get_current_admin_user(current_user: models.User = Depends(get_current_user)):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not enough privileges")
     return current_user

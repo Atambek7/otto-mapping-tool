@@ -47,8 +47,13 @@ def resolve_category_names(category_ids: Iterable[str], db: Session) -> Dict[str
     missing_ids = [cid for cid in clean_ids if cid not in name_map]
     if missing_ids:
         json_map = get_json_categories()
+        from services.categories_repo import get_category_by_id
         for cid in missing_ids:
             if cid in json_map:
                 name_map[cid] = json_map[cid]
+            else:
+                resolved = get_category_by_id(cid)
+                if resolved and resolved.get("name"):
+                    name_map[cid] = str(resolved["name"])
 
     return name_map

@@ -15,7 +15,7 @@ router = APIRouter(
 )
 
 @router.get("/summary")
-async def get_validation_summary(account: str = None, db: Session = Depends(get_db)):
+def get_validation_summary(account: str = None, db: Session = Depends(get_db)):
     """
     Fast aggregated validation summary grouped by factory_id using composite index.
     """
@@ -43,18 +43,23 @@ async def get_validation_summary(account: str = None, db: Session = Depends(get_
     ]
 
 @router.get("/products")
-async def get_invalid_products(factory_id: str = None, account: str = None, limit: int = 500, db: Session = Depends(get_db)):
+def get_invalid_products(factory_id: str = None, account: str = None, limit: int = 500, db: Session = Depends(get_db)):
     # Only fetch mappings that are in Error or Need Attributes state — skip Ready/Not Mapped entirely.
     # This is much faster than fetching all products and re-validating each one.
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.status.in_(["Error", "Need Attributes"])
     )
+    from services.factory_exclusions import is_protected_factory, resolve_account_scope, filter_factory_mappings
+    if factory_id and (is_protected_factory(factory_id) or account):
+        account = resolve_account_scope(db, account, factory_id)
     if factory_id:
         query = query.filter(models.ProductMapping.factory_id == factory_id)
     if account:
         query = query.filter(models.ProductMapping.account_name == account)
 
     mappings = query.limit(limit).all()
+    if factory_id:
+        mappings = filter_factory_mappings(db, factory_id, mappings)
 
     # Pre-fetch all attributes in one batch query
     eans = [m.product_ean for m in mappings]
@@ -129,27 +134,39 @@ from typing import List
 
 class ApproveRequest(BaseModel):
     product_eans: List[str]
+    account: str = None
+    factory_id: str = None
 
 @router.post("/approve")
-async def force_approve_products(req: ApproveRequest, db: Session = Depends(get_db)):
+def force_approve_products(req: ApproveRequest, db: Session = Depends(get_db)):
+    from services.factory_exclusions import resolve_account_scope, lock_and_require_factory_eans_allowed
+    account = resolve_account_scope(db, req.account, req.factory_id, req.product_eans)
+    lock_and_require_factory_eans_allowed(db, account, req.factory_id, req.product_eans)
     db.query(models.ProductMapping).filter(
-        models.ProductMapping.product_ean.in_(req.product_eans)
+        models.ProductMapping.product_ean.in_(req.product_eans),
+        models.ProductMapping.account_name == account,
+        *([models.ProductMapping.factory_id == req.factory_id] if req.factory_id else []),
     ).update({"status": "Ready"}, synchronize_session=False)
     db.commit()
     return {"status": "success"}
 
 class ValidationExportRequest(BaseModel):
     factory_ids: List[str]
+    account: str = None
 
 @router.post("/export/csv")
 async def export_invalid_csv(req: ValidationExportRequest, db: Session = Depends(get_db)):
     if not req.factory_ids:
         return {"error": "No factory IDs provided"}
         
+    from services.factory_exclusions import is_protected_factory, resolve_account_scope, filter_factory_mappings
+    protected_ids = [fid for fid in req.factory_ids if is_protected_factory(fid)]
+    account = resolve_account_scope(db, req.account, protected_ids[0] if protected_ids else None)
     query = db.query(models.ProductMapping).filter(
         models.ProductMapping.factory_id.in_(req.factory_ids)
-    )
+    ).filter(models.ProductMapping.account_name == account)
     mappings = query.all()
+    mappings = [m for fid in req.factory_ids for m in filter_factory_mappings(db, fid, [x for x in mappings if x.factory_id == fid])]
     
     eans = [m.product_ean for m in mappings]
     if not eans:
@@ -159,7 +176,10 @@ async def export_invalid_csv(req: ValidationExportRequest, db: Session = Depends
         zip_buffer.seek(0)
         return StreamingResponse(iter([zip_buffer.getvalue()]), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=validation_export.zip"})
         
-    db_attrs = db.query(models.ProductAttribute).filter(models.ProductAttribute.product_ean.in_(eans)).all()
+    db_attrs = db.query(models.ProductAttribute).filter(
+        models.ProductAttribute.product_ean.in_(eans),
+        models.ProductAttribute.account_name == account,
+    ).all()
     attr_by_ean = {}
     for a in db_attrs:
         if a.product_ean not in attr_by_ean:

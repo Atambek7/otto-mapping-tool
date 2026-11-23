@@ -14,6 +14,29 @@ from services.aftercool_service import resolve_aftercool_account
 
 logger = logging.getLogger("factory_scope")
 
+
+def _apply_factory_exclusions(factory_id: str, account: str, eans: Set[str]) -> Set[str]:
+    """Apply durable exclusions to both fresh and Redis-cached EAN inventories."""
+    if (str(account).upper(), str(factory_id).strip()) not in {("JV", "504487"), ("XL", "483563")}:
+        return eans
+    try:
+        from database import SessionLocal
+        import models
+        session = SessionLocal()
+        try:
+            rows = session.query(models.FactoryProductExclusion.product_ean).filter_by(
+                account_name=str(account).upper(), excluded_factory_id=str(factory_id).strip(), is_active=True
+            ).all()
+            return eans - {row[0] for row in rows}
+        finally:
+            session.close()
+    except Exception as exc:
+        # Do not turn an exclusion-store failure into an unfiltered candidate set.
+        if (str(account).upper(), str(factory_id).strip()) in {("JV", "504487"), ("XL", "483563")}:
+            logger.exception("Factory exclusion lookup failed for guarded factory %s", factory_id)
+            raise RuntimeError("Factory exclusion policy is unavailable; refusing unfiltered factory scope") from exc
+        return eans
+
 @dataclass
 class AuthoritativeResult:
     status: str  # "success", "empty", "error"
@@ -59,10 +82,14 @@ async def get_authoritative_factory_eans(
                     st = data.get("status")
                     cached_eans = set(data.get("eans", []))
                     if st in ("success", "empty"):
-                        return AuthoritativeResult(status=st, eans=cached_eans)
+                        filtered = _apply_factory_exclusions(fid_str, acc_str, cached_eans)
+                        return AuthoritativeResult(status="success" if filtered else "empty", eans=filtered)
                 elif isinstance(data, list):
                     st = "success" if data else "empty"
-                    return AuthoritativeResult(status=st, eans=set(data))
+                    filtered = _apply_factory_exclusions(fid_str, acc_str, set(data))
+                    return AuthoritativeResult(status="success" if filtered else "empty", eans=filtered)
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.warning(f"Error reading Redis cache for authoritative EANs ({fid_str}): {e}")
 
@@ -125,6 +152,10 @@ async def get_authoritative_factory_eans(
                 redis_client.set(cache_key, json.dumps({"status": "empty", "eans": []}), ex=120)
             except Exception as e:
                 logger.warning(f"Error saving empty Redis cache for authoritative EANs ({fid_str}): {e}")
+        return AuthoritativeResult(status="empty", eans=set())
+
+    eans = _apply_factory_exclusions(fid_str, acc_str, eans)
+    if not eans:
         return AuthoritativeResult(status="empty", eans=set())
 
     # Cache successful non-empty result for 15 minutes

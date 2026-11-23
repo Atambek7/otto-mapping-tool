@@ -36,6 +36,91 @@ import { parsePositivePrice, getAftercoolPrice } from "@/lib/prices";
 
 // --- Helpers ---
 const deCollator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+const GUARDED_FACTORY_SCOPES = new Set(["JV:504487", "XL:483563"]);
+
+function getFactoryItemEan(item: any): string {
+  return String(item?.ean || item?.row?.EAN || item?.EAN || "").trim();
+}
+
+function getFactoryPageItems(data: any): any[] {
+  if (Array.isArray(data?.items)) return data.items;
+  return Array.isArray(data) ? data : [];
+}
+
+function getFactorySourcePageCount(data: any, items: any[]): number {
+  const sourceCount = Number(data?.source_page_count);
+  return Number.isFinite(sourceCount) && sourceCount >= 0 ? sourceCount : items.length;
+}
+
+function isSameFactoryItem(a: any, b: any): boolean {
+  if (a === b) return true;
+  const ra = a?.row || {};
+  const rb = b?.row || {};
+  return (
+    String(a?.ean || ra.EAN || "").trim() === String(b?.ean || rb.EAN || "").trim() &&
+    String(ra.Artikelbeschreibung || a?.name || "").trim() === String(rb.Artikelbeschreibung || b?.name || "").trim() &&
+    String(ra.Startpreis ?? a?.price ?? "").trim() === String(rb.Startpreis ?? b?.price ?? "").trim() &&
+    String(ra.SofortkaufenPreis ?? "").trim() === String(rb.SofortkaufenPreis ?? "").trim() &&
+    String(ra.GalleryURL || ra.PictureURL || a?.img || "").trim() === String(rb.GalleryURL || rb.PictureURL || b?.img || "").trim() &&
+    String(a?.factory_id ?? ra.factory_id ?? "").trim() === String(b?.factory_id ?? rb.factory_id ?? "").trim()
+  );
+}
+
+function detectClientPriceConflicts(items: any[]): Set<string> {
+  const seenPrice = new Map<string, string>();
+  const conflicts = new Set<string>();
+  for (const item of items) {
+    const ean = getFactoryItemEan(item);
+    if (!ean) continue;
+    const row = item?.row || {};
+    const sig = `${String(row.Startpreis ?? "").trim()}|${String(row.SofortkaufenPreis ?? "").trim()}`;
+    const prev = seenPrice.get(ean);
+    if (prev !== undefined && prev !== sig) {
+      conflicts.add(ean);
+    } else if (prev === undefined) {
+      seenPrice.set(ean, sig);
+    }
+  }
+  return conflicts;
+}
+
+function filterAndDedupeFactoryProducts(items: any[], excludedEans: Set<string>) {
+  const byEan = new Map<string, any>();
+  const noEan: any[] = [];
+  const conflicts = new Set<string>();
+  let excludedCount = 0;
+
+  for (const item of items) {
+    const ean = getFactoryItemEan(item);
+    if (ean && excludedEans.has(ean)) {
+      excludedCount++;
+      continue;
+    }
+    if (!ean) {
+      noEan.push(item);
+      continue;
+    }
+    if (conflicts.has(ean)) continue;
+    const prior = byEan.get(ean);
+    if (!prior) {
+      byEan.set(ean, item);
+      continue;
+    }
+    // Keep exact repeated source rows once. If the same EAN has conflicting
+    // payloads, hide it until the source is reconciled instead of picking one.
+    if (!isSameFactoryItem(prior, item)) {
+      byEan.delete(ean);
+      conflicts.add(ean);
+    }
+  }
+
+  return {
+    products: [...byEan.values(), ...noEan],
+    excludedCount,
+    duplicateCount: items.length - excludedCount - byEan.size - conflicts.size - noEan.length,
+    conflictEans: [...conflicts].sort(),
+  };
+}
 
 function parseSpecifics(raw: any) {
   if (!raw) return [];
@@ -339,6 +424,13 @@ export default function FactoryWorkspace() {
   const factoryId = params?.factory_id as string;
   const { account, setAccount } = useAccount();
   const { t } = useTranslation();
+  const requiresFactoryPolicy = GUARDED_FACTORY_SCOPES.has(`${account}:${factoryId}`);
+  const [factoryConflictEans, setFactoryConflictEans] = useState<string[]>([]);
+  const [factoryPolicyReady, setFactoryPolicyReady] = useState(false);
+  const [factoryPolicyUnavailable, setFactoryPolicyUnavailable] = useState(false);
+  const [factoryPolicyScopeKey, setFactoryPolicyScopeKey] = useState("");
+  const [factoryExclusionVersion, setFactoryExclusionVersion] = useState<string>("");
+  const [factoryExcludedEans, setFactoryExcludedEans] = useState<Set<string>>(new Set());
 
   const [products, setProducts] = useState<any[]>([]);
   const [streamedLoadedCount, setStreamedLoadedCount] = useState<number>(0);
@@ -423,6 +515,9 @@ export default function FactoryWorkspace() {
   const [hasAnyPlan, setHasAnyPlan] = useState(false);
 
   const fetchActivePlan = useCallback(async () => {
+    if (requiresFactoryPolicy && (
+      !factoryPolicyReady || factoryPolicyUnavailable || factoryPolicyScopeKey !== `${account}:${factoryId}`
+    )) return;
     try {
       const res = await fetchWithAuth(`/pipeline/plans?account_name=${account}&factory_id=${factoryId}`);
       if (res.ok) {
@@ -453,13 +548,35 @@ export default function FactoryWorkspace() {
     } catch (err) {
       console.error("Failed to fetch active plan", err);
     }
-  }, [account, factoryId]);
+  }, [account, factoryId, requiresFactoryPolicy, factoryPolicyReady, factoryPolicyUnavailable, factoryPolicyScopeKey]);
 
   useEffect(() => {
     fetchActivePlan();
-    const interval = setInterval(fetchActivePlan, 15000);
-    return () => clearInterval(interval);
   }, [fetchActivePlan]);
+
+  // Poll /pipeline/plans every 15s ONLY when an active/paused plan actually exists and the tab is visible
+  const hasActivePlanToPoll = Boolean(
+    activePlan && (activePlan.status === "active" || activePlan.status === "paused")
+  );
+  useEffect(() => {
+    if (!hasActivePlanToPoll) return;
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        fetchActivePlan();
+      }
+    };
+    const interval = setInterval(tick, 15000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchActivePlan();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [hasActivePlanToPoll, fetchActivePlan]);
 
   const handlePausePlan = async (planId: number) => {
     try {
@@ -763,6 +880,7 @@ export default function FactoryWorkspace() {
         method: "POST",
         body: JSON.stringify({
           product_eans: selectedEans,
+          factory_id: factoryId,
           account: account,
           target_group: options?.targetGroup || "Erwachsene ; Jugendliche",
           design: options?.design || "Modern",
@@ -822,6 +940,7 @@ export default function FactoryWorkspace() {
 
     let ok = 0;
     let notFound = 0;
+    let partial = 0;
     let error = 0;
 
     const chunkSize = 10;
@@ -848,6 +967,7 @@ export default function FactoryWorkspace() {
           const data = await res.json();
           for (const r of (data.results || [])) {
             if (r.status === "success") ok++;
+            else if (r.status === "partial") partial++;
             else if (r.status === "not_found" || r.status === "unresolved") notFound++;
             else error++;
           }
@@ -866,7 +986,7 @@ export default function FactoryWorkspace() {
 
     if (!isSyncCancelled.current) {
       setTimeout(async () => {
-        alert(t("workspace.alert_okb_done", { ok, notFound, error }));
+        alert(t("workspace.alert_okb_done", { ok, notFound, error }) + (partial ? `\nЧастично обновлено: ${partial}. Категория не определена.` : ""));
         await fetchMappings();
       }, 100);
     } else {
@@ -880,11 +1000,25 @@ export default function FactoryWorkspace() {
     const abortController = new AbortController();
     const signal = abortController.signal;
     const load = async () => {
+      setLoading(true);
+      setFactoryPolicyReady(false);
+      setFactoryConflictEans([]);
+      setFactoryPolicyUnavailable(false);
+      setFactoryPolicyScopeKey("");
+      setProducts([]);
+      setSelectedIds(new Set());
+      setActiveProduct(null);
+      setPreviewImage(null);
+      setIsDripModalOpen(false);
+      setIsQueueModalOpen(false);
+      setIsAiTitleModalOpen(false);
+      setIsPriceEndingModalOpen(false);
+
       // 0. Failsafe check: Does factoryId belong to the active account?
       const otherAccount = account === "JV" ? "XL" : "JV";
       try {
-        const activeListRaw = localStorage.getItem(`otto_factories_list_${account}`);
-        const otherListRaw = localStorage.getItem(`otto_factories_list_${otherAccount}`);
+        const activeListRaw = localStorage.getItem(`otto_factories_list_${account}_v2`) || localStorage.getItem(`otto_factories_list_${account}`);
+        const otherListRaw = localStorage.getItem(`otto_factories_list_${otherAccount}_v2`) || localStorage.getItem(`otto_factories_list_${otherAccount}`);
         const activeList = activeListRaw ? JSON.parse(activeListRaw) : [];
         const otherList = otherListRaw ? JSON.parse(otherListRaw) : [];
 
@@ -928,111 +1062,220 @@ export default function FactoryWorkspace() {
         console.error("Failsafe twin lookup error:", e);
       }
 
+      const activeExcludedEans = new Set<string>();
+      let activeExclusionVersion = "unrestricted";
+      if (requiresFactoryPolicy) {
+        try {
+          const policyRes = await fetchWithAuth(
+            `/mapping/factory-exclusions?account=${account}&factory_id=${factoryId}`,
+            { signal },
+          );
+          if (!policyRes.ok) throw new Error(`Политика исключений недоступна (HTTP ${policyRes.status})`);
+          const policy = await policyRes.json();
+          if (
+            policy?.account !== account ||
+            String(policy?.factory_id) !== String(factoryId) ||
+            !Array.isArray(policy?.excluded_eans) ||
+            typeof policy?.version !== "string"
+          ) throw new Error("Ответ политики исключений не соответствует фабрике/аккаунту");
+          for (const rawEan of policy.excluded_eans) {
+            const ean = String(rawEan || "").trim();
+            if (ean) activeExcludedEans.add(ean);
+          }
+          activeExclusionVersion = policy.version;
+        } catch (error) {
+          if (!signal.aborted) {
+            console.error("Failed to load factory exclusion policy:", error);
+            setFactoryPolicyUnavailable(true);
+            setFactoryPolicyReady(true);
+            setLoading(false);
+            setIsBackgroundLoading(false);
+            setProducts([]);
+            setSelectedIds(new Set());
+          }
+          return;
+        }
+      }
+      setFactoryExcludedEans(activeExcludedEans);
+      setFactoryExclusionVersion(activeExclusionVersion);
+      setFactoryPolicyScopeKey(`${account}:${factoryId}`);
+      setFactoryPolicyReady(true);
+
+      // Start factory name resolution and mappings fetch in parallel right away
+      const namePromise = (async () => {
+        try {
+          const cacheKey = `otto_factories_list_${account}_v2`;
+          const saved = localStorage.getItem(cacheKey) || localStorage.getItem(`otto_factories_list_${account}`);
+          let list = [];
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              list = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
+            } catch (e) { }
+          }
+          const found = list.find((f: any) => String(f.id) === String(factoryId));
+          if (found?.name) {
+            setFactoryName(found.name);
+          } else {
+            const nameRes = await fetchWithAuth(`/aftercool/factories?account=${account}`, { signal });
+            if (nameRes.ok) {
+              const rawList = await nameRes.json();
+              const freshList = Array.isArray(rawList) ? rawList : (rawList?.items ?? []);
+              const fFound = freshList.find((f: any) => String(f.id) === String(factoryId));
+              if (fFound?.name) setFactoryName(fFound.name);
+            }
+          }
+        } catch (e) { }
+      })();
+      const mappingsPromise = fetchMappings();
+
       // 1. Instant cache render (0-15ms)
       const cached = await getCachedFactory(factoryId, account);
+      const cachedFiltered = cached?.products?.length
+        ? filterAndDedupeFactoryProducts(cached.products, activeExcludedEans)
+        : null;
       const isCachedTruncated = Boolean(
-        cached?.products?.length && (
-          cached.products.length === 500 || 
-          (cached.total && cached.products.length < cached.total)
-        )
+        cached && cachedFiltered?.products.length && cached.total &&
+        (cached.sourceRowsCount ?? cached.products.length) < cached.total
       );
 
-      const isCacheStale = !cached?.fetchedAt || Date.now() - cached.fetchedAt > 30 * 60 * 1000;
+      const isPolicyCacheStale = Boolean(requiresFactoryPolicy && cached?.exclusionVersion !== activeExclusionVersion);
+      const isCacheStale = (requiresFactoryPolicy && !Array.isArray(cached?.conflictEans)) || !cached?.fetchedAt || Date.now() - cached.fetchedAt > 30 * 60 * 1000 || isPolicyCacheStale;
+      const hasFreshCache = Boolean(
+        cached &&
+        cachedFiltered?.products.length &&
+        !isCachedTruncated &&
+        !isCacheStale &&
+        cached.compact
+      );
 
-      if (cached?.products?.length) {
-        setProducts(cached.products);
-        setTotalCatalogCount(cached.total || cached.products.length);
+      if (cached && cachedFiltered?.products.length) {
+        setProducts(cachedFiltered.products);
+        setTotalCatalogCount(cached.total || cachedFiltered.products.length);
         setLoading(false);
-        if (!isCachedTruncated && !isCacheStale) {
+        setFactoryConflictEans([...new Set([...(cached.conflictEans || []), ...cachedFiltered.conflictEans])]);
+        if (cachedFiltered.conflictEans.length) {
+          toast.error(`Скрыты конфликтующие дубли EAN: ${cachedFiltered.conflictEans.length}.`);
+        }
+        if (requiresFactoryPolicy && cached?.exclusionVersion !== activeExclusionVersion) {
+          await setCachedFactory({
+            factoryId, products: cachedFiltered.products, total: cached.total,
+            sourceRowsCount: cached.sourceRowsCount ?? cached.products.length,
+            fetchedAt: cached.fetchedAt, exclusionVersion: activeExclusionVersion,
+            conflictEans: [...new Set([...(cached.conflictEans || []), ...cachedFiltered.conflictEans])],
+            compact: Boolean(cached.compact),
+          }, Boolean(cached.isPinned), account);
+        }
+        if (hasFreshCache) {
           setIsBackgroundLoading(false);
         }
       } else {
         setLoading(true);
       }
 
-      // 2. Fetch from network if not cached or if it looks truncated (exactly 500 or less than total)
-      let all = cached?.products || [];
-      if (!all.length || isCachedTruncated || isCacheStale) {
+      // 2. Fetch compact pages from network ONLY if cache is missing, truncated, stale, or legacy non-compact
+      if (!hasFreshCache) {
         try {
           setIsBackgroundLoading(true);
-          const syncRes = await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST", signal, timeout: 180000 } as RequestInit & { timeout: number }, 0);
-          if (!syncRes.ok) throw new Error("Aftercool metadata sync failed");
-          const syncResult = await syncRes.json();
-          const priceConflicts = new Set<string>(syncResult.price_conflicts || []);
-          if (syncResult.price_conflicts?.length) toast.error(`Конфликт цен Aftercool: ${syncResult.price_conflicts.join(", ")}. Эти цены не изменены.`);
-          if (syncResult.status === "partial_error" && (syncResult.catalog_complete === false || !syncResult.price_conflicts?.length)) throw new Error(syncResult.error || "Aftercool metadata sync incomplete");
           const PAGE_SIZE = 500;
           const res = await fetchWithAuth(
-            `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&sync_db=0`,
+            `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&compact=1&sync_db=0`,
             { signal }
           );
           if (!res.ok) throw new Error("Failed to fetch products");
           const data = await res.json();
           if (isCancelled || signal.aborted) return;
-          const firstChunk = (data?.items || data || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
-          all = [...firstChunk];
+          const firstPageItems = getFactoryPageItems(data);
+          const all: any[] = [...firstPageItems];
+          let sourceRowsLoaded = getFactorySourcePageCount(data, firstPageItems);
 
-          // Immediately display products on screen (<200ms perceived load)
-          setProducts([...all]);
+          // Immediately display first 500 products on screen
+          const firstVisible = filterAndDedupeFactoryProducts(all, activeExcludedEans);
+          setProducts(firstVisible.products);
+          setFactoryConflictEans(firstVisible.conflictEans);
+          if (firstVisible.conflictEans.length) toast.error(`Скрыты конфликтующие дубли EAN: ${firstVisible.conflictEans.length}.`);
           setLoading(false);
 
-          const total = Number(data?.total) || all.length;
+          const total = Number(data?.total) || sourceRowsLoaded;
           setTotalCatalogCount(total);
-          setStreamedLoadedCount(all.length);
+          setStreamedLoadedCount(sourceRowsLoaded);
+          if (total > 0 && sourceRowsLoaded === 0) {
+            throw new Error("Aftercool вернул пустую страницу при непустом каталоге.");
+          }
 
-          // If more products exist, fetch with Controlled Parallel Pagination (MAX_PARALLEL_PAGES = 3)
-          if (total > all.length && firstChunk.length > 0) {
+          // If more products exist, fetch remaining compact pages with controlled concurrency
+          if (total > sourceRowsLoaded) {
             const MAX_SAFE_TOTAL = 50000;
             const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
             const remainingOffsets: number[] = [];
-            for (let off = all.length; off < safeTotal; off += PAGE_SIZE) {
+            for (let off = PAGE_SIZE; off < safeTotal; off += PAGE_SIZE) {
               remainingOffsets.push(off);
             }
 
             const MAX_PARALLEL_PAGES = 3;
             for (let i = 0; i < remainingOffsets.length; i += MAX_PARALLEL_PAGES) {
               if (isCancelled || signal.aborted) return;
-              // 300ms throttle gives the browser main thread time to process user interactions
-              await new Promise((r) => setTimeout(r, 300));
+              await new Promise((r) => setTimeout(r, 150));
               if (isCancelled || signal.aborted) return;
 
               const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
               const results = await Promise.all(
                 batch.map(async (off) => {
                   const r = await fetchWithAuth(
-                    `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&sync_db=0`,
+                    `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&compact=1&sync_db=0`,
                     { signal }
                   );
                   if (!r.ok) throw new Error(`Aftercool: HTTP ${r.status}, offset ${off}`);
                   const d = await r.json();
-                  return (d?.items || d || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
+                  const pageItems = getFactoryPageItems(d);
+                  return {
+                    items: pageItems,
+                    sourceRowsCount: getFactorySourcePageCount(d, pageItems),
+                  };
                 })
               );
               if (isCancelled || signal.aborted) return;
 
-              const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
+              const validChunks = results.filter((chunk) => chunk.sourceRowsCount > 0);
               if (validChunks.length !== results.length) {
                 throw new Error("Aftercool вернул неполный каталог. Повторите обновление.");
               }
 
               for (const chunk of validChunks) {
-                all = all.concat(chunk);
+                all.push(...chunk.items);
+                sourceRowsLoaded += chunk.sourceRowsCount;
               }
 
-              // Update the lightweight counter only so the bottom progress bar updates smoothly
-              // WITHOUT triggering expensive table, stats, and ProductDrawer re-renders!
-              setStreamedLoadedCount(all.length);
+              setStreamedLoadedCount(sourceRowsLoaded);
             }
           }
 
-          if (all.length < total) throw new Error("Aftercool вернул неполный каталог");
+          if (sourceRowsLoaded < total) throw new Error("Aftercool вернул неполный каталог");
           if (!isCancelled && !signal.aborted) {
-            await setCachedFactory({ factoryId, products: all, total, fetchedAt: Date.now() }, false, account);
-            // Single final transition update once background loading completes
+            const clientPriceConflicts = detectClientPriceConflicts(all);
+            if (clientPriceConflicts.size > 0) {
+              for (const p of all) {
+                const ean = getFactoryItemEan(p);
+                if (ean && clientPriceConflicts.has(ean)) p.price_conflict = true;
+              }
+            }
+            const cleaned = filterAndDedupeFactoryProducts(all, activeExcludedEans);
+            setFactoryConflictEans(cleaned.conflictEans);
+            if (cleaned.conflictEans.length) toast.error(`Скрыты конфликтующие дубли EAN: ${cleaned.conflictEans.length}.`);
+            await setCachedFactory({
+              factoryId,
+              products: cleaned.products,
+              conflictEans: cleaned.conflictEans,
+              total,
+              sourceRowsCount: sourceRowsLoaded,
+              fetchedAt: Date.now(),
+              exclusionVersion: activeExclusionVersion,
+              compact: true,
+            }, false, account);
             startTransition(() => {
-              setProducts([...all]);
+              setProducts(cleaned.products);
               setTotalCatalogCount(total);
-              setStreamedLoadedCount(all.length);
+              setStreamedLoadedCount(sourceRowsLoaded);
             });
           }
         } catch (e: any) {
@@ -1048,42 +1291,14 @@ export default function FactoryWorkspace() {
         }
       }
 
-      // 3. Resolve factory name and fetch mappings in parallel
-      const namePromise = (async () => {
-        try {
-          const cacheKey = `otto_factories_list_${account}`;
-          const saved = localStorage.getItem(cacheKey);
-          let list = [];
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              list = Array.isArray(parsed) ? parsed : (parsed?.items ?? []);
-            } catch (e) { }
-          }
-          let found = list.find((f: any) => String(f.id) === String(factoryId));
-          if (found?.name) {
-            setFactoryName(found.name);
-          } else {
-            const nameRes = await fetchWithAuth(`/aftercool/factories?account=${account}`);
-            if (nameRes.ok) {
-              const rawList = await nameRes.json();
-              const freshList = Array.isArray(rawList) ? rawList : (rawList?.items ?? []);
-              localStorage.setItem(cacheKey, JSON.stringify(freshList));
-              const fFound = freshList.find((f: any) => String(f.id) === String(factoryId));
-              if (fFound?.name) setFactoryName(fFound.name);
-            }
-          }
-        } catch (e) { }
-      })();
-
-      await Promise.all([fetchMappings(), namePromise]);
+      await Promise.all([mappingsPromise, namePromise]);
     };
     load();
     return () => {
       isCancelled = true;
       abortController.abort();
     };
-  }, [factoryId, account, fetchMappings]);
+  }, [factoryId, account, fetchMappings, requiresFactoryPolicy]);
 
   // Auto-poll mappings ONLY when any item is legitimately In Progress or Processing
   const hasInProgress = useMemo(() => {
@@ -1105,6 +1320,12 @@ export default function FactoryWorkspace() {
 
   const handleSync = async () => {
     if (loading || isBackgroundLoading) return;
+    if (requiresFactoryPolicy && (
+      !factoryPolicyReady || factoryPolicyUnavailable || factoryPolicyScopeKey !== `${account}:${factoryId}`
+    )) {
+      toast.error("Политика исключений не подтверждена. Обновите страницу после восстановления API.");
+      return;
+    }
     setIsBackgroundLoading(true);
     try {
       const syncRes = await fetchWithAuth(`/aftercool/sync-metadata/${factoryId}?account=${account}&dataset=lister`, { method: "POST", timeout: 180000 } as RequestInit & { timeout: number }, 0);
@@ -1115,69 +1336,88 @@ export default function FactoryWorkspace() {
       if (syncResult.status === "partial_error" && (syncResult.catalog_complete === false || !syncResult.price_conflicts?.length)) throw new Error(syncResult.error || "Aftercool metadata sync incomplete");
       const PAGE_SIZE = 500;
       const res = await fetchWithAuth(
-        `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&refresh=true&sync_db=0`
+        `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=0&include_row=1&compact=1&refresh=true&sync_db=0`
       );
       if (!res.ok) throw new Error("Failed to sync products");
       const data = await res.json();
-      let all = (data?.items || data || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
-      setProducts([...all]);
+      const firstPageItems = getFactoryPageItems(data);
+      const all: any[] = firstPageItems.map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
+      let sourceRowsLoaded = getFactorySourcePageCount(data, firstPageItems);
+      const firstVisible = filterAndDedupeFactoryProducts(all, factoryExcludedEans);
+      setProducts(firstVisible.products);
+      setFactoryConflictEans(firstVisible.conflictEans);
+      if (firstVisible.conflictEans.length) toast.error(`Скрыты конфликтующие дубли EAN: ${firstVisible.conflictEans.length}.`);
       setLoading(false);
 
-      const total = Number(data?.total) || all.length;
+      const total = Number(data?.total) || sourceRowsLoaded;
       setTotalCatalogCount(total);
+      setStreamedLoadedCount(sourceRowsLoaded);
+      if (total > 0 && sourceRowsLoaded === 0) {
+        throw new Error("Aftercool вернул пустую страницу при непустом каталоге.");
+      }
 
-      if (total > all.length && all.length > 0) {
+      if (total > sourceRowsLoaded) {
         const MAX_SAFE_TOTAL = 50000;
         const safeTotal = Math.min(total, MAX_SAFE_TOTAL);
         const remainingOffsets: number[] = [];
-        for (let off = all.length; off < safeTotal; off += PAGE_SIZE) {
+        for (let off = PAGE_SIZE; off < safeTotal; off += PAGE_SIZE) {
           remainingOffsets.push(off);
         }
 
         const MAX_PARALLEL_PAGES = 3;
-        let batchesSinceLastRender = 0;
         for (let i = 0; i < remainingOffsets.length; i += MAX_PARALLEL_PAGES) {
-          await new Promise((r) => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 150));
 
           const batch = remainingOffsets.slice(i, i + MAX_PARALLEL_PAGES);
           const results = await Promise.all(
             batch.map(async (off) => {
               const r = await fetchWithAuth(
-                `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&refresh=true&sync_db=0`
+                `/aftercool/products?factory_id=${factoryId}&account=${account}&dataset=lister&limit=${PAGE_SIZE}&offset=${off}&include_row=1&compact=1&refresh=true&sync_db=0`
               );
               if (!r.ok) throw new Error(`Aftercool: HTTP ${r.status}, offset ${off}`);
               const d = await r.json();
-              return (d?.items || d || []).map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) }));
+              const pageItems = getFactoryPageItems(d);
+              return {
+                items: pageItems.map((p: any) => ({ ...p, price_conflict: priceConflicts.has(String(p.ean || p.row?.EAN || "")) })),
+                sourceRowsCount: getFactorySourcePageCount(d, pageItems),
+              };
             })
           );
 
-          const validChunks = results.filter((chunk) => Array.isArray(chunk) && chunk.length > 0);
+          const validChunks = results.filter((chunk) => chunk.sourceRowsCount > 0);
           if (validChunks.length !== results.length) {
             throw new Error("Aftercool вернул неполный каталог. Повторите обновление.");
           }
 
           for (const chunk of validChunks) {
-            all = all.concat(chunk);
+            all.push(...chunk.items);
+            sourceRowsLoaded += chunk.sourceRowsCount;
           }
 
-          batchesSinceLastRender++;
-          const isLastBatch = (i + MAX_PARALLEL_PAGES) >= remainingOffsets.length;
-          if (batchesSinceLastRender >= 2 || isLastBatch) {
-            batchesSinceLastRender = 0;
-            const snapshot = [...all];
-            startTransition(() => {
-              setProducts(snapshot);
-              setTotalCatalogCount(total);
-            });
-          }
+          setStreamedLoadedCount(sourceRowsLoaded);
         }
       }
 
-      if (all.length < total) throw new Error("Aftercool вернул неполный каталог");
+      if (sourceRowsLoaded < total) throw new Error("Aftercool вернул неполный каталог");
       {
-        await setCachedFactory({ factoryId, products: all, total, fetchedAt: Date.now() }, false, account);
-        setProducts([...all]);
-        setTotalCatalogCount(total);
+        const cleaned = filterAndDedupeFactoryProducts(all, factoryExcludedEans);
+        setFactoryConflictEans(cleaned.conflictEans);
+        if (cleaned.conflictEans.length) toast.error(`Скрыты конфликтующие дубли EAN: ${cleaned.conflictEans.length}.`);
+        await setCachedFactory({
+          factoryId,
+          products: cleaned.products,
+          conflictEans: cleaned.conflictEans,
+          total,
+          sourceRowsCount: sourceRowsLoaded,
+          fetchedAt: Date.now(),
+          exclusionVersion: factoryExclusionVersion,
+          compact: true,
+        }, false, account);
+        startTransition(() => {
+          setProducts(cleaned.products);
+          setTotalCatalogCount(total);
+          setStreamedLoadedCount(sourceRowsLoaded);
+        });
         await fetchMappings();
       }
     } catch (e) {
@@ -1251,9 +1491,10 @@ export default function FactoryWorkspace() {
         specifics: specificsStr,
         gallery_url: row.GalleryURL || p.img || p.image_url || "",
         picture_urls: row.PictureURLs || row.PictureURL || "",
-        category_id: cat
+        category_id: cat,
+        _needsFullRow: Boolean(p._compact) && !row.Beschreibung && !rawSpec,
       };
-    }).filter(Boolean);
+    }).filter(Boolean) as any[];
 
     if (payloadProducts.length === 0) {
       setIsAutoMapping(false);
@@ -1276,7 +1517,41 @@ export default function FactoryWorkspace() {
         if (isAutoMappingCancelled.current) {
           break;
         }
-        const batch = payloadProducts.slice(i, i + BATCH_SIZE);
+        const rawBatch = payloadProducts.slice(i, i + BATCH_SIZE);
+        // Hydrate full description/specifics on demand for compact rows so AI mapping quality stays 100% intact
+        const batch = await Promise.all(
+          rawBatch.map(async ({ _needsFullRow, ...item }: any) => {
+            if (!_needsFullRow) return item;
+            try {
+              const r = await fetchWithAuth(
+                `/aftercool/products?factory_id=${encodeURIComponent(factoryId)}&account=${encodeURIComponent(account)}&dataset=lister&q=${encodeURIComponent(item.ean)}&limit=5&include_row=1&compact=0&sync_db=0`
+              );
+              if (r.ok) {
+                const d = await r.json();
+                const items = Array.isArray(d) ? d : (d?.items || []);
+                const exact = items.find((it: any) => String(it?.ean || it?.row?.EAN || "").trim() === String(item.ean).trim()) || items[0];
+                const fullRow = exact?.row || {};
+                let specStr = item.specifics;
+                const rawSpec = fullRow.CustomItemSpecifics || fullRow.ItemSpecifics || "";
+                if (rawSpec) {
+                  try {
+                    const parsed = typeof rawSpec === "string" ? JSON.parse(rawSpec) : rawSpec;
+                    if (Array.isArray(parsed)) specStr = parsed.map((x: any) => `${x.Name}: ${x.Value}`).join(", ");
+                    else if (typeof parsed === "object" && parsed !== null) specStr = Object.entries(parsed).map(([k, v]) => `${k}: ${v}`).join(", ");
+                  } catch {
+                    specStr = String(rawSpec);
+                  }
+                }
+                return {
+                  ...item,
+                  description: fullRow.Beschreibung || item.description,
+                  specifics: specStr || item.specifics,
+                };
+              }
+            } catch { }
+            return item;
+          })
+        );
 
         const res = await fetchWithAuth(`/mapping/auto-map`, {
           method: "POST",
@@ -1371,7 +1646,7 @@ export default function FactoryWorkspace() {
       const options: any = { method: "GET" };
       if (eans.length > 0) {
         options.method = "POST";
-        options.body = JSON.stringify({ product_eans: eans });
+        options.body = JSON.stringify({ product_eans: eans, account });
       }
 
       const res = await fetchWithAuth(`/csv/export/categories/${factoryId}`, options);
@@ -1429,7 +1704,7 @@ export default function FactoryWorkspace() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ product_eans: eans })
+          body: JSON.stringify({ product_eans: eans, account })
         }
       );
 
@@ -1685,12 +1960,13 @@ export default function FactoryWorkspace() {
         if (data.updated_categories) msgParts.push(t("workspace.import_categories_count", { count: data.updated_categories }));
         if (data.updated_attributes) msgParts.push(t("workspace.import_attributes_count", { count: data.updated_attributes }));
         if (data.skipped_foreign_eans) msgParts.push(t("workspace.import_skipped_count", { count: data.skipped_foreign_eans }));
+        if (data.skipped_excluded_eans) msgParts.push(`исключённых из фабрики: ${data.skipped_excluded_eans}`);
         
         let finalAlert = "";
         if ((data.updated_categories || 0) > 0 || (data.updated_attributes || 0) > 0) {
           finalAlert = t("workspace.import_success") + "\n" + msgParts.join(" | ");
-        } else if ((data.skipped_foreign_eans || 0) > 0) {
-          finalAlert = t("workspace.import_skipped_all", { count: data.skipped_foreign_eans });
+        } else if ((data.skipped_foreign_eans || 0) > 0 || (data.skipped_excluded_eans || 0) > 0) {
+          finalAlert = [...msgParts].join(" | ");
         } else {
           finalAlert = t("workspace.import_no_changes");
         }
@@ -1828,12 +2104,13 @@ export default function FactoryWorkspace() {
         if (data.updated_categories) msgParts.push(t("workspace.import_categories_count", { count: data.updated_categories }));
         if (data.updated_attributes) msgParts.push(t("workspace.import_attributes_count", { count: data.updated_attributes }));
         if (data.skipped_foreign_eans) msgParts.push(t("workspace.import_skipped_count", { count: data.skipped_foreign_eans }));
+        if (data.skipped_excluded_eans) msgParts.push(`исключённых из фабрики: ${data.skipped_excluded_eans}`);
         
         let finalAlert = "";
         if ((data.updated_categories || 0) > 0 || (data.updated_attributes || 0) > 0) {
           finalAlert = t("workspace.import_success") + "\n" + msgParts.join(" | ");
-        } else if ((data.skipped_foreign_eans || 0) > 0) {
-          finalAlert = t("workspace.import_skipped_all", { count: data.skipped_foreign_eans });
+        } else if ((data.skipped_foreign_eans || 0) > 0 || (data.skipped_excluded_eans || 0) > 0) {
+          finalAlert = [...msgParts].join(" | ");
         } else {
           finalAlert = t("workspace.import_no_changes");
         }
@@ -1855,21 +2132,37 @@ export default function FactoryWorkspace() {
     }
   }, [factoryId, factoryName, fetchMappings]);
 
-  // Client-side processing (in-place index caching, zero object allocations)
+  // Client-side processing (in-place index caching + O(1) EAN->product Map, zero object allocations)
+  const productsByEanRef = useRef<Map<string, any>>(new Map());
   const enrichedProducts = useMemo(() => {
+    const byEan = new Map<string, any>();
     for (let i = 0; i < products.length; i++) {
       const p = products[i];
+      const row = p.row || {};
+      const ean = String(p.ean || row.EAN || "");
+      if (ean) byEan.set(ean, p);
       if (!p._searchIndex) {
-        const row = p.row || {};
         const title = row.Artikelbeschreibung || p.name || "";
-        const ean = String(p.ean || row.EAN || "");
         p._searchIndex = `${title} ${ean}`.toLowerCase();
       }
     }
+    productsByEanRef.current = byEan;
     return products;
   }, [products]);
 
+  const needsMappingsInProcessed = Boolean(
+    deferredSearch.trim() ||
+    categoryFilter.trim() ||
+    statusFilter.trim() ||
+    onlyOver70 ||
+    sort.col === "price" ||
+    sort.col === "category" ||
+    sort.col === "status"
+  );
+  const mappingsForProcessed = needsMappingsInProcessed ? mappings : undefined;
+
   const processed = useMemo(() => {
+    const activeMappings = mappingsForProcessed || {};
     const hasSearch = Boolean(deferredSearch.trim());
     const hasCategory = Boolean(categoryFilter.trim());
     const hasStatus = Boolean(statusFilter.trim());
@@ -1884,7 +2177,7 @@ export default function FactoryWorkspace() {
     if (hasOver70) {
       arr = arr.filter(p => {
         const ean = p.ean || (p.row || {}).EAN || "";
-        const mapData = mappings[ean];
+        const mapData = activeMappings[ean];
         const rawTitle = (mapData?.product_name || "").trim();
         const title = (rawTitle && rawTitle !== "Без названия" && rawTitle.toLowerCase() !== "null")
           ? rawTitle
@@ -1897,7 +2190,7 @@ export default function FactoryWorkspace() {
       arr = arr.filter(p => {
         if (p._searchIndex && p._searchIndex.includes(q)) return true;
         const ean = p.ean || (p.row || {}).EAN;
-        const mappedTitle = mappings[ean]?.product_name;
+        const mappedTitle = activeMappings[ean]?.product_name;
         return !!(mappedTitle && mappedTitle.toLowerCase().includes(q));
       });
     }
@@ -1905,7 +2198,7 @@ export default function FactoryWorkspace() {
       const q = categoryFilter.toLowerCase();
       arr = arr.filter(p => {
         const ean = p.ean || (p.row || {}).EAN;
-        const cat = mappings[ean]?.category_name || mappings[ean]?.category || "";
+        const cat = activeMappings[ean]?.category_name || activeMappings[ean]?.category || "";
         return cat.toLowerCase().includes(q);
       });
     }
@@ -1913,7 +2206,7 @@ export default function FactoryWorkspace() {
       const q = statusFilter.toLowerCase().trim();
       arr = arr.filter(p => {
         const ean = p.ean || (p.row || {}).EAN || "";
-        const mapData = mappings[ean];
+        const mapData = activeMappings[ean];
         const stKey = getProductStatusKey(p, mapData);
         if (q === "unmapped") return stKey === "unmapped";
         if (q === "need") return stKey === "need";
@@ -1930,7 +2223,7 @@ export default function FactoryWorkspace() {
       if (sort.col === "price") {
         const mapped = arr.map((item) => ({
           item,
-          price: getItemNumericPrice(item, mappings)
+          price: getItemNumericPrice(item, activeMappings)
         }));
 
         mapped.sort((a, b) => {
@@ -1955,10 +2248,10 @@ export default function FactoryWorkspace() {
           if (sort.col === "name") {
             key = row.Artikelbeschreibung || item.name || "";
           } else if (sort.col === "category") {
-            key = mappings[ean]?.category_name || mappings[ean]?.category || "";
+            key = activeMappings[ean]?.category_name || activeMappings[ean]?.category || "";
           } else if (sort.col === "status") {
             const ean = item.ean || row.EAN || "";
-            const mapData = mappings[ean];
+            const mapData = activeMappings[ean];
             key = getProductStatusKey(item, mapData);
           } else {
             key = ean;
@@ -1978,7 +2271,7 @@ export default function FactoryWorkspace() {
       }
     }
     return arr;
-  }, [enrichedProducts, deferredSearch, sort, categoryFilter, statusFilter, onlyOver70, mappings]);
+  }, [enrichedProducts, deferredSearch, sort, categoryFilter, statusFilter, onlyOver70, mappingsForProcessed]);
 
   // Virtualizer with lean overscan for max FPS
   const rowVirtualizer = useVirtualizer({
@@ -2044,8 +2337,7 @@ export default function FactoryWorkspace() {
         const oldMapping = prev[ean];
         if (oldMapping?.product_name === newTitle) return prev;
 
-        const prodList = productsRef.current;
-        const p = prodList.find(prod => (prod.ean || prod.row?.EAN) === ean);
+        const p = productsByEanRef.current.get(ean);
         const fallbackCat = p?.category_id || (p?.row && p?.row?.category_id) || p?.category || "";
         const fallbackCatName = p?.category_name || (p?.row && p?.row?.category_name) || fallbackCat;
 
@@ -2066,21 +2358,17 @@ export default function FactoryWorkspace() {
         };
       });
     });
-    // Mutate in-place without replacing the products array reference to avoid
-    // re-triggering expensive O(N log N) sorting and full-table re-renders.
-    setProducts(prev => {
-      const target = prev.find(p => (p.ean || p.row?.EAN) === ean);
-      if (target) {
-        target.name = newTitle;
-        if (target.row) {
-          target.row.Artikelbeschreibung = newTitle;
-        }
-        if (target._searchIndex) {
-          target._searchIndex = `${newTitle} ${ean}`.toLowerCase();
-        }
+    // O(1) in-place update without replacing the products array reference
+    const target = productsByEanRef.current.get(ean);
+    if (target) {
+      target.name = newTitle;
+      if (target.row) {
+        target.row.Artikelbeschreibung = newTitle;
       }
-      return prev;
-    });
+      if (target._searchIndex) {
+        target._searchIndex = `${newTitle} ${ean}`.toLowerCase();
+      }
+    }
   }, []);
 
   const handleCloseDrawer = useCallback(() => {
@@ -2136,13 +2424,26 @@ export default function FactoryWorkspace() {
     const eans = Object.keys(updated);
     if (eans.length === 0) return;
 
+    const byEan = productsByEanRef.current;
+    for (const [ean, newTitle] of Object.entries(updated)) {
+      const target = byEan.get(ean);
+      if (target) {
+        target.name = newTitle;
+        if (target.row) {
+          target.row.Artikelbeschreibung = newTitle;
+        }
+        if (target._searchIndex) {
+          target._searchIndex = `${newTitle} ${ean}`.toLowerCase();
+        }
+      }
+    }
+
     startTransition(() => {
       setMappings(prev => {
         const next = { ...prev };
-        const prodList = productsRef.current;
         for (const [ean, newTitle] of Object.entries(updated)) {
           const oldMapping = prev[ean];
-          const p = prodList.find(prod => (prod.ean || prod.row?.EAN) === ean);
+          const p = byEan.get(ean);
           const fallbackCat = p?.category_id || (p?.row && p?.row?.category_id) || p?.category || "";
           const fallbackCatName = p?.category_name || (p?.row && p?.row?.category_name) || fallbackCat;
 
@@ -2162,24 +2463,6 @@ export default function FactoryWorkspace() {
         return next;
       });
     });
-
-    setProducts(prev => {
-      const eanMap = new Map(Object.entries(updated));
-      for (const p of prev) {
-        const pEan = p.ean || p.row?.EAN;
-        if (pEan && eanMap.has(pEan)) {
-          const newTitle = eanMap.get(pEan)!;
-          p.name = newTitle;
-          if (p.row) {
-            p.row.Artikelbeschreibung = newTitle;
-          }
-          if (p._searchIndex) {
-            p._searchIndex = `${newTitle} ${pEan}`.toLowerCase();
-          }
-        }
-      }
-      return prev;
-    });
   }, []);
 
   const handleInlinePriceSaved = useCallback((ean: string, newPrice: string) => {
@@ -2196,15 +2479,12 @@ export default function FactoryWorkspace() {
         };
       });
     });
-    // Mutate in-place without replacing the products array reference
-    setProducts(prev => {
-      const target = prev.find(p => (p.ean || p.row?.EAN) === ean);
-      if (target && target.row) {
-        target.row.Startpreis = newPrice;
-        target.row.SofortkaufenPreis = newPrice;
-      }
-      return prev;
-    });
+    // O(1) in-place update without replacing the products array reference
+    const target = productsByEanRef.current.get(ean);
+    if (target && target.row) {
+      target.row.Startpreis = newPrice;
+      target.row.SofortkaufenPreis = newPrice;
+    }
   }, []);
 
   const handlePricesUpdated = useCallback((updated: Record<string, string>) => {
@@ -2268,8 +2548,19 @@ export default function FactoryWorkspace() {
       });
     };
 
+    const stopAutoScroll = () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+    };
+
     const autoScrollLoop = () => {
-      if (isDragging.current && lastMouseY.current !== null && parentRef.current && dragStartIndex.current !== null) {
+      if (!isDragging.current || dragStartIndex.current === null) {
+        animationFrameId = 0;
+        return;
+      }
+      if (lastMouseY.current !== null && parentRef.current) {
         const rect = parentRef.current.getBoundingClientRect();
         const y = lastMouseY.current;
         const edgeZone = 30;
@@ -2285,7 +2576,6 @@ export default function FactoryWorkspace() {
       }
       animationFrameId = requestAnimationFrame(autoScrollLoop);
     };
-    animationFrameId = requestAnimationFrame(autoScrollLoop);
 
     const handleMouseMove = (e: MouseEvent) => {
       lastMouseY.current = e.clientY;
@@ -2298,6 +2588,9 @@ export default function FactoryWorkspace() {
         if (Math.hypot(dx, dy) > 4) {
           isDragging.current = true;
           applyDragRange(dragStartIndex.current);
+          if (!animationFrameId) {
+            animationFrameId = requestAnimationFrame(autoScrollLoop);
+          }
         }
       }
 
@@ -2320,6 +2613,7 @@ export default function FactoryWorkspace() {
     };
 
     const handleGlobalMouseUp = () => {
+      stopAutoScroll();
       if (isDragging.current) {
         setTimeout(() => {
           isDragging.current = false;
@@ -2335,7 +2629,7 @@ export default function FactoryWorkspace() {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      stopAutoScroll();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
@@ -2473,6 +2767,25 @@ export default function FactoryWorkspace() {
     return Math.max(0, selectedEansArray.length - selectedXlAlreadyGeneratedCount);
   }, [isAiTitleModalOpen, selectedIds.size, selectedEansArray.length, selectedXlAlreadyGeneratedCount]);
 
+  if (requiresFactoryPolicy && (!factoryPolicyReady || factoryPolicyUnavailable || factoryPolicyScopeKey !== `${account}:${factoryId}`)) {
+    return (
+      <main className="min-h-screen bg-slate-50 dark:bg-[#0b101b] p-8 text-slate-900 dark:text-slate-100">
+        <section className="mx-auto mt-20 max-w-xl rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-6 shadow-xl">
+          <h1 className="text-lg font-semibold">Политика фабрики</h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {factoryPolicyUnavailable
+              ? "Не удалось загрузить исключения для этой фабрики. Каталог и действия временно заблокированы, чтобы не показать и не обработать исключённые товары."
+              : "Проверяем актуальный список исключений перед загрузкой товаров."}
+          </p>
+          <div className="mt-5 flex gap-3">
+            {factoryPolicyUnavailable && <Button onClick={() => window.location.reload()}>Повторить</Button>}
+            <Button variant="outline" onClick={() => router.push("/dashboard/factories")}>К списку фабрик</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (loading && products.length === 0) {
     return (
       <div className="p-10 text-slate-500 dark:text-slate-400 flex items-center gap-3">
@@ -2490,6 +2803,7 @@ export default function FactoryWorkspace() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      {factoryConflictEans.length > 0 && <div role="alert" className="m-4 rounded-lg border border-amber-500 p-3 text-sm text-amber-600">Конфликт данных источника: {factoryConflictEans.length} EAN временно скрыты. В источнике для них несколько разных товаров. Требуется сверка: {factoryConflictEans.join(", ")}</div>}
       {/* ── DRAG & DROP OVERLAY ── */}
       {isDragOver && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl pointer-events-none"
@@ -2554,7 +2868,9 @@ export default function FactoryWorkspace() {
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {t("workspace.products_in_workspace", {
                   current: products.length.toLocaleString(),
-                  total: totalCatalogCount && totalCatalogCount > products.length ? t("workspace.of_total", { total: totalCatalogCount.toLocaleString() }) : "",
+                  total: !requiresFactoryPolicy && totalCatalogCount && totalCatalogCount > products.length
+                    ? t("workspace.of_total", { total: totalCatalogCount.toLocaleString() })
+                    : "",
                   account
                 })}
               </p>
@@ -3502,6 +3818,7 @@ export default function FactoryWorkspace() {
       {isMassEditOpen && (
         <MassEditDrawer
           selectedEans={selectedEansArray}
+          factoryId={factoryId}
           account={account}
           onClose={() => setIsMassEditOpen(false)}
           onSaved={() => {

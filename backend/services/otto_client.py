@@ -78,6 +78,7 @@ class OttoMarketClient:
 
                 return {
                     "status_code": response.status_code,
+                    "request_attempted": True,
                     "response": result
                 }
             except requests.exceptions.Timeout as e:
@@ -86,16 +87,16 @@ class OttoMarketClient:
                     time.sleep(backoff)
                     backoff *= 2
                     continue
-                return {"status_code": 504, "error": f"Otto API request timed out after {self.timeout}s: {e}"}
+                return {"status_code": 504, "request_attempted": True, "error": f"Otto API request timed out after {self.timeout}s: {e}"}
             except requests.exceptions.RequestException as e:
                 logging.warning(f"[OttoMarketClient] Network error publishing products (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(backoff)
                     backoff *= 2
                     continue
-                return {"status_code": 502, "error": f"Otto API network connection error: {e}"}
+                return {"status_code": 502, "request_attempted": True, "error": f"Otto API network connection error: {e}"}
 
-        return {"status_code": 429, "error": "Max retries reached due to rate limits."}
+        return {"status_code": 429, "request_attempted": True, "error": "Max retries reached due to rate limits."}
 
     def get_update_task(self, task_href_or_id: str) -> Dict[str, Any]:
         try:
@@ -182,6 +183,54 @@ class OttoMarketClient:
 
         return {"status_code": last_status, "error": f"Max retries reached ({last_status})"}
 
+    def update_initial_quantity_once(self, sku: str) -> Dict[str, Any]:
+        """Send one initial quantity request; an uncertain result is never retried here."""
+        try:
+            token = self.get_access_token()
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 401
+            return {"status_code": status, "error": str(exc), "request_sent": False}
+        except Exception as exc:
+            return {"status_code": 401, "error": str(exc), "request_sent": False}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/availability/quantities", headers=headers,
+                json=[{"sku": sku, "quantity": 20}], timeout=min(10.0, self.timeout),
+            )
+            try:
+                result = response.json()
+            except ValueError:
+                result = {"text": response.text}
+            return {"status_code": response.status_code, "response": result, "request_sent": True}
+        except requests.exceptions.RequestException as exc:
+            logging.warning("Initial quantity request outcome unknown: %s", exc)
+            return {"status_code": 0, "error": str(exc), "request_sent": True}
+
+    def update_initial_delivery_once(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Send one initial delivery-profile request without transport retries."""
+        try:
+            token = self.get_access_token()
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 401
+            return {"status_code": status, "error": str(exc), "request_sent": False}
+        except Exception as exc:
+            return {"status_code": 401, "error": str(exc), "request_sent": False}
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/availability/product-delivery-information",
+                headers=headers, json=[item], timeout=min(10.0, self.timeout),
+            )
+            try:
+                result = response.json()
+            except ValueError:
+                result = {"text": response.text}
+            return {"status_code": response.status_code, "response": result, "request_sent": True}
+        except requests.exceptions.RequestException as exc:
+            logging.warning("Initial delivery request outcome unknown: %s", exc)
+            return {"status_code": 0, "error": str(exc), "request_sent": True}
+
     def update_product_delivery_information(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Updates shipping profile and delivery information for SKUs.
@@ -198,26 +247,17 @@ class OttoMarketClient:
             "Content-Type": "application/json"
         }
 
-        last_status = 429
         req_timeout = min(10.0, self.timeout)
-        for attempt in range(2):
+        try:
+            resp = requests.post(url, headers=headers, json=items, timeout=req_timeout)
             try:
-                resp = requests.post(url, headers=headers, json=items, timeout=req_timeout)
-                last_status = resp.status_code
-                if resp.status_code in (429, 502, 503, 504) and attempt < 1:
-                    time.sleep(1.0)
-                    continue
-                try:
-                    result = resp.json()
-                except ValueError:
-                    result = {"status_code": resp.status_code, "text": resp.text}
-                return {"status_code": resp.status_code, "response": result}
-            except requests.exceptions.RequestException as e:
-                if attempt < 1:
-                    time.sleep(1.0)
-                    continue
-                logging.error(f"[OttoMarketClient] Error updating delivery information: {e}")
-                return {"status_code": last_status, "error": f"Max retries reached ({last_status})"}
+                result = resp.json()
+            except ValueError:
+                result = {"status_code": resp.status_code, "text": resp.text}
+            return {"status_code": resp.status_code, "response": result}
+        except requests.exceptions.RequestException as e:
+            logging.error(f"[OttoMarketClient] Delivery update outcome unknown: {e}")
+            return {"status_code": 0, "error": str(e), "request_sent": True}
 
     def get_category_definition(self, category_id: str) -> Dict[str, Any]:
         """

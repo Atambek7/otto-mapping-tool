@@ -1,0 +1,17 @@
+# NEW_OTTO_3 remaining risks — read-only analysis, 2026-11-13
+
+Scope: JV 504487 / XL 483563, current deployed code after the first corrections. No fixes, deployments, live writes or background operations performed. Authenticated read-only GETs and pure validator calls only.
+
+1. **Confirmed runtime: whole-factory category export fails without a selection.** Workspace handleExportCategories sends GET /csv/export/categories/{factoryId} without account when selected EAN list is empty. With a selection it sends account in POST JSON. Both live GETs returned HTTP 409 ACCOUNT_CONTEXT_REQUIRED. Previous audit exercised scoped POST and missed this frontend GET variant. Fix is to preserve account in the no-selection URL as well; do not relax backend isolation.
+
+2. **Confirmed selection inconsistency; downstream consequence is a risk.** Frontend removes conflicting duplicate EANs from products and selection. Whole-factory AI title generation omits eans and backend queries all account/factory mappings; full factory exports also use DB mappings. Factory authoritative EAN sets apply NEW_OTTO_2 exclusions, but not source payload conflict quarantine. Thus hidden EAN 4072102209861 can still be in these command scopes. Drip may include it once it has eligible status/category. Fresh product lookup rejects conflicting prices but returns the first match when prices agree, even if names/content differ. No live AI/publish command was executed in this analysis. A visible warning alone does not make all commands use one safe conflict set.
+
+3. **Confirmed code gap: old invalid categories can enter Drip eligibility.** Preview/create check status Ready/Error and bool(category_id), not taxonomy existence. An existing N/A is truthy. get_missing_required_attributes('N/A', {}) returned [] in a pure call, although validate_product correctly returns category-not-found. New category write checks prevent newly submitted N/A through corrected paths, but existing invalid mappings need separate validation at planning/execution. This analysis did not create a live plan or send a product.
+
+4. **Confirmed by code: bulk editor ignores HTTP errors.** BulkEditorDrawer.handleSave awaits category and attribute fetches without inspecting res.ok, then calls onSave/onClose. A returned HTTP 400/409/500 does not throw. The UI can appear saved when a write was rejected. No failing live mutation was sent to reproduce it.
+
+5. **Architectural risk: drawer category and attributes are two separate commits.** ProductDrawer handles both error responses, but a successful /category followed by failed /attributes leaves the category committed. The UI cannot roll back that first write atomically. Especially relevant to fresh NEW_OTTO_3 products undergoing initial mapping. No artificial production fault was injected.
+
+6. **Previously observed XL hydration warning.** Shared useAccount renders JV on the server and can initialize XL from localStorage on the client. Prior browser cases recorded recoverable React #418. Does not prove account-scoped DB contamination; successful scoped saves were verified. Shared-hook changes require separate regression checks.
+
+Recommended first: fix missing account in export; make conflict handling consistent for whole-factory operations and reject invalid taxonomy IDs in Drip; then handle bulk-editor HTTP errors/partial save semantics. These findings do not establish that NEW_OTTO_2 exclusions have stopped working or that all issues are exclusive to NEW_OTTO_3.

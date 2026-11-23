@@ -75,6 +75,8 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
     }
     return {
       ean: sampleProduct?.ean || row.EAN || "",
+      factory_id: factoryId,
+      account,
       title: row.Artikelbeschreibung || sampleProduct?.name || "",
       specifics: specificsStr,
       gallery_url: row.GalleryURL || "",
@@ -181,7 +183,7 @@ export function BulkEditorDrawer({ selectedEans, factoryId, sampleProduct, onClo
       if (Object.keys(attributes).length > 0) {
         await fetchWithAuth("/mapping/attributes/bulk", {
           method: "POST",
-          body: JSON.stringify({ product_eans: selectedEans, attributes, account }),
+          body: JSON.stringify({ product_eans: selectedEans, attributes, account, factory_id: factoryId }),
         });
       }
 
