@@ -9,3 +9,8 @@ out/
 *.sqlite3-shm
 *.sqlite3-wal
 *.tsbuildinfo
+snapshots/*.db
+snapshots/*.db.gz
+snapshots/*.xlsx
+snapshots/*.csv
+reports/*.csv

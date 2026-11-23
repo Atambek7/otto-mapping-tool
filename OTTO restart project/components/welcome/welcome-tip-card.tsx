@@ -47,8 +47,8 @@ export function WelcomeTipCard() {
       </div>
 
       <p className="tip-main-text">
-        Начните с раздела «Кандидаты 3/12M», если хотите быстро приступить к
-        обработке товаров Restart.
+        Начните с раздела «Товары Afterbuy» или «Товары напрямую из OTTO», чтобы
+        отфильтровать карточки 3/12 месяцев и настроить Drip Feed.
       </p>
 
       <div className="tip-checklist">

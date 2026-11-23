@@ -26,9 +26,9 @@
 | Новые EAN | Пользователь загружает пул отдельным файлом; бот **не генерирует** новые EAN |
 | Идентификаторы по умолчанию | `new_ean = new_sku = new_product_reference` — только когда это допустимо для реального нового товара |
 | Альтернативный вариант | `new_ean = new_sku`, `new_product_reference = old_product_reference` — отдельный эксперимент для настоящих вариаций, только после проверки правил OTTO |
-| Базовая цена | **Текущая стандартная цена старого SKU на OTTO**, отдельно для JV/XL; не Aftercool, не Excel и не `salePrice` |
-| Цена JV | `new_standard_price = old_otto.standardPrice.amount − 10.00 EUR` |
-| Цена XL | `new_standard_price = old_otto.standardPrice.amount − 15.00 EUR` |
+| Базовая цена | Для Aftercool/Afterbuy сравнить подтверждённые цены OTTO standardPrice и Aftercool Startpreis и взять большую; если доступна только одна — использовать её. Direct OTTO использует только OTTO standardPrice. Не использовать `salePrice` или цену из файла. |
+| Цена JV | Из выбранной базовой цены вычесть `10.00 EUR`, затем установить окончание `.99` |
+| Цена XL | Из выбранной базовой цены вычесть `20.00 EUR`, затем установить окончание `.99` |
 | Старые товары | Не пытаться автоматически удалить, не перезаписывать и не изменять их состояние |
 | Начальная стадия | Read-only аудит, проектирование, импорт, Dry-Run. **Никакой реальной публикации до разрешения сценария OTTO/GTIN и одобрения оператора** |
 
@@ -181,7 +181,7 @@
 | Выбор | Чекбокс только для доступных операций; явно показывать охват «страница / все отфильтрованные» |
 | Товар | Миниатюра, краткое старое/новое название |
 | EAN / SKU | `OLD → NEW`, копирование полного значения, поиск |
-| Цена OTTO | `standardPrice → −10/−15 € → new standardPrice`, время чтения |
+| Цена | Выбранная подтверждённая базовая цена; отдельный текст под суммой в таблице не показывать |
 | Качество | Сводка атрибутов/ошибок, причина блокировки |
 | OTTO | `activeStatus` и `marketplaceStatus` по отдельности |
 | Restart | Шаг обработки, последний ответ, детали |
@@ -201,7 +201,7 @@
 | SKU | `old_sku` | `new_sku` |
 | Product Reference | `old_product_reference` | `new_product_reference` + режим |
 | Название | Название источника | Проверяемое AI-название, счётчик символов |
-| Цена | `old_sku.standardPrice.amount` из OTTO | Рассчитанный `new_standard_price` |
+| Цена | Подтверждённая цена OTTO и/или Aftercool; при двух ценах — большая | Рассчитанная цена на основе доступной подтверждённой базы |
 | Статусы | `activeStatus`, `marketplaceStatus` | локальная готовность / фактические статусы OTTO после отправки |
 | Категория | Исходная | Проверенная целевая |
 | Атрибуты | Имеющиеся | Копируемые/добавленные + дифф |
@@ -374,25 +374,29 @@ otto-bot/
 ### 6.3. Обязательная логика цены
 
 ```text
-source = OTTO / current account / old SKU
-base = GET /v5/products/{old_sku}/prices → standardPrice.amount
+source = account-scoped, identity-verified source prices
+otto = GET /v5/products/{old_sku}/prices → standardPrice.amount (if available)
+aftercool = matched Aftercool Startpreis (for Aftercool/Afterbuy source only, if available)
 
-if account == JV: discount = 10.00 EUR
-if account == XL: discount = 15.00 EUR
+if source_type == OTTO_DIRECT: base = required positive OTTO price
+elif otto and aftercool: base = max(otto, aftercool)
+elif otto or aftercool: base = the available positive price
+else: PRICE_UNAVAILABLE / PRICE_REVIEW_REQUIRED
 
-new_standard_price = base − discount
+discount = 10.00 EUR for JV, 20.00 EUR for XL
+new_standard_price = floor((base − discount) to whole EUR) + 0.99 EUR
 ```
 
 - `salePrice` не брать за основу, не наследовать старую sale-акцию автоматически.
-- Aftercool, Excel/CSV и внутренняя БД не являются fallback ценой.
-- Нет цены OTTO / не тот аккаунт / неправильная валюта / некорректная сумма → `PRICE_UNAVAILABLE` или `PRICE_REVIEW_REQUIRED`, **без отправки**.
+- Aftercool цена используется только при подтверждённой связи с тем же аккаунтом, EAN, товаром и фабрикой. Если подтверждена только одна из двух цен, она не сравнивается с отсутствующей.
+- Excel/CSV и внутренняя БД не являются источниками цены. Неподтверждённая цена/валюта или отсутствие обеих доступных цен → `PRICE_UNAVAILABLE` или `PRICE_REVIEW_REQUIRED`, **без отправки**.
 - Расчёт через `Decimal` или целые центы, не `float`.
-- Сохранять исходный SKU, аккаунт, base, сумму вычета, итог, валюту, timestamp, версию snapshot.
-- При утверждении и перед **первой фактической отправкой** заново читать `standardPrice.amount` старого SKU; изменение базы сбрасывает approval.
+- Сохранять исходный SKU, аккаунт, подтверждённые цены, выбранную базу, источник выбора, сумму вычета, итог, валюту, timestamp, версию snapshot.
+- При утверждении и перед **первой фактической отправкой** заново читать доступные цены источников; изменение любой подтверждённой цены или выбранной базы сбрасывает approval.
 - Сохранять immutable payload для отправки. Повторная попытка не должна ещё раз уменьшить уже пересчитанную цену.
 - После успешной разрешённой операции проверять стандартную цену **нового** SKU в OTTO.
 
-**Пример изменения цены:** OTTO было 100 €, стало 110 €: JV `90 → 100 €`, XL `85 → 95 €` (пересчёт отдельно по аккаунтам).
+**Пример:** OTTO 100 € и Aftercool 110 € дают базу 110 €; если Aftercool недоступен, а OTTO 100 € подтверждён — база 100 €. После этого для JV применяется −10 €, для XL −20 €, затем окончание `.99`.
 
 ### 6.4. Жизненный цикл
 
@@ -425,7 +429,7 @@ IMPORTED → VALIDATING_SOURCE → CHECKING_OTTO_STATUS
 | **1. UI shell** | Создать новый layout, sidebar, product switcher, account switcher и страницы-скелеты | Только новые файлы | `/restart` открывается без изменения OttoFlow |
 | **2. Контракт API** | DTO, типизированный клиент, error states; собственный API-namespace | Новые файлы | Типы и интерфейс согласованы, существующие API не менялись |
 | **3. EAN + batches** | Import, dry-run, pool, таблицы и история | Новые миграции/сервисы | Файлы проверяются, EAN не расходуются в dry-run |
-| **4. Prepare + review** | Связь старого и нового товара, AI, проверка атрибутов, price flow, drawer | Новый модуль | Цена только OTTO standardPrice, причины блокировки видны |
+| **4. Prepare + review** | Связь старого и нового товара, AI, проверка атрибутов, price flow, drawer | Новый модуль | Для Aftercool/Afterbuy используется максимум обеих подтверждённых цен либо единственная доступная; Direct OTTO — только OTTO |
 | **5. Queue + monitor** | Собственные Restart-задачи, pause/resume, сверка состояний | Только после подтверждения границ | Нет воздействия на очередь OttoFlow |
 | **6. Проверки и тесты** | Unit, integration, UI/e2e, нагрузочные, безопасность | Mock/sandbox | Все критерии ниже выполнены |
 | **7. Production pilot** | Только разрешённые товары и после OTTO/GTIN и пользовательского approval | Отдельное разрешение | Реальный ONLINE и цена подтверждены |
@@ -495,7 +499,7 @@ IMPORTED → VALIDATING_SOURCE → CHECKING_OTTO_STATUS
 
 ## 11. Готовая команда для Codex (первая итерация)
 
-> Изучи документ `OttoRestart_Architecture_and_Frontend_Plan.md` и действующий `AGENTS.md`. Сейчас открыт проект `otto-bot` по SSH Remote. **Выполни только фазу 0: read-only аудит репозитория и точный план реализации независимого OttoRestart.** OttoFlow не трогать: нельзя изменять его исходники, Sidebar, маршруты, API, модели, задачи или настройки. Разрешено только изучать существующий код и брать решения как образец. Новый продукт должен иметь собственные layout, Sidebar, страницы, API, backend, очередь и данные. Проверь, можно ли сделать `/restart` без изменения root-layout и существующих модулей; если нельзя, предложи отдельное frontend-приложение внутри того же репозитория. **Не пиши код, не создавай миграции, не вызывай OTTO write API.** Верни конкретный перечень файлов, рекомендуемую структуру и минимальные технические точки подключения; перечисли любые необходимые исключения из правила «только новые файлы» для моего предварительного утверждения. Учитывай: исходная цена берётся только из `GET /v5/products/{old_sku}/prices` → `standardPrice.amount` соответствующего аккаунта; JV −10 €, XL −15 €; старые и новые EAN предоставляются файлами; publish закрыт до проверки GTIN/правил OTTO и моего разрешения.
+> Изучи документ `OttoRestart_Architecture_and_Frontend_Plan.md` и действующий `AGENTS.md`. Выполни read-only аудит и подготовь точный план отдельного OttoRestart, не изменяя OttoFlow. Для Aftercool/Afterbuy сравни подтверждённые OTTO standardPrice и связанный Aftercool Startpreis; при наличии только одной подтверждённой цены используй её. Direct OTTO использует только OTTO цену. JV: −10 €, XL: −20 €, затем окончание `.99`. Старые и новые EAN предоставляются файлами; публикация закрыта до проверки GTIN/правил OTTO и отдельного разрешения пользователя.
 
 ### Основа документа
 

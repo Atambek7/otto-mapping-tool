@@ -1,0 +1,24 @@
+.production-bulk-dialog { width: min(1100px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid #374151; border-radius: 14px; background: #141923; color: #f3f5f8; box-shadow: 0 24px 80px #0008; }
+.production-bulk-dialog::backdrop { background: #05080dbb; }
+.production-bulk-dialog > header, .production-bulk-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; background: #141923; }
+.production-bulk-dialog > header { border-bottom: 1px solid #293241; }
+.production-bulk-dialog h2 { margin: 0 0 6px; font-size: 19px; }
+.production-bulk-dialog header p { margin: 0; font-size: 13px; color: #9aa7b8; }
+.production-bulk-dialog header button { border: 0; background: transparent; color: #9aa7b8; cursor: pointer; padding: 8px; }
+.production-bulk-body { overflow: auto; max-height: calc(100dvh - 250px); padding: 20px 24px; }
+.production-bulk-note { color: #9aa7b8; font-size: 12px; line-height: 1.7; }
+.production-bulk-product { padding: 16px 0; border-bottom: 1px solid #293241; }
+.production-bulk-product-heading { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.6; }
+.production-bulk-product-heading strong { flex: 1; overflow-wrap: anywhere; }
+.production-bulk-success { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: #34d399; }
+.production-bulk-error { color: #fb7185; font-size: 12px; line-height: 1.6; }
+.production-bulk-diff { margin-top: 12px; font-size: 12px; }
+.production-bulk-diff > div { display: grid; grid-template-columns: minmax(100px, .7fr) 1fr 1fr; gap: 14px; padding: 9px 10px; border-top: 1px solid #293241; line-height: 1.7; }
+.production-bulk-diff span { overflow-wrap: anywhere; }
+.production-bulk-diff span:last-child { color: #a7f3d0; }
+.production-bulk-diff-head { color: #9aa7b8; font-weight: 600; }
+.production-bulk-dialog > footer { border-top: 1px solid #293241; font-size: 12px; color: #9aa7b8; flex-wrap: wrap; }
+.production-bulk-dialog > footer > div { display: flex; gap: 10px; flex-wrap: wrap; }
+.production-bulk-progress { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; padding: 12px 0; }
+.production-bulk-progress progress { accent-color: #ff5a36; flex: 1; min-width: 100px; height: 8px; }
+@media(max-width: 600px) { .production-bulk-dialog > header, .production-bulk-dialog > footer, .production-bulk-body { padding: 16px; } .production-bulk-diff > div { grid-template-columns: 1fr; gap: 5px; } .production-bulk-diff-head { display: none !important; } }

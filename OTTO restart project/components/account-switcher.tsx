@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { Check, ChevronDown, Store } from "lucide-react";
 import { useRestartAccount } from "@/features/state/restart-account";
+import { useTranslation } from "@/features/i18n";
 
 type Account = "JV" | "XL";
 
 export function AccountSwitcher() {
+  const { t } = useTranslation();
   const { account, choose: chooseAccount } = useRestartAccount();
   const [open, setOpen] = useState(false);
 
@@ -25,7 +27,7 @@ export function AccountSwitcher() {
         onClick={() => setOpen((value) => !value)}
       >
         <Store size={15} />
-        <span className="account-label">Аккаунт</span>
+        <span className="account-label">{t("topbar.account")}</span>
         <strong>{account}</strong>
         <ChevronDown size={14} />
       </button>

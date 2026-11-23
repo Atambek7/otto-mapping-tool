@@ -65,7 +65,7 @@ export interface DemoSettings {
   maximumDemoBatchItems: number;
   strictAttributeChecks: boolean;
   restartPublishEnabled: false;
-  priceRule: { source: "DEMO STANDARD PRICE"; JV: "−10.00 EUR"; XL: "−15.00 EUR" };
+  priceRule: { source: "DEMO STANDARD PRICE"; JV: "−10.00 EUR"; XL: "−20.00 EUR" };
   updatedAt: string;
   demoOnly: true;
 }

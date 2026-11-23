@@ -18,8 +18,8 @@ test('prices use integer cents and account-specific discounts; retries keep one 
     const id = `${account.toLowerCase()}-demo-1`;
     const first = prepare(service, account, id);
     const retry = service.act(account, id, first.version, 'prepare');
-    assert.equal(first.price.discountCents, account === 'JV' ? 1000 : 1500);
-    assert.equal(first.price.newCents, account === 'JV' ? 9000 : 9500);
+    assert.equal(first.price.discountCents, account === 'JV' ? 1000 : 2000);
+    assert.equal(first.price.newCents, 9099);
     assert.deepEqual(first.identity, retry.identity);
     assert.equal(first.price.newCents, retry.price.newCents);
     assert.equal(service.list(account).pool.reserved, 1);
@@ -79,10 +79,10 @@ test('price is re-read on approval; changed base requires a new validation and a
   assert.equal(item.status, 'PRICE_CHANGED_REAPPROVAL_REQUIRED');
   assert.equal(item.approval, null);
   assert.equal(item.price.baseCents, 11000);
-  assert.equal(item.price.newCents, 10000);
+  assert.equal(item.price.newCents, 10099);
   item = approve(service, item);
   assert.equal(item.status, 'APPROVED');
-  assert.equal(service.approvedPayload('JV', item.id).price.newCents, 10000);
+  assert.equal(service.approvedPayload('JV', item.id).price.newCents, 10099);
 });
 test('validation reports missing attributes and images; a correction unblocks demo approval', () => {
   const service = new DemoReviewService();

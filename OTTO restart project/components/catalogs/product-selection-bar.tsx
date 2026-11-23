@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import type { CatalogBulkAction } from "@/features/catalogs/bulk-actions";
 import {
   Check,
   CheckSquare,
+  Clock,
   Database,
   Loader2,
   RefreshCw,
@@ -15,23 +17,33 @@ import {
 } from "lucide-react";
 
 interface ProductSelectionBarProps {
+  demoMode?: boolean;
+  disabled?: boolean;
+  onProductionAction?: (action: CatalogBulkAction) => void;
   selectedCount: number;
   totalCount: number;
   onClearSelection: () => void;
   onSelectAll?: () => void;
+  onDripFeed?: () => void;
   onApplyDefaults?: () => Promise<void> | void;
+  onAssignDemoEan?: () => Promise<void> | void;
   onApplyAiTitles?: () => Promise<void> | void;
-  onSyncFromOtto: () => Promise<void> | void;
+  onSyncFromOtto: (reportProgress: (current: number, total: number) => void) => Promise<void> | void;
   onApplyAiCategories: () => Promise<void> | void;
   onApplyAiAttributes: () => Promise<void> | void;
 }
 
 export function ProductSelectionBar({
+  demoMode = false,
+  disabled = false,
+  onProductionAction,
   selectedCount,
   totalCount,
   onClearSelection,
   onSelectAll,
+  onDripFeed,
   onApplyDefaults,
+  onAssignDemoEan,
   onApplyAiTitles,
   onSyncFromOtto,
   onApplyAiCategories,
@@ -70,6 +82,26 @@ export function ProductSelectionBar({
       setTimeout(() => {
         setActiveTask(null);
       }, 400);
+    }
+  }
+
+  async function runSyncWithActualProgress(
+    label: string,
+    actionFn: (reportProgress: (current: number, total: number) => void) => Promise<void> | void,
+  ) {
+    const total = selectedCount;
+    setActiveTask({ label, current: 0, total });
+    const reportProgress = (current: number, reportedTotal: number) => {
+      setActiveTask((previous) => previous ? {
+        ...previous,
+        total: Math.max(0, reportedTotal),
+        current: Math.max(previous.current, Math.min(reportedTotal, current)),
+      } : null);
+    };
+    try {
+      await Promise.resolve(actionFn(reportProgress));
+    } finally {
+      setTimeout(() => setActiveTask(null), 400);
     }
   }
 
@@ -157,34 +189,52 @@ export function ProductSelectionBar({
 
         {/* Right Side: Action Buttons matching Photo 4 (No ,99, No в XL) */}
         <div className="selection-bar-actions">
-          {/* 1. Defaults */}
-          <button
+          {onDripFeed && <button type="button" className="selection-btn btn-action-drip" disabled={disabled} onClick={onDripFeed} title="Создать план Drip Feed для выбранных товаров">
+            <Clock size={14} /> <span>Drip Feed ({selectedCount})</span>
+          </button>}
+          {(demoMode && onAssignDemoEan) || onProductionAction ? (
+            <button
+              type="button"
+              className="selection-btn btn-action-new-ean"
+              disabled={disabled}
+              onClick={() => onProductionAction ? onProductionAction("assign-ean") : onAssignDemoEan && runWithProgress("Назначение условных demo EAN…", onAssignDemoEan)}
+              title={demoMode ? "DEMO: назначить условные коды" : "Назначить выбранным товарам свободные EAN из пула"}
+            >
+              <Tag size={14} className="icon-tag-ean" />
+              <span>Новый EAN ({selectedCount})</span>
+            </button>
+          ) : null}
+
+          {/* Demo-only local actions */}
+          {(demoMode || onProductionAction) ? <button
             type="button"
             className="selection-btn btn-action-defaults"
-            onClick={() =>
+            disabled={disabled}
+            onClick={() => onProductionAction ? onProductionAction("defaults") :
               runWithProgress(
                 "Применение стандартных значений...",
                 onApplyDefaults || (() => {})
               )
             }
-            title="Применить стандартные параметры фабрики и логистики к выбранным товарам"
+            title={demoMode ? "Применить стандартные параметры фабрики и логистики" : "Предложить стандартные характеристики выбранного аккаунта"}
           >
             <Zap size={14} className="icon-zap" />
             <span>Defaults</span>
-          </button>
+          </button> : null}
 
           {/* 2. ИИ-название (count) */}
-          {onApplyAiTitles && (
+          {((demoMode && onApplyAiTitles) || onProductionAction) && (
             <button
               type="button"
               className="selection-btn btn-action-ai-title"
-              onClick={() =>
+              disabled={disabled}
+              onClick={() => onProductionAction ? onProductionAction("ai-title") : onApplyAiTitles &&
                 runWithProgress(
                   `Генерация ИИ-названий (≤70 симв.) для ${selectedCount} товаров...`,
                   onApplyAiTitles
                 )
               }
-              title="Оптимизировать названия выбранных товаров до ≤ 70 символов для стандартов OTTO"
+              title="Предложить подготовленные названия OttoRestart в пределах внутреннего лимита 70 символов; потребуется проверка"
             >
               <Sparkles size={14} className="icon-sparkles" />
               <span>ИИ-название ({selectedCount})</span>
@@ -195,8 +245,9 @@ export function ProductSelectionBar({
           <button
             type="button"
             className="selection-btn btn-action-sync"
+            disabled={disabled}
             onClick={() =>
-              runWithProgress(
+              runSyncWithActualProgress(
                 "Синхронизация карточек с каталогом OTTO...",
                 onSyncFromOtto
               )
@@ -208,10 +259,11 @@ export function ProductSelectionBar({
           </button>
 
           {/* 4. AI Категории */}
-          <button
+          {(demoMode || onProductionAction) ? <button
             type="button"
             className="selection-btn btn-action-ai-cat"
-            onClick={() =>
+            disabled={disabled}
+            onClick={() => onProductionAction ? onProductionAction("ai-category") :
               runWithProgress(
                 "Определение категорий каталога OTTO через ИИ...",
                 onApplyAiCategories
@@ -221,13 +273,14 @@ export function ProductSelectionBar({
           >
             <Sparkles size={14} className="icon-sparkles-orange" />
             <span>AI Категории</span>
-          </button>
+          </button> : null}
 
           {/* 5. AI Атрибуты */}
-          <button
+          {(demoMode || onProductionAction) ? <button
             type="button"
             className="selection-btn btn-action-ai-attr"
-            onClick={() =>
+            disabled={disabled}
+            onClick={() => onProductionAction ? onProductionAction("ai-attributes") :
               runWithProgress(
                 "Генерация атрибутов (материал, габариты, цвет) через ИИ...",
                 onApplyAiAttributes
@@ -237,7 +290,7 @@ export function ProductSelectionBar({
           >
             <Sparkles size={14} className="icon-sparkles-white" />
             <span>AI Атрибуты</span>
-          </button>
+          </button> : null}
 
           {/* Dismiss / Clear Selection Button */}
           <button

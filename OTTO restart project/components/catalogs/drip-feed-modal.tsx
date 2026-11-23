@@ -151,7 +151,7 @@ export function DripFeedModal({
                   checked={antiCollisionEnabled}
                   onChange={(e) => setAntiCollisionEnabled(e.target.checked)}
                 />
-                <span>🛡️ Защита от коллизий между аккаунтами (JV ↔ XL)</span>
+                <span>Защита от коллизий между аккаунтами (JV ↔ XL)</span>
               </label>
 
               {antiCollisionEnabled && (

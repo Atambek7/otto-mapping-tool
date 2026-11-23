@@ -14,9 +14,12 @@ export function WorkflowStepper({ active }: { active: RestartStage }) {
     {stages.map(({ id, label, href, icon: Icon }, index) => {
       const current = id === active;
       const previous = stages.findIndex((stage) => stage.id === active) > index;
-      return <Link className={`workflow-step${current ? " current" : ""}${previous ? " complete" : ""}`} href={href} aria-current={current ? "step" : undefined} key={id}>
-        <span className="workflow-step-icon">{previous ? <Check size={15} /> : <Icon size={15} />}</span><span>{label}</span>
-      </Link>;
+      const className = `workflow-step${current ? " current" : ""}${previous ? " complete" : ""}`;
+      const content = <><span className="workflow-step-icon">{previous ? <Check size={15} /> : <Icon size={15} />}</span><span>{label}</span></>;
+      if (id === "quality") {
+        return <span className={className} aria-current={current ? "step" : undefined} title="Автоматическая проверка выполняется внутри Drip Feed" key={id}>{content}</span>;
+      }
+      return <Link className={className} href={href} aria-current={current ? "step" : undefined} key={id}>{content}</Link>;
     })}
   </nav>;
 }

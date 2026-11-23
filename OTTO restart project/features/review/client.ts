@@ -1,4 +1,5 @@
 import type { RestartAccount } from "../api/types";
+import { getCsrfToken } from "@/features/auth/csrf-client";
 import type { ReviewAction, ReviewItem, ReviewList, ReviewPatch } from "./types";
 
 export class ReviewClientError extends Error {
@@ -12,7 +13,9 @@ export class DemoReviewClient {
     for (const [key, value] of Object.entries(query)) if (value !== "") params.set(key, String(value));
     let response: Response;
     try {
-      response = await fetch(`/restart/api/demo/${path}?${params}`, { method, credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json", "X-OttoRestart-Demo": "1" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const headers = new Headers({ "Content-Type": "application/json", "X-OttoRestart-Demo": "1" });
+      if (method !== "GET") headers.set("X-CSRF-Token", await getCsrfToken());
+      response = await fetch(`/restart/api/demo/${path}?${params}`, { method, credentials: "same-origin", cache: "no-store", headers, body: body === undefined ? undefined : JSON.stringify(body) });
     } catch { throw new ReviewClientError(0, "NETWORK_ERROR", "Нет соединения с демо-API. Повторите загрузку."); }
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) throw new ReviewClientError(response.status, data?.code ?? "INVALID_RESPONSE", data?.message ?? "Не удалось прочитать демо-ответ.");
